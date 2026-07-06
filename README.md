@@ -1,5 +1,7 @@
 # EmuFramework
 
+**Version: v0.0.0.4**
+
 **General-purpose metadata-driven application platform** — build business apps (ERP, CRM, any domain)
 by declaring tables, forms, menus as JSON metadata and writing TypeScript business logic. No per-app UI
 code needed — the client auto-generates list/detail pages, field controls, and line grids from metadata.
@@ -124,6 +126,26 @@ that app's sidebar group automatically via menuExtension.
 Set `EMU_APP_TITLE=MyAppName` environment variable to customize the login page and sidebar title.
 Default: "EmuFramework".
 
+## System Requirements
+
+EmuFramework runs as a **single Node.js process** with an **embedded SQLite database** (no
+separate DB server, no network round-trip for data access). That makes sizing simple: the
+main costs are CPU for the Fastify/Node event loop and RAM for the Node heap + SQLite page
+cache.
+
+| Usage level | CPU | RAM | Disk | Example specs |
+|---|---|---|---|---|
+| Dev / test / demo | 1 vCPU | 512MB–1GB | 1GB+ (persistence not critical) | Fly.io free/shared-1x, Railway trial |
+| Small production (<20 concurrent users) | 1–2 vCPU | 2GB | 10–20GB SSD, **persistent** | DigitalOcean 2GB/1vCPU droplet, Railway Hobby + volume, Render Starter + disk, Fly.io shared-cpu-1x/1GB + volume |
+| Medium production (20–100 concurrent users, fast-growing data) | 2–4 vCPU | 4–8GB | 40GB+ SSD, persistent | DigitalOcean 4GB/2vCPU droplet, Render Standard + disk, comparable VPS |
+| Large scale (100+ concurrent, heavy workload) | Migrate off SQLite to a managed DB (e.g. Postgres) before scaling further — SQLite is single-writer/file-based and doesn't scale horizontally | — | — | — |
+
+Two hard requirements regardless of scale:
+- **Long-running process** — no serverless/request-per-invocation hosting. SQLite state lives
+  in files on disk that a single persistent process reads/writes.
+- **Persistent disk/volume** that survives redeploys — `data.db` and `designer.db` are 100%
+  of your data (see [Where your data lives](#where-your-data-lives--backing-it-up) below).
+
 ## Deployment
 
 EmuFramework deploys as a **single Node.js process**. That one process serves both the API
@@ -182,15 +204,15 @@ The app needs a **long-running Node.js process** (not request-per-invocation) an
 **persistent disk** that survives redeploys (for the two SQLite files) — SQLite is an embedded,
 file-based database, not a managed DB service.
 
-| Hosting type | Supported? | Notes |
-|---|---|---|
-| VPS (DigitalOcean, Linode, Vultr, Hetzner, AWS EC2, GCP Compute Engine, etc.) | ✅ Yes | Full control; run `pnpm build && pnpm start` directly, ideally behind `pm2`/`systemd`. |
-| Railway | ✅ Yes | Attach a persistent volume for the two `.db` files. |
-| Render | ✅ Yes (paid tier) | Requires a persistent disk add-on — the free tier has no persistent storage. |
-| Fly.io | ✅ Yes | Attach a Fly volume for the two `.db` files. |
-| Any Docker-capable host | 🔜 Not yet, but ready | Host/port/DB paths are already env-var driven and `pnpm build`/`pnpm start` are the only two commands needed — a future `Dockerfile` would just wrap them, no code changes required. |
-| Static hosting (GitHub Pages, Netlify/Vercel static sites) | ❌ No | There's no process to run the server at all — these only serve static files. |
-| Serverless functions (Vercel Functions, Netlify Functions, plain AWS Lambda) | ❌ No | Filesystem is ephemeral/read-only between invocations, so SQLite writes don't persist. Would require migrating to a managed database first — out of scope for now. |
+| Hosting type | Supported? | Recommended spec | Notes |
+|---|---|---|---|
+| VPS (DigitalOcean, Linode, Vultr, Hetzner, AWS EC2, GCP Compute Engine, etc.) | ✅ Yes | 1–2 vCPU / 2GB RAM to start; scale to 4 vCPU / 4–8GB as usage grows | Full control; run `pnpm build && pnpm start` directly, ideally behind `pm2`/`systemd`. |
+| Railway | ✅ Yes | Hobby/Pro plan sized to 1–2 vCPU / 2GB+ | Attach a persistent volume for the two `.db` files. |
+| Render | ✅ Yes (paid tier) | Starter/Standard instance + persistent disk add-on | Requires a persistent disk add-on — the free tier has no persistent storage. |
+| Fly.io | ✅ Yes | shared-cpu-1x with 1GB+ RAM to start | Attach a Fly volume for the two `.db` files. |
+| Any Docker-capable host | 🔜 Not yet, but ready | Same as VPS above | Host/port/DB paths are already env-var driven and `pnpm build`/`pnpm start` are the only two commands needed — a future `Dockerfile` would just wrap them, no code changes required. |
+| Static hosting (GitHub Pages, Netlify/Vercel static sites) | ❌ No | — | There's no process to run the server at all — these only serve static files. |
+| Serverless functions (Vercel Functions, Netlify Functions, plain AWS Lambda) | ❌ No | — | Filesystem is ephemeral/read-only between invocations, so SQLite writes don't persist. Would require migrating to a managed database first — out of scope for now. |
 
 ### Where your data lives / backing it up
 
