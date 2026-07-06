@@ -1,8 +1,12 @@
 {
   "name": "emuframework",
-  "version": "0.0.0.4",
+  "version": "0.0.0.5",
   "private": true,
   "license": "MIT",
+  "packageManager": "pnpm@8.6.1",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "postinstall": "pnpm --filter @emu/core build",
     "dev": "concurrently -n server,client -c blue,green \"pnpm --filter @emu/server dev\" \"pnpm --filter @emu/client dev\"",

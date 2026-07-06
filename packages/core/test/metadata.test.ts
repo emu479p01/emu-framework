@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import DatabaseCtor from 'better-sqlite3';
-import { MetadataRegistry, MetadataError, syncSchema, type TableMeta, type FormMeta } from '../src/index.js';
+import { MetadataRegistry, MetadataError, syncSchema, type TableMeta, type FormMeta, type ReportMeta } from '../src/index.js';
 import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable, testRegistry } from './helpers.js';
 
 describe('MetadataRegistry', () => {
@@ -218,5 +218,65 @@ describe('syncSchema', () => {
 
     expect(result.createdTables).toHaveLength(0);
     expect(result.addedColumns).toEqual(['TESTAPP_CustTable.phone']);
+  });
+});
+
+describe('MetadataRegistry — reports', () => {
+  function goodReport(): ReportMeta {
+    return {
+      kind: 'report',
+      name: 'TESTAPP_CustListReport',
+      app: 'testapp',
+      model: 'ClientCustom',
+      dataSource: 'TESTAPP_CustTable',
+      bands: [
+        {
+          kind: 'header',
+          height: 40,
+          elements: [{ id: 'title', type: 'text', x: 0, y: 0, width: 200, height: 20, text: 'Customers' }],
+        },
+        {
+          kind: 'detail',
+          height: 20,
+          elements: [
+            { id: 'accountNum', type: 'field', x: 0, y: 0, width: 100, height: 20, field: 'accountNum' },
+            { id: 'name', type: 'field', x: 100, y: 0, width: 100, height: 20, field: 'name' },
+          ],
+        },
+      ],
+    } as ReportMeta;
+  }
+
+  it('registers a well-formed report and exposes it via getReport/allReports', () => {
+    const registry = testRegistry();
+    registry.registerWebArtifacts('testapp', [goodReport()]);
+    expect(registry.hasReport('TESTAPP_CustListReport')).toBe(true);
+    expect(registry.getReport('TESTAPP_CustListReport').dataSource).toBe('TESTAPP_CustTable');
+    expect(registry.allReports()).toHaveLength(1);
+  });
+
+  it('rejects a report with an unknown dataSource table', () => {
+    const registry = testRegistry();
+    const bad = { ...goodReport(), dataSource: 'Nope' };
+    expect(() => registry.registerWebArtifacts('testapp', [bad])).toThrow(/unknown dataSource table/);
+  });
+
+  it('rejects a report with an unknown field binding', () => {
+    const registry = testRegistry();
+    const bad = goodReport();
+    bad.bands[1].elements.push({ id: 'bad', type: 'field', x: 0, y: 20, width: 50, height: 20, field: 'nope' });
+    expect(() => registry.registerWebArtifacts('testapp', [bad])).toThrow(/unknown field 'nope'/);
+  });
+
+  it('rejects a report with an invalid lineSource refField', () => {
+    const registry = testRegistry();
+    const bad: ReportMeta = {
+      ...goodReport(),
+      name: 'TESTAPP_SalesInvoiceReport',
+      dataSource: 'TESTAPP_SalesTable',
+      bands: [{ kind: 'detail', height: 20, elements: [] }],
+      lineSources: [{ table: 'TESTAPP_CustTable', refField: 'nope', bands: [{ kind: 'detail', height: 20, elements: [] }] }],
+    };
+    expect(() => registry.registerWebArtifacts('testapp', [bad])).toThrow(/has no refField 'nope'/);
   });
 });

@@ -7,6 +7,7 @@ import ListPage from './views/ListPage.vue';
 import FormPage from './views/FormPage.vue';
 import DesignerPage from './views/designer/DesignerPage.vue';
 import DesignerEditPage from './views/designer/DesignerEditPage.vue';
+import ReportEditPage from './views/report-designer/ReportEditPage.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -22,6 +23,9 @@ export const router = createRouter({
     { path: '/form/:formName/:id', component: FormPage, props: true },
     // Designer (framework-level)
     { path: '/designer', component: DesignerPage },
+    // Reports use a dedicated drag-and-drop canvas editor instead of the generic structured-form editor.
+    { path: '/designer/new/report', component: ReportEditPage },
+    { path: '/designer/report/:name', component: ReportEditPage, props: true },
     { path: '/designer/new/:kind', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind }) },
     { path: '/designer/:kind/:name', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind, name: r.params.name }) },
   ],

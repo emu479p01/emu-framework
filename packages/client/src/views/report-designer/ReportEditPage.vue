@@ -1,0 +1,427 @@
+<script setup lang="ts">
+import { computed, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import {
+  NButton,
+  NCard,
+  NCheckbox,
+  NColorPicker,
+  NInput,
+  NInputNumber,
+  NRadioButton,
+  NRadioGroup,
+  NSelect,
+  NSpace,
+  NSwitch,
+  useMessage,
+} from 'naive-ui';
+import { ApiError } from '../../api';
+import { useDesigner } from '../../stores/designer';
+import { useMeta, type FieldMeta } from '../../stores/meta';
+import { useDraggableElement } from './useDraggableElement';
+
+interface ReportElement {
+  id: string;
+  type: 'text' | 'field' | 'image' | 'line' | 'rect';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text?: string;
+  field?: string;
+  style?: { fontSize?: number; bold?: boolean; italic?: boolean; align?: 'left' | 'center' | 'right'; color?: string; borderWidth?: number };
+}
+type ReportBandKind = 'pageHeader' | 'header' | 'detail' | 'footer' | 'pageFooter';
+interface ReportBand {
+  kind: ReportBandKind;
+  height: number;
+  elements: ReportElement[];
+}
+interface ReportLineSource {
+  table: string;
+  refField: string;
+  bands: ReportBand[];
+}
+interface ReportArtifact {
+  kind: 'report';
+  name: string;
+  app?: string;
+  model?: string;
+  layer?: string;
+  label?: string;
+  dataSource: string;
+  bands: ReportBand[];
+  lineSources?: ReportLineSource[];
+}
+
+const props = defineProps<{ name?: string }>();
+const route = useRoute();
+const router = useRouter();
+const designer = useDesigner();
+const meta = useMeta();
+const message = useMessage();
+
+const isNew = computed(() => props.name === undefined);
+const busy = ref(false);
+
+const BAND_KINDS: { kind: ReportBandKind; label: string }[] = [
+  { kind: 'pageHeader', label: 'Page header' },
+  { kind: 'header', label: 'Header' },
+  { kind: 'detail', label: 'Detail (repeats per row)' },
+  { kind: 'footer', label: 'Footer' },
+  { kind: 'pageFooter', label: 'Page footer' },
+];
+
+function blank(): ReportArtifact {
+  return {
+    kind: 'report',
+    name: '',
+    label: '',
+    dataSource: '',
+    bands: [{ kind: 'header', height: 30, elements: [] }, { kind: 'detail', height: 20, elements: [] }],
+    lineSources: [],
+  };
+}
+
+const report = reactive<ReportArtifact>(blank());
+const selectedApp = ref('');
+const selectedModel = ref('');
+const selectedLayer = ref('CUS');
+
+let idCounter = 0;
+function nextId(): string {
+  idCounter += 1;
+  return `el${Date.now()}_${idCounter}`;
+}
+
+async function load() {
+  if (!designer.loaded) await designer.load();
+  if (isNew.value) {
+    Object.assign(report, blank());
+    selectedApp.value = (route.query.app as string) ?? selectedApp.value;
+    selectedModel.value = (route.query.model as string) ?? selectedModel.value;
+    const defaultApp = designer.apps.find((a) => a.name !== 'system');
+    if (!selectedApp.value && defaultApp) selectedApp.value = defaultApp.name;
+    const app = designer.apps.find((a) => a.name === selectedApp.value);
+    if (!selectedModel.value) selectedModel.value = app?.models?.[0]?.name ?? '';
+    selectedLayer.value = app?.models?.find((m) => m.name === selectedModel.value)?.layer ?? selectedLayer.value;
+  } else {
+    const entry = designer.get(props.name!);
+    const art = entry ? (JSON.parse(JSON.stringify(entry.artifact)) as ReportArtifact) : blank();
+    Object.assign(report, blank(), art);
+    selectedApp.value = report.app ?? '';
+    selectedModel.value = report.model ?? '';
+    selectedLayer.value = report.layer ?? 'CUS';
+  }
+  selected.value = null;
+}
+watch(() => props.name, load, { immediate: true });
+
+const appOptions = computed(() => designer.apps.map((a) => ({ label: a.label ?? a.name, value: a.name })));
+const selectedAppEntry = computed(() => designer.apps.find((a) => a.name === selectedApp.value));
+const modelOptions = computed(() => (selectedAppEntry.value?.models ?? []).map((m) => ({ label: `${m.label ?? m.name} (${m.layer})`, value: m.name })));
+watch([selectedApp, selectedModel], () => {
+  const model = selectedAppEntry.value?.models?.find((m) => m.name === selectedModel.value);
+  if (model) selectedLayer.value = model.layer;
+});
+
+const tableOptions = computed(() => (meta.meta?.tables ?? []).map((t) => ({ label: t.label ?? t.name, value: t.name })));
+const mainFields = computed<FieldMeta[]>(() => meta.table(report.dataSource)?.fields ?? []);
+const mainFieldOptions = computed(() => mainFields.value.map((f) => ({ label: f.label ?? f.name, value: f.name })));
+
+// ---- band management ----
+function bandFor(kind: ReportBandKind): ReportBand | undefined {
+  return report.bands.find((b) => b.kind === kind);
+}
+function hasBand(kind: ReportBandKind): boolean {
+  return Boolean(bandFor(kind));
+}
+function toggleBand(kind: ReportBandKind, on: boolean) {
+  if (on) {
+    if (!hasBand(kind)) report.bands.push({ kind, height: 24, elements: [] });
+  } else {
+    report.bands = report.bands.filter((b) => b.kind !== kind);
+  }
+}
+
+// ---- element selection ----
+interface Selection { list: ReportElement[]; index: number; fieldOptions: { label: string; value: string }[] }
+const selected = ref<Selection | null>(null);
+const selectedElement = computed(() => (selected.value ? selected.value.list[selected.value.index] : null));
+
+function addElement(list: ReportElement[], type: ReportElement['type'], fieldOptions: { label: string; value: string }[]) {
+  const el: ReportElement = { id: nextId(), type, x: 4, y: 2, width: type === 'line' ? 100 : type === 'rect' ? 80 : 100, height: type === 'line' ? 1 : type === 'rect' ? 40 : 18 };
+  if (type === 'text') el.text = 'Text';
+  list.push(el);
+  selected.value = { list, index: list.length - 1, fieldOptions };
+}
+function selectElement(list: ReportElement[], index: number, fieldOptions: { label: string; value: string }[]) {
+  selected.value = { list, index, fieldOptions };
+}
+function removeSelected() {
+  if (!selected.value) return;
+  selected.value.list.splice(selected.value.index, 1);
+  selected.value = null;
+}
+
+function dragHandlers(el: ReportElement) {
+  return useDraggableElement(
+    () => ({ x: el.x, y: el.y, width: el.width, height: el.height }),
+    (r) => { el.x = r.x; el.y = r.y; el.width = r.width; el.height = r.height; },
+  );
+}
+
+// ---- line sources ----
+function addLineSource() {
+  report.lineSources = report.lineSources ?? [];
+  report.lineSources.push({ table: '', refField: '', bands: [{ kind: 'detail', height: 20, elements: [] }] });
+}
+function removeLineSource(idx: number) {
+  report.lineSources?.splice(idx, 1);
+}
+function lineFieldOptions(table: string) {
+  return (meta.table(table)?.fields ?? []).map((f) => ({ label: f.label ?? f.name, value: f.name }));
+}
+function refFieldOptions(table: string) {
+  return (meta.table(table)?.fields ?? []).filter((f) => f.type === 'reference').map((f) => ({ label: f.label ?? f.name, value: f.name }));
+}
+
+// ---- save / preview ----
+async function save() {
+  if (!report.name) { message.error('Name is required'); return; }
+  if (!report.dataSource) { message.error('Data source table is required'); return; }
+  if (!selectedApp.value || !selectedModel.value) { message.error('App and model are required'); return; }
+  busy.value = true;
+  try {
+    let name = report.name;
+    if (isNew.value) {
+      const prefix = selectedApp.value === 'system' ? 'FW' : selectedApp.value.replace(/[^a-z0-9]/gi, '').toUpperCase();
+      if (!name.startsWith(`${prefix}_`)) name = `${prefix}_${name}`;
+    }
+    const artifact = { ...report, name, app: selectedApp.value, model: selectedModel.value, layer: selectedLayer.value };
+    await designer.save(artifact as unknown as { kind: string; name: string; [k: string]: unknown });
+    message.success('Report saved');
+    if (isNew.value) router.replace(`/designer/report/${encodeURIComponent(name)}`);
+  } catch (err) {
+    if (err instanceof ApiError) message.error(err.message);
+    else throw err;
+  } finally {
+    busy.value = false;
+  }
+}
+
+function previewUrl(): string {
+  return `/api/report/${encodeURIComponent(report.name)}/pdf`;
+}
+function preview() {
+  window.open(previewUrl(), '_blank', 'noopener');
+}
+
+function back() {
+  router.push('/designer');
+}
+</script>
+
+<template>
+  <div>
+    <n-space justify="space-between" style="margin-bottom: 16px">
+      <h2 style="margin: 0">{{ isNew ? 'New report' : report.name }}</h2>
+      <n-space>
+        <n-button @click="back">Back</n-button>
+        <n-button :disabled="isNew" @click="preview">Preview PDF</n-button>
+        <n-button type="primary" :loading="busy" @click="save">Save</n-button>
+      </n-space>
+    </n-space>
+
+    <n-card size="small" style="margin-bottom: 16px">
+      <n-space vertical>
+        <n-space align="center">
+          <span style="width: 110px">Name</span>
+          <n-input v-model:value="report.name" :disabled="!isNew" placeholder="CustListReport" style="width: 240px" />
+          <span style="width: 90px">Label</span>
+          <n-input v-model:value="report.label" placeholder="Customer list" style="width: 240px" />
+        </n-space>
+        <n-space align="center">
+          <span style="width: 110px">App</span>
+          <n-select v-model:value="selectedApp" :options="appOptions" style="width: 240px" />
+          <span style="width: 90px">Model</span>
+          <n-select v-model:value="selectedModel" :options="modelOptions" style="width: 240px" />
+        </n-space>
+        <n-space align="center">
+          <span style="width: 110px">Data source</span>
+          <n-select v-model:value="report.dataSource" :options="tableOptions" style="width: 240px" placeholder="Table this report reads from" />
+        </n-space>
+      </n-space>
+    </n-card>
+
+    <div style="display: flex; gap: 16px; align-items: flex-start">
+      <div style="flex: 1; min-width: 0">
+        <n-card v-for="bk in BAND_KINDS" :key="bk.kind" size="small" style="margin-bottom: 12px">
+          <template #header>
+            <n-space align="center">
+              <n-checkbox :checked="hasBand(bk.kind)" @update:checked="(v: boolean) => toggleBand(bk.kind, v)">{{ bk.label }}</n-checkbox>
+              <template v-if="hasBand(bk.kind)">
+                <span>Height</span>
+                <n-input-number v-model:value="bandFor(bk.kind)!.height" :min="8" size="small" style="width: 90px" />
+                <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'text', mainFieldOptions)">+ Text</n-button>
+                <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'field', mainFieldOptions)">+ Field</n-button>
+                <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'line', mainFieldOptions)">+ Line</n-button>
+                <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'rect', mainFieldOptions)">+ Box</n-button>
+              </template>
+            </n-space>
+          </template>
+          <div
+            v-if="hasBand(bk.kind)"
+            class="report-band"
+            :style="{ height: bandFor(bk.kind)!.height + 'px' }"
+          >
+            <div
+              v-for="(el, i) in bandFor(bk.kind)!.elements"
+              :key="el.id"
+              class="report-element"
+              :class="{ selected: selected?.list === bandFor(bk.kind)!.elements && selected?.index === i }"
+              :style="{ left: el.x + 'px', top: el.y + 'px', width: el.width + 'px', height: el.height + 'px', fontSize: (el.style?.fontSize ?? 10) + 'px', fontWeight: el.style?.bold ? 'bold' : 'normal', fontStyle: el.style?.italic ? 'italic' : 'normal', textAlign: el.style?.align ?? 'left', color: el.style?.color ?? '#000' }"
+              @pointerdown="(e) => { selectElement(bandFor(bk.kind)!.elements, i, mainFieldOptions); dragHandlers(el).onDragStart(e); }"
+            >
+              <span v-if="el.type === 'text'">{{ el.text }}</span>
+              <span v-else-if="el.type === 'field'">[{{ el.field ?? '?' }}]</span>
+              <div v-else-if="el.type === 'line'" class="report-line" />
+              <div v-else-if="el.type === 'rect'" class="report-rect" />
+              <div class="resize-handle" @pointerdown="(e) => dragHandlers(el).onResizeStart(e)" />
+            </div>
+          </div>
+        </n-card>
+
+        <n-card size="small" title="Line sources (repeating child rows, e.g. invoice lines)">
+          <template #header-extra>
+            <n-button size="tiny" @click="addLineSource">+ Add line source</n-button>
+          </template>
+          <div v-for="(line, li) in report.lineSources ?? []" :key="li" style="margin-bottom: 16px">
+            <n-space align="center" style="margin-bottom: 8px">
+              <n-select v-model:value="line.table" :options="tableOptions" placeholder="Child table" style="width: 200px" />
+              <n-select v-model:value="line.refField" :options="refFieldOptions(line.table)" placeholder="Reference field back to main record" style="width: 260px" />
+              <n-button size="tiny" @click="addElement(line.bands[0].elements, 'text', lineFieldOptions(line.table))">+ Text</n-button>
+              <n-button size="tiny" @click="addElement(line.bands[0].elements, 'field', lineFieldOptions(line.table))">+ Field</n-button>
+              <n-button size="tiny" type="error" quaternary @click="removeLineSource(li)">Remove</n-button>
+            </n-space>
+            <div class="report-band" :style="{ height: line.bands[0].height + 'px' }">
+              <div
+                v-for="(el, i) in line.bands[0].elements"
+                :key="el.id"
+                class="report-element"
+                :class="{ selected: selected?.list === line.bands[0].elements && selected?.index === i }"
+                :style="{ left: el.x + 'px', top: el.y + 'px', width: el.width + 'px', height: el.height + 'px' }"
+                @pointerdown="(e) => { selectElement(line.bands[0].elements, i, lineFieldOptions(line.table)); dragHandlers(el).onDragStart(e); }"
+              >
+                <span v-if="el.type === 'text'">{{ el.text }}</span>
+                <span v-else-if="el.type === 'field'">[{{ el.field ?? '?' }}]</span>
+                <div class="resize-handle" @pointerdown="(e) => dragHandlers(el).onResizeStart(e)" />
+              </div>
+            </div>
+          </div>
+        </n-card>
+      </div>
+
+      <n-card v-if="selectedElement" size="small" title="Element" style="width: 280px; flex-shrink: 0">
+        <n-space vertical>
+          <div>Type: {{ selectedElement.type }}</div>
+          <n-input v-if="selectedElement.type === 'text'" v-model:value="selectedElement.text" type="textarea" placeholder="Text" />
+          <n-select
+            v-if="selectedElement.type === 'field'"
+            v-model:value="selectedElement.field"
+            :options="selected?.fieldOptions ?? []"
+            placeholder="Bound field"
+          />
+          <template v-if="selectedElement.type === 'text' || selectedElement.type === 'field'">
+            <n-space align="center">
+              <span>Size</span>
+              <n-input-number
+                :value="selectedElement.style?.fontSize ?? 10"
+                :min="6"
+                :max="72"
+                size="small"
+                style="width: 90px"
+                @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, fontSize: v ?? 10 }; }"
+              />
+            </n-space>
+            <n-space align="center">
+              <span>Bold</span>
+              <n-switch
+                :value="selectedElement.style?.bold ?? false"
+                @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, bold: v }; }"
+              />
+              <span>Italic</span>
+              <n-switch
+                :value="selectedElement.style?.italic ?? false"
+                @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, italic: v }; }"
+              />
+            </n-space>
+            <n-radio-group
+              :value="selectedElement.style?.align ?? 'left'"
+              @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, align: v }; }"
+            >
+              <n-radio-button value="left">Left</n-radio-button>
+              <n-radio-button value="center">Center</n-radio-button>
+              <n-radio-button value="right">Right</n-radio-button>
+            </n-radio-group>
+            <n-color-picker
+              :show-alpha="false"
+              :value="selectedElement.style?.color ?? '#000000'"
+              @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, color: v }; }"
+            />
+          </template>
+          <n-space>
+            <span>x</span><n-input-number v-model:value="selectedElement.x" size="small" style="width: 80px" />
+            <span>y</span><n-input-number v-model:value="selectedElement.y" size="small" style="width: 80px" />
+          </n-space>
+          <n-space>
+            <span>w</span><n-input-number v-model:value="selectedElement.width" size="small" style="width: 80px" />
+            <span>h</span><n-input-number v-model:value="selectedElement.height" size="small" style="width: 80px" />
+          </n-space>
+          <n-button type="error" quaternary @click="removeSelected">Delete element</n-button>
+        </n-space>
+      </n-card>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.report-band {
+  position: relative;
+  border: 1px dashed #ccc;
+  background: #fafafa;
+  overflow: hidden;
+}
+.report-element {
+  position: absolute;
+  cursor: move;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+.report-element.selected {
+  border-color: #2080f0;
+  background: rgba(32, 128, 240, 0.08);
+}
+.report-line {
+  border-top: 1px solid #000;
+  width: 100%;
+  margin-top: 50%;
+}
+.report-rect {
+  border: 1px solid #000;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+.resize-handle {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 8px;
+  height: 8px;
+  background: #2080f0;
+  cursor: nwse-resize;
+}
+</style>

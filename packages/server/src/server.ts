@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
+import multipart from '@fastify/multipart';
 import {
   Kernel,
   MetadataError,
@@ -20,6 +21,8 @@ import { registerSystemApp, registerSystemHooks } from './systemApp.js';
 import { login, logout, resolveSession, seedAdmin, type AuthUser } from './auth.js';
 import { bootWebArtifacts, registerDesignerRoutes } from './designer.js';
 import { seedDesignerDb } from './seeder.js';
+import { buildFilteredQuery, registerImportExportRoutes } from './importExport.js';
+import { registerReportRoutes } from './reports.js';
 
 export interface ServerOptions {
   dbPath?: string;
@@ -71,22 +74,34 @@ function migrateLegacyCoreTables(kernel: Kernel): void {
   }
 }
 
+const LEGACY_ROLE_NAMES = new Map<number, string>([
+  [0, 'FW_FrameworkUser'],
+  [1, 'ERP_Admin'],
+  [2, 'FW_SystemAdminRole'],
+  [3, 'ERP_SalesManager'],
+  [4, 'ERP_SalesClerk'],
+]);
+
 function migrateLegacyRoleTables(kernel: Kernel): void {
   if (!tableExists(kernel.db, 'SystemUserRole') || !tableExists(kernel.db, 'FW_UserRole')) return;
-  const roleMap = new Map([
-    [0, 0], // FrameworkUser -> FW_FrameworkUser
-    [1, 1], // Admin -> ERP_Admin
-    [2, 2], // SystemAdminRole -> FW_SystemAdminRole
-    [3, 3], // SalesManager -> ERP_SalesManager
-    [4, 4], // SalesClerk -> ERP_SalesClerk
-  ]);
   const rows = kernel.db.prepare('SELECT userId, username, role FROM "SystemUserRole"').all() as { userId: number; username?: string; role: number }[];
   const insert = kernel.db.prepare('INSERT OR IGNORE INTO "FW_UserRole" (userId, username, role) VALUES (?, ?, ?)');
   for (const row of rows) {
-    insert.run(row.userId, row.username ?? null, roleMap.get(row.role) ?? row.role);
+    insert.run(row.userId, row.username ?? null, LEGACY_ROLE_NAMES.get(row.role) ?? String(row.role));
   }
   // one-time migration — never re-import deleted assignments
   kernel.db.exec(`DROP TABLE "SystemUserRole"`);
+}
+
+/** One-time migration: FW_UserRole.role used to store the FW_Role enum's numeric code — rewrite to the role's string name. */
+function migrateRoleValuesToNames(kernel: Kernel): void {
+  if (!tableExists(kernel.db, 'FW_UserRole')) return;
+  const rows = kernel.db.prepare('SELECT id, role FROM "FW_UserRole"').all() as { id: number; role: unknown }[];
+  const update = kernel.db.prepare('UPDATE "FW_UserRole" SET role = ? WHERE id = ?');
+  for (const row of rows) {
+    if (typeof row.role !== 'number') continue;
+    update.run(LEGACY_ROLE_NAMES.get(row.role) ?? String(row.role), row.id);
+  }
 }
 
 function migrateLegacyDesignerArtifacts(kernel: Kernel): void {
@@ -97,6 +112,8 @@ function migrateLegacyDesignerArtifacts(kernel: Kernel): void {
   for (const row of rows) {
     const converted = convertLegacyArtifact(row);
     if (existing.has(converted.name)) continue;
+    // the old SystemRole/FW_Role enum is obsolete — role names now come from the FW_Role list (kind: 'role') artifacts only
+    if (converted.kind === 'enum' && converted.name === 'FW_Role') continue;
     insert.run(converted.kind, converted.name, converted.json);
   }
   // one-time migration — deleted artifacts must not resurrect on the next boot
@@ -165,34 +182,34 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   // merge web-designer artifacts from designer.db into the registry
   bootWebArtifacts(kernel);
   migrateLegacyRoleTables(kernel);
+  migrateRoleValuesToNames(kernel);
 
-  // Assign admin roles now that SystemRole enum + SystemUserRole table exist
+  // Assign admin roles now that the FW_Role list + FW_UserRole table exist
   (function seedAdminRoles() {
     const ctx = kernel.context();
     const admin = ctx.select('FW_User').whereEq({ username: 'admin' }).firstOnly();
     if (!admin || !admin.f.id) return;
     const uid = admin.f.id as number;
     try {
-      const roleEnum = kernel.registry.getEnum('FW_Role');
       for (const roleName of ['FW_FrameworkUser', 'FW_SystemAdminRole']) {
-        const val = roleEnum.values.find((v) => v.name === roleName);
-        if (!val) continue;
+        if (!kernel.registry.getRole(roleName)) continue;
         const exists = ctx
           .select('FW_UserRole')
           .whereEq({ userId: uid })
-          .where('role', '=', val.value)
+          .where('role', '=', roleName)
           .firstOnly();
         if (!exists) {
-          ctx.newRecord('FW_UserRole').setMany({ userId: uid, username: 'admin', role: val.value }).insert();
+          ctx.newRecord('FW_UserRole').setMany({ userId: uid, username: 'admin', role: roleName }).insert();
         }
       }
     } catch {
-      // FW_Role enum or FW_UserRole table not yet available - skip
+      // FW_UserRole table not yet available - skip
     }
   })();
 
   const app = Fastify({ logger: false });
   app.register(cookie);
+  app.register(multipart);
 
   // Serve the built client (packages/client/dist) as static files when it exists.
   // In local dev, the client runs its own Vite dev server (5199) and this dist folder
@@ -226,15 +243,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const user = ctx.select('FW_User').whereEq({ username }).firstOnly();
     if (!user || !user.f.id) return [];
     try {
-      const roleEnum = kernel.registry.getEnum('FW_Role');
       return ctx
         .select('FW_UserRole')
         .whereEq({ userId: user.f.id as number })
         .toArray()
-        .map((r) => {
-          const val = roleEnum.values.find((v) => v.value === (r.f.role as number));
-          return val?.name ?? String(r.f.role);
-        });
+        .map((r) => r.f.role as string);
     } catch {
       return [];
     }
@@ -422,6 +435,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         .filter((t) => policy.can(t.name, 'read') || usedTables.has(t.name)),
       enums: kernel.registry.allEnums(),
       forms,
+      reports: kernel.registry.allReports().filter((r) => policy.can(r.dataSource, 'read')),
       privileges: kernel.registry.allPrivileges(),
       duties: kernel.registry.allDuties(),
       roles: kernel.registry.allRoles(),
@@ -483,26 +497,18 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     (req) => {
       const table = dataTable(req.params.table, req);
       const ctx = userCtx(req);
-      const q = ctx.select(table.name);
-      const countQ = ctx.select(table.name);
-      for (const [key, value] of Object.entries(req.query)) {
-        if (key.startsWith('filter.') && value !== undefined) {
-          const field = key.slice('filter.'.length);
-          const coerced = coerce(table.name, field, value);
-          q.where(field, '=', coerced);
-          countQ.where(field, '=', coerced);
-        }
-      }
-      if (req.query.sort) {
-        const [field, dir] = req.query.sort.split(':');
-        q.orderBy(field, dir === 'desc' ? 'desc' : 'asc');
-      }
+      const query = req.query as unknown as { [key: string]: string | undefined };
+      const q = buildFilteredQuery(ctx, table.name, query, coerce);
+      const countQ = buildFilteredQuery(ctx, table.name, query, coerce);
       const limit = Math.min(Number(req.query.limit ?? 50), 500);
       const offset = Number(req.query.offset ?? 0);
       q.limit(limit, offset);
       return { data: q.toArray().map((r) => r.toObject()), total: countQ.count() };
     },
   );
+
+  registerImportExportRoutes(app, kernel, { userCtx, dataTable, coerce, writableBody });
+  registerReportRoutes(app, kernel, { userCtx, coerce });
 
   app.get<{ Params: { table: string; id: string } }>('/api/data/:table/:id', (req) => {
     const table = dataTable(req.params.table, req);

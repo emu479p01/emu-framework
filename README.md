@@ -1,14 +1,14 @@
 # EmuFramework
 
-**Version: v0.0.0.4**
+**Version: v0.0.0.5**
 
 **General-purpose metadata-driven application platform** — build business apps (ERP, CRM, any domain)
 by declaring tables, forms, menus as JSON metadata and writing TypeScript business logic. No per-app UI
 code needed — the client auto-generates list/detail pages, field controls, and line grids from metadata.
 
-> **Mini ERP** (included under `apps/erp`) is a **sample app** demonstrating the framework's
-> capabilities — not the framework itself. The platform can host any number of independent apps,
-> extensions, and web-designed customizations simultaneously.
+This repository ships the framework itself (`packages/core|server|client|cli`). Business apps
+are not included — you scaffold them under `apps/` with `pnpm emu add app`. The platform can
+host any number of independent apps, extensions, and web-designed customizations simultaneously.
 
 ## Stack
 
@@ -24,8 +24,7 @@ packages/core     kernel: metadata registry, schema sync, data API, events, secu
 packages/server   Fastify REST + session auth + generic /api/data + /api/action + Web Designer
 packages/client   Vue engine: shell, auto list/form pages, field controls, designer UI
 packages/cli      Dev tool: pnpm emu — scaffold apps, modules, objects, extensions
-apps/erp          Mini ERP app (sample): Sales, Inventory, Customers modules
-apps/erp.credit   Extension app demo: adds credit limit to ERP via events+extensions
+apps/*            Business apps you scaffold via 'pnpm emu add app' (none included by default)
 ```
 
 The server (`@emu/server`) and client (`@emu/client`) are two separate packages during
@@ -63,8 +62,8 @@ Nothing needs to be created by hand — the first time the server boots it creat
 
 ## Usage
 
-Default logins (Mini ERP sample app): `admin/admin` (full access), `manager/manager`
-(SalesManager), `clerk/clerk` (SalesClerk).
+Default login: `admin/admin` (full access) — created automatically on first boot. Change this
+password immediately.
 
 ```sh
 pnpm -r test        # all test suites
@@ -82,7 +81,7 @@ See [docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md) for the full developer gu
 ## Key Concepts
 
 **Platform, not product** — EmuFramework is an app *platform*. You create apps on top of it. Each app
-gets its own sidebar group, menu tree, and security policies. Extensions (dot-named like `erp.credit`)
+gets its own sidebar group, menu tree, and security policies. Extensions (dot-named like `crm.reporting`)
 add features to existing apps without modifying base code.
 
 **Metadata-driven UI** — apps declare `tables/enums/forms/menus/privileges/duties/roles` as JSON
