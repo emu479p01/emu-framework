@@ -265,6 +265,75 @@ export interface ScriptExtensionMeta {
   model?: string;
 }
 
+// ---- PDF report designer ----
+
+export type ReportElementType = 'text' | 'field' | 'image' | 'line' | 'rect';
+
+export interface ReportElementStyle {
+  fontSize?: number;
+  bold?: boolean;
+  italic?: boolean;
+  align?: 'left' | 'center' | 'right';
+  color?: string;
+  borderWidth?: number;
+}
+
+export interface ReportElementMeta {
+  /** Stable id within the report, used by the canvas editor. */
+  id: string;
+  type: ReportElementType;
+  /** Absolute position/size in points, relative to the top-left of the band. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Literal content for 'text' elements. */
+  text?: string;
+  /** Bound field path for 'field' elements — "field" on the main datasource, or "table.field" for a line source. */
+  field?: string;
+  /** Formatting token (e.g. date/number format) applied to a 'field' element's value. */
+  format?: string;
+  style?: ReportElementStyle;
+}
+
+export type ReportBandKind = 'pageHeader' | 'header' | 'detail' | 'footer' | 'pageFooter';
+
+export interface ReportBandMeta {
+  kind: ReportBandKind;
+  /** Band height in points. */
+  height: number;
+  elements: ReportElementMeta[];
+}
+
+export interface ReportLineSourceMeta {
+  /** Child/related table for a repeating detail section, e.g. invoice lines. */
+  table: string;
+  /** FK field on `table` pointing back to a record of the report's main dataSource. */
+  refField: string;
+  bands: ReportBandMeta[];
+}
+
+export interface ReportPageMeta {
+  size?: 'A4' | 'Letter';
+  orientation?: 'portrait' | 'landscape';
+  /** [top, right, bottom, left], in points. */
+  margins?: [number, number, number, number];
+}
+
+export interface ReportMeta {
+  kind: 'report';
+  name: string;
+  app?: string;
+  label?: string;
+  /** Main table this report reads from — a single record (id filter) or a filtered/sorted list. */
+  dataSource: string;
+  page?: ReportPageMeta;
+  bands: ReportBandMeta[];
+  lineSources?: ReportLineSourceMeta[];
+  layer?: LayerType;
+  model?: string;
+}
+
 export interface AppManifest {
   name: string;
   label?: string;
@@ -289,7 +358,8 @@ export type AnyMeta =
   | DutyExtensionMeta
   | RoleExtensionMeta
   | ScriptExtensionMeta
-  | ScriptMeta;
+  | ScriptMeta
+  | ReportMeta;
 
 /** All extension kinds (accumulate into base, never override). */
 export const EXTENSION_KINDS = new Set([
@@ -313,6 +383,7 @@ export const BASE_KINDS = new Set([
   'duty',
   'role',
   'script',
+  'report',
 ]);
 
 export const SYSTEM_FIELDS = ['id', 'createdAt', 'createdBy', 'modifiedAt', 'modifiedBy'] as const;

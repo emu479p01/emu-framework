@@ -1,6 +1,6 @@
 # คู่มือ Developer — EmuFramework
 
-**เวอร์ชัน: v0.0.0.4**
+**เวอร์ชัน: v0.0.0.5**
 
 ## สารบัญ
 1. [ภาพรวม Architecture](#1-ภาพรวม-architecture)

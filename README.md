@@ -1,6 +1,6 @@
 # EmuFramework
 
-**Version: v0.0.0.4**
+**Version: v0.0.0.5**
 
 **General-purpose metadata-driven application platform** — build business apps (ERP, CRM, any domain)
 by declaring tables, forms, menus as JSON metadata and writing TypeScript business logic. No per-app UI

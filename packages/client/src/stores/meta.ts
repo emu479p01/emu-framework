@@ -62,6 +62,15 @@ export interface MenuMeta {
   items: MenuItem[];
 }
 
+export interface ReportMeta {
+  name: string;
+  label?: string;
+  app?: string;
+  model?: string;
+  layer?: string;
+  dataSource: string;
+}
+
 export interface SecurityMeta {
   name: string;
   label?: string;
@@ -89,6 +98,7 @@ interface Metadata {
   tables: TableMeta[];
   enums: EnumMeta[];
   forms: FormMeta[];
+  reports: ReportMeta[];
   privileges: SecurityMeta[];
   duties: SecurityMeta[];
   roles: SecurityMeta[];
@@ -105,6 +115,7 @@ export const useMeta = defineStore('meta', {
     table: (s) => (name: string) => s.meta?.tables.find((t) => t.name === name),
     form: (s) => (name: string) => s.meta?.forms.find((f) => f.name === name),
     enumOf: (s) => (name: string) => s.meta?.enums.find((e) => e.name === name),
+    reportsFor: (s) => (tableName: string) => (s.meta?.reports ?? []).filter((r) => r.dataSource === tableName),
   },
   actions: {
     async load() {

@@ -28,6 +28,7 @@ const DESIGNER_KINDS = new Set([
   'role',
   'roleExtension',
   'scriptExtension',
+  'report',
 ]);
 
 function loadStored(kernel: Kernel): AnyMeta[] {

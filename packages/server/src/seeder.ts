@@ -63,9 +63,21 @@ export function seedDesignerDb(kernel: Kernel): void {
       { label: 'App Access', form: 'FW_AppAccessForm' },
       { label: 'Designer', route: '/designer' },
     ] } as any,
+    // Example report — a working recipe for the Report Designer, printable from the Users list ("Print" button).
+    { kind: 'report', name: 'FW_UserListReport', label: 'User list', ...fw, dataSource: 'FW_User',
+      bands: [
+        { kind: 'header', height: 30, elements: [
+          { id: 'title', type: 'text', x: 0, y: 0, width: 300, height: 20, text: 'User List', style: { fontSize: 16, bold: true } },
+        ] },
+        { kind: 'detail', height: 18, elements: [
+          { id: 'username', type: 'field', x: 0, y: 0, width: 150, height: 16, field: 'username' },
+          { id: 'displayName', type: 'field', x: 150, y: 0, width: 200, height: 16, field: 'displayName' },
+          { id: 'enabled', type: 'field', x: 350, y: 0, width: 80, height: 16, field: 'enabled' },
+        ] },
+      ] } as any,
   ];
 
-  const order = ['enum', 'table', 'privilege', 'duty', 'role', 'form', 'menu'];
+  const order = ['enum', 'table', 'privilege', 'duty', 'role', 'form', 'menu', 'report'];
   const tableOrder = ['FW_UserRole', 'FW_AppAccess'];
   artifacts.sort((a, b) => {
     const ak = order.indexOf(a.kind);

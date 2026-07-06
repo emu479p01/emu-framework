@@ -183,6 +183,7 @@ const NEW_KINDS = [
   { key: 'duty', label: 'Duty' },
   { key: 'role', label: 'Role' },
   { key: 'script', label: 'Script' },
+  { key: 'report', label: 'Report' },
   { type: 'divider' as const, key: 'd1' },
   { key: 'tableExtension', label: 'Table Extension' },
   { key: 'formExtension', label: 'Form Extension' },
@@ -199,7 +200,7 @@ const NEW_KINDS = [
 ];
 
 const KIND_ORDER = [
-  'table', 'enum', 'form', 'menu', 'privilege', 'duty', 'role', 'script',
+  'table', 'enum', 'form', 'menu', 'privilege', 'duty', 'role', 'script', 'report',
   'tableExtension', 'enumExtension', 'formExtension', 'menuExtension',
   'privilegeExtension', 'dutyExtension', 'roleExtension', 'scriptExtension',
 ];

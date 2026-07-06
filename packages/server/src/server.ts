@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
+import multipart from '@fastify/multipart';
 import {
   Kernel,
   MetadataError,
@@ -20,6 +21,8 @@ import { registerSystemApp, registerSystemHooks } from './systemApp.js';
 import { login, logout, resolveSession, seedAdmin, type AuthUser } from './auth.js';
 import { bootWebArtifacts, registerDesignerRoutes } from './designer.js';
 import { seedDesignerDb } from './seeder.js';
+import { buildFilteredQuery, registerImportExportRoutes } from './importExport.js';
+import { registerReportRoutes } from './reports.js';
 
 export interface ServerOptions {
   dbPath?: string;
@@ -193,6 +196,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   const app = Fastify({ logger: false });
   app.register(cookie);
+  app.register(multipart);
 
   // Serve the built client (packages/client/dist) as static files when it exists.
   // In local dev, the client runs its own Vite dev server (5199) and this dist folder
@@ -422,6 +426,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         .filter((t) => policy.can(t.name, 'read') || usedTables.has(t.name)),
       enums: kernel.registry.allEnums(),
       forms,
+      reports: kernel.registry.allReports().filter((r) => policy.can(r.dataSource, 'read')),
       privileges: kernel.registry.allPrivileges(),
       duties: kernel.registry.allDuties(),
       roles: kernel.registry.allRoles(),
@@ -483,26 +488,18 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     (req) => {
       const table = dataTable(req.params.table, req);
       const ctx = userCtx(req);
-      const q = ctx.select(table.name);
-      const countQ = ctx.select(table.name);
-      for (const [key, value] of Object.entries(req.query)) {
-        if (key.startsWith('filter.') && value !== undefined) {
-          const field = key.slice('filter.'.length);
-          const coerced = coerce(table.name, field, value);
-          q.where(field, '=', coerced);
-          countQ.where(field, '=', coerced);
-        }
-      }
-      if (req.query.sort) {
-        const [field, dir] = req.query.sort.split(':');
-        q.orderBy(field, dir === 'desc' ? 'desc' : 'asc');
-      }
+      const query = req.query as unknown as { [key: string]: string | undefined };
+      const q = buildFilteredQuery(ctx, table.name, query, coerce);
+      const countQ = buildFilteredQuery(ctx, table.name, query, coerce);
       const limit = Math.min(Number(req.query.limit ?? 50), 500);
       const offset = Number(req.query.offset ?? 0);
       q.limit(limit, offset);
       return { data: q.toArray().map((r) => r.toObject()), total: countQ.count() };
     },
   );
+
+  registerImportExportRoutes(app, kernel, { userCtx, dataTable, coerce, writableBody });
+  registerReportRoutes(app, kernel, { userCtx, coerce });
 
   app.get<{ Params: { table: string; id: string } }>('/api/data/:table/:id', (req) => {
     const table = dataTable(req.params.table, req);

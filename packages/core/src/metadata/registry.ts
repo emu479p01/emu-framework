@@ -13,6 +13,8 @@ import type {
   MenuMeta,
   PrivilegeMeta,
   PrivilegeExtensionMeta,
+  ReportBandMeta,
+  ReportMeta,
   RoleMeta,
   RoleExtensionMeta,
   ScriptExtensionMeta,
@@ -47,6 +49,7 @@ const META_DIRS: { dir: string; kind: AnyMeta['kind'] }[] = [
   { dir: 'roleExtensions', kind: 'roleExtension' },
   { dir: 'scripts', kind: 'script' },
   { dir: 'scriptExtensions', kind: 'scriptExtension' },
+  { dir: 'reports', kind: 'report' },
 ];
 
 const KNOWN_META_KINDS = new Set(META_DIRS.map((d) => d.dir));
@@ -65,6 +68,7 @@ export class MetadataRegistry {
   private duties = new Map<string, DutyMeta>();
   private roles = new Map<string, RoleMeta>();
   private scripts = new Map<string, ScriptMeta>();
+  private reports = new Map<string, ReportMeta>();
   private extensionNames = new Set<string>();
   /** Maps artifact name → app name for grouping in metadata API */
   private artifactApp = new Map<string, string>();
@@ -216,6 +220,8 @@ export class MetadataRegistry {
         return this.duties as Map<string, AnyMeta>;
       case 'role':
         return this.roles as Map<string, AnyMeta>;
+      case 'report':
+        return this.reports as Map<string, AnyMeta>;
       default:
         throw new MetadataError(`Unsupported base kind '${kind}'`);
     }
@@ -441,8 +447,37 @@ export class MetadataRegistry {
         }
       }
     }
+    for (const report of this.reports.values()) {
+      const table = this.tables.get(report.dataSource);
+      if (!table) throw new MetadataError(`Report '${report.name}': unknown dataSource table '${report.dataSource}'`);
+      const mainFieldNames = new Set([...table.fields.map((f) => f.name), ...(SYSTEM_FIELDS as readonly string[])]);
+      this.validateReportBands(report.bands, mainFieldNames, `Report '${report.name}'`);
+      for (const line of report.lineSources ?? []) {
+        const lineTable = this.tables.get(line.table);
+        if (!lineTable) {
+          throw new MetadataError(`Report '${report.name}': unknown lineSource table '${line.table}'`);
+        }
+        if (!lineTable.fields.some((f) => f.name === line.refField)) {
+          throw new MetadataError(
+            `Report '${report.name}': lineSource table '${line.table}' has no refField '${line.refField}'`,
+          );
+        }
+        const lineFieldNames = new Set([...lineTable.fields.map((f) => f.name), ...(SYSTEM_FIELDS as readonly string[])]);
+        this.validateReportBands(line.bands, lineFieldNames, `Report '${report.name}' lineSource '${line.table}'`);
+      }
+    }
     for (const ext of [...this.extensionNames]) {
       void ext;
+    }
+  }
+
+  private validateReportBands(bands: ReportBandMeta[], fieldNames: Set<string>, context: string): void {
+    for (const band of bands) {
+      for (const el of band.elements) {
+        if (el.type === 'field' && el.field && !fieldNames.has(el.field)) {
+          throw new MetadataError(`${context}: unknown field '${el.field}' in ${band.kind} band`);
+        }
+      }
     }
   }
 
@@ -525,6 +560,20 @@ export class MetadataRegistry {
 
   allScripts(): ScriptMeta[] {
     return [...this.scripts.values()];
+  }
+
+  getReport(name: string): ReportMeta {
+    const r = this.reports.get(name);
+    if (!r) throw new MetadataError(`Unknown report '${name}'`);
+    return r;
+  }
+
+  hasReport(name: string): boolean {
+    return this.reports.has(name);
+  }
+
+  allReports(): ReportMeta[] {
+    return [...this.reports.values()];
   }
 
   loadedApps(): AppManifest[] {
