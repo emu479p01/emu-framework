@@ -10,6 +10,7 @@ import {
   scaffoldFormExtension,
   scaffoldMenuExtension,
 } from '../scaffold/extension.js';
+import type { IndexDef } from '../scaffold/object.js';
 
 type ExtKind = 'tableExtension' | 'formExtension' | 'menuExtension';
 const EXTS: ExtKind[] = ['tableExtension', 'formExtension', 'menuExtension'];
@@ -101,7 +102,28 @@ async function addTableExt(root: string, appDir: string, targetApps: string[]) {
     p.log.success(`  Added: ${fName} (${fType})`);
   }
 
-  const filepath = scaffoldTableExtension(appDir, { name, table, fields });
+  const indexes: IndexDef[] = [];
+  p.log.step('Add indexes (leave name empty to finish)');
+
+  while (true) {
+    const idxName = await p.text({ message: 'Index name' }) as string;
+    if (p.isCancel(idxName) || !idxName) break;
+
+    const idxFields = await p.multiselect({
+      message: 'Fields for this index',
+      options: fields.map((f) => ({ value: f.name, label: f.name })),
+      required: true,
+    }) as string[];
+    if (p.isCancel(idxFields)) process.exit(0);
+
+    const unique = await p.confirm({ message: 'Unique?', initialValue: false });
+    if (p.isCancel(unique)) process.exit(0);
+
+    indexes.push({ name: idxName, fields: idxFields, unique: unique === true });
+    p.log.success(`  Added index: ${idxName} (${idxFields.join(', ')})`);
+  }
+
+  const filepath = scaffoldTableExtension(appDir, { name, table, fields, indexes: indexes.length > 0 ? indexes : undefined });
   p.outro(pc.green(`Created ${filepath}`));
 }
 

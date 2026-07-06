@@ -9,7 +9,7 @@ export interface FieldMeta {
   readOnly?: boolean;
   maxLength?: number;
   enumName?: string;
-  reference?: { table: string; displayField?: string };
+  reference?: { table: string; displayField?: string; copyFields?: { from: string; to: string }[] };
 }
 export interface TableMeta {
   name: string;
@@ -27,6 +27,12 @@ export interface EnumMeta {
   layer?: string;
   values: { name: string; value: number; label?: string }[];
 }
+export interface AggregateMeta {
+  fn: 'count' | 'sum' | 'avg';
+  field?: string;
+  label?: string;
+}
+
 export interface FormMeta {
   name: string;
   table: string;
@@ -37,7 +43,7 @@ export interface FormMeta {
   actions?: { label: string; action: string }[];
   listFields?: string[];
   groups?: { label?: string; fields: string[] }[];
-  lines?: { table: string; refField: string; fields: string[] }[];
+  lines?: { table: string; refField: string; fields: string[]; aggregates?: AggregateMeta[] }[];
 }
 
 export interface MenuItem {

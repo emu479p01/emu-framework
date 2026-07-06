@@ -335,6 +335,24 @@ export class MetadataRegistry {
           }
         }
       }
+      for (const f of table.fields) {
+        for (const cf of f.reference?.copyFields ?? []) {
+          const refTable = this.tables.get(f.reference!.table);
+          const fromOk =
+            refTable?.fields.some((x) => x.name === cf.from) ||
+            (SYSTEM_FIELDS as readonly string[]).includes(cf.from);
+          if (!fromOk) {
+            throw new MetadataError(
+              `${table.name}.${f.name}: copyFields 'from' unknown field '${cf.from}' on '${f.reference!.table}'`,
+            );
+          }
+          if (cf.to === f.name || !table.fields.some((x) => x.name === cf.to)) {
+            throw new MetadataError(
+              `${table.name}.${f.name}: copyFields 'to' unknown/invalid field '${cf.to}'`,
+            );
+          }
+        }
+      }
     }
     for (const form of this.forms.values()) {
       const table = this.tables.get(form.table);
@@ -361,6 +379,26 @@ export class MetadataRegistry {
           throw new MetadataError(
             `Form '${form.name}': line table '${line.table}' has no refField '${line.refField}'`,
           );
+        }
+        for (const agg of line.aggregates ?? []) {
+          if (agg.fn !== 'count') {
+            if (!agg.field) {
+              throw new MetadataError(
+                `Form '${form.name}' line '${line.table}': aggregate '${agg.fn}' requires 'field'`,
+              );
+            }
+            const aggField = lineTable.fields.find((f) => f.name === agg.field);
+            if (!aggField) {
+              throw new MetadataError(
+                `Form '${form.name}' line '${line.table}': aggregate field '${agg.field}' not found`,
+              );
+            }
+            if (aggField.type !== 'int' && aggField.type !== 'real') {
+              throw new MetadataError(
+                `Form '${form.name}' line '${line.table}': aggregate field '${agg.field}' must be numeric`,
+              );
+            }
+          }
         }
       }
     }

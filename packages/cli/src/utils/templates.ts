@@ -14,7 +14,7 @@ export function appPackageJson(name: string): string {
   return JSON.stringify(
     {
       name: `@emu/app-${name}`,
-      version: '0.0.0.1',
+      version: '0.0.0.2',
       private: true,
       type: 'module',
       main: 'dist/logic.js',

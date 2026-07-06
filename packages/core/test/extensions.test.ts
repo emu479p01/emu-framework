@@ -80,6 +80,20 @@ describe('extensions', () => {
     expect(registry.allMenus()[0].items).toHaveLength(2);
   });
 
+  it('menu extension supports nested sub-items', () => {
+    const registry = baseRegistry();
+    const menuExt: MenuExtensionMeta = {
+      kind: 'menuExtension',
+      name: 'TESTAPP_Main_Extension',
+      menu: 'TESTAPP_Main',
+      items: [{ label: 'Group', items: [{ label: 'Nested', form: 'TESTAPP_CustForm' }] }],
+    };
+    registry.registerApp({ name: 'testapp.ext', dependsOn: ['testapp'] }, [menuExt]);
+    const items = registry.allMenus()[0].items;
+    expect(items).toHaveLength(2);
+    expect(items[1].items).toEqual([{ label: 'Nested', form: 'TESTAPP_CustForm' }]);
+  });
+
   it('rejects extending unknown tables and duplicate fields', () => {
     const registry = baseRegistry();
     expect(() =>

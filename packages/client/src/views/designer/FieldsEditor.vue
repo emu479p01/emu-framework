@@ -9,11 +9,23 @@ export interface EditableField {
   label?: string;
   mandatory?: boolean;
   enumName?: string;
-  reference?: { table: string };
+  reference?: { table: string; displayField?: string; copyFields?: { from: string; to: string }[] };
 }
 
 const props = defineProps<{ fields: EditableField[] }>();
 const meta = useMeta();
+
+function fieldOptionsFor(tableName: string) {
+  return (meta.table(tableName)?.fields ?? []).map((f) => ({ label: f.name, value: f.name }));
+}
+function addCopyField(field: EditableField) {
+  if (!field.reference) return;
+  if (!field.reference.copyFields) field.reference.copyFields = [];
+  field.reference.copyFields.push({ from: '', to: '' });
+}
+function removeCopyField(field: EditableField, i: number) {
+  field.reference?.copyFields?.splice(i, 1);
+}
 
 const TYPE_OPTIONS = ['string', 'int', 'real', 'boolean', 'date', 'datetime', 'enum', 'reference'].map(
   (t) => ({ label: t, value: t }),
@@ -79,14 +91,22 @@ function onTypeChange(field: EditableField) {
             placeholder="enum"
             size="small"
           />
-          <n-select
-            v-else-if="field.type === 'reference' && field.reference"
-            v-model:value="field.reference.table"
-            :options="tableOptions"
-            placeholder="table"
-            size="small"
-            filterable
-          />
+          <div v-else-if="field.type === 'reference' && field.reference">
+            <n-select
+              v-model:value="field.reference.table"
+              :options="tableOptions"
+              placeholder="table"
+              size="small"
+              filterable
+            />
+            <div v-for="(cf, ci) in field.reference.copyFields ?? []" :key="ci" style="margin-top: 4px; display: flex; gap: 4px; align-items: center">
+              <n-select v-model:value="cf.from" :options="fieldOptionsFor(field.reference.table)" placeholder="from field" size="tiny" style="width: 40%" filterable />
+              <span style="font-size: 12px">→</span>
+              <n-select v-model:value="cf.to" :options="fields.map((f) => ({ label: f.name, value: f.name }))" placeholder="to field" size="tiny" style="width: 40%" filterable />
+              <n-button size="tiny" quaternary type="error" @click="removeCopyField(field, ci)">✕</n-button>
+            </div>
+            <n-button size="tiny" style="margin-top: 4px" @click="addCopyField(field)">+ Default from lookup</n-button>
+          </div>
         </td>
         <td><n-button size="tiny" quaternary type="error" @click="removeField(i)">✕</n-button></td>
       </tr>

@@ -23,7 +23,7 @@ const main = defineCommand({
   meta: {
     name: 'emu',
     description: 'EmuFramework Developer CLI — scaffold apps, objects, and extensions interactively',
-    version: '0.0.0.1',
+    version: '0.0.0.2',
   },
   subCommands: {
     setup: setupCommand,

@@ -14,6 +14,13 @@ export type FieldType =
   | 'enum'
   | 'reference';
 
+export interface FieldReferenceMeta {
+  table: string;
+  displayField?: string;
+  /** Fields to copy from the referenced record onto this record when the reference is selected. */
+  copyFields?: { from: string; to: string }[];
+}
+
 export interface FieldMeta {
   name: string;
   type: FieldType;
@@ -22,7 +29,7 @@ export interface FieldMeta {
   readOnly?: boolean;
   maxLength?: number;
   enumName?: string;
-  reference?: { table: string; displayField?: string };
+  reference?: FieldReferenceMeta;
   default?: string | number | boolean | null;
 }
 
@@ -65,10 +72,18 @@ export interface EnumMeta {
   model?: string;
 }
 
+export interface AggregateMeta {
+  fn: 'count' | 'sum' | 'avg';
+  /** Required for sum/avg; ignored for count. */
+  field?: string;
+  label?: string;
+}
+
 export interface FormLineGridMeta {
   table: string;
   refField: string;
   fields: string[];
+  aggregates?: AggregateMeta[];
 }
 
 export interface FormGroupMeta {

@@ -19,6 +19,8 @@ import { useDesigner, type Artifact } from '../../stores/designer';
 import { useMeta } from '../../stores/meta';
 import { ApiError } from '../../api';
 import FieldsEditor, { type EditableField } from './FieldsEditor.vue';
+import IndexesEditor, { type EditableIndex } from './IndexesEditor.vue';
+import MenuItemsEditor, { type EditableMenuItem } from './MenuItemsEditor.vue';
 
 const props = defineProps<{ kind: string; name?: string }>();
 const route = useRoute();
@@ -189,6 +191,14 @@ const fieldOptionsForFormTable = computed(() => {
   const t = meta.table(formTableName.value);
   return (t?.fields ?? []).map((f) => ({ label: f.name, value: f.name }));
 });
+function fieldOptionsFor(tableName: string) {
+  return (meta.table(tableName)?.fields ?? []).map((f) => ({ label: f.name, value: f.name }));
+}
+function numericFieldOptionsFor(tableName: string) {
+  return (meta.table(tableName)?.fields ?? [])
+    .filter((f) => f.type === 'int' || f.type === 'real')
+    .map((f) => ({ label: f.name, value: f.name }));
+}
 const formOptions = computed(() =>
   (meta.meta?.forms ?? []).map((f) => ({ label: f.name, value: f.name })),
 );
@@ -341,8 +351,26 @@ async function save() {
 // typed views over the artifact for the template
 const enumValues = computed(() => (artifact.value.values ?? []) as { name: string; value: number; label?: string }[]);
 const formGroups = computed(() => (artifact.value.groups ?? []) as { label?: string; fields: string[] }[]);
-const menuItems = computed(() => (artifact.value.items ?? []) as { label?: string; form: string }[]);
+const menuItems = computed(() => {
+  if (!artifact.value.items) artifact.value.items = [];
+  return artifact.value.items as EditableMenuItem[];
+});
 const tableFields = computed(() => (artifact.value.fields ?? []) as EditableField[]);
+interface EditableAggregate { fn: 'count' | 'sum' | 'avg'; field?: string; label?: string }
+interface EditableLine { table: string; refField: string; fields: string[]; aggregates?: EditableAggregate[] }
+const formLines = computed(() => {
+  if (!artifact.value.lines) artifact.value.lines = [];
+  return artifact.value.lines as EditableLine[];
+});
+const AGGREGATE_FN_OPTIONS = [
+  { label: 'count', value: 'count' },
+  { label: 'sum', value: 'sum' },
+  { label: 'avg', value: 'avg' },
+];
+const tableIndexes = computed(() => {
+  if (!artifact.value.indexes) artifact.value.indexes = [];
+  return artifact.value.indexes as EditableIndex[];
+});
 const tablePermissions = computed(() => (artifact.value.tablePermissions ?? []) as {
   table: string;
   read?: boolean;
@@ -366,12 +394,14 @@ const selectedDuties = computed({
 // ---- enum helpers ----
 function addEnumValue() { const values = artifact.value.values as { name: string; value: number }[]; values.push({ name: '', value: values.length > 0 ? values[values.length - 1].value + 1 : 0 }); }
 function removeEnumValue(i: number) { (artifact.value.values as unknown[]).splice(i, 1); }
-// ---- menu helpers ----
-function addMenuItem() { ((artifact.value.items as unknown[]) ?? []).push({ label: '', form: '' }); }
-function removeMenuItem(i: number) { (artifact.value.items as unknown[]).splice(i, 1); }
 // ---- form group helpers ----
 function addGroup() { if (!artifact.value.groups) artifact.value.groups = []; (artifact.value.groups as unknown[]).push({ label: '', fields: [] }); }
 function removeGroup(i: number) { (artifact.value.groups as unknown[]).splice(i, 1); }
+// ---- form line grid helpers ----
+function addLine() { formLines.value.push({ table: '', refField: '', fields: [] }); }
+function removeLine(i: number) { formLines.value.splice(i, 1); }
+function addAggregate(line: EditableLine) { if (!line.aggregates) line.aggregates = []; line.aggregates.push({ fn: 'count' }); }
+function removeAggregate(line: EditableLine, i: number) { line.aggregates!.splice(i, 1); }
 // ---- security helpers ----
 function addTablePermission() {
   if (!artifact.value.tablePermissions) artifact.value.tablePermissions = [];
@@ -512,6 +542,11 @@ function removeTablePermission(i: number) { (artifact.value.tablePermissions as 
               <FieldsEditor :fields="tableFields" />
             </n-card>
 
+            <!-- Indexes (table / tableExtension) -->
+            <n-card v-if="kind === 'table' || kind === 'tableExtension'" size="small" title="Indexes">
+              <IndexesEditor :indexes="tableIndexes" :fields="tableFields" />
+            </n-card>
+
             <!-- Enum values -->
             <n-card v-if="kind === 'enum' || kind === 'enumExtension'" size="small" title="Values">
               <n-table size="small" :bordered="false">
@@ -543,18 +578,51 @@ function removeTablePermission(i: number) { (artifact.value.tablePermissions as 
                 </n-space>
                 <n-button size="small" style="margin-top: 8px" @click="addGroup">+ Add group</n-button>
               </n-card>
+
+              <!-- Line grids (master-detail) -->
+              <n-card v-if="kind === 'form'" size="small" title="Line grids">
+                <n-space vertical :size="16">
+                  <n-card v-for="(line, li) in formLines" :key="li" size="small" :bordered="true">
+                    <n-space :size="16" align="start" style="margin-bottom: 8px">
+                      <n-form-item label="Line table">
+                        <n-select v-model:value="line.table" :options="tableOptions" size="small" style="min-width: 200px" filterable />
+                      </n-form-item>
+                      <n-form-item label="Ref field (on line table)">
+                        <n-select v-model:value="line.refField" :options="fieldOptionsFor(line.table)" size="small" style="min-width: 200px" filterable />
+                      </n-form-item>
+                      <n-form-item label="Display fields">
+                        <n-select v-model:value="line.fields" :options="fieldOptionsFor(line.table)" multiple size="small" style="min-width: 260px" />
+                      </n-form-item>
+                      <n-button size="tiny" quaternary type="error" @click="removeLine(li)">✕ Remove line</n-button>
+                    </n-space>
+
+                    <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0 0 8px">Aggregates shown on the header (e.g. line count, sum of amount)</p>
+                    <n-space v-for="(agg, ai) in line.aggregates ?? []" :key="ai" align="center" style="margin-bottom: 4px">
+                      <n-select v-model:value="agg.fn" :options="AGGREGATE_FN_OPTIONS" size="small" style="width: 100px" />
+                      <n-select
+                        v-if="agg.fn !== 'count'"
+                        v-model:value="agg.field"
+                        :options="numericFieldOptionsFor(line.table)"
+                        placeholder="numeric field"
+                        size="small"
+                        style="min-width: 160px"
+                      />
+                      <n-input v-model:value="agg.label" placeholder="Label (optional)" size="small" style="width: 160px" />
+                      <n-button size="tiny" quaternary type="error" @click="removeAggregate(line, ai)">✕</n-button>
+                    </n-space>
+                    <n-button size="small" style="margin-top: 4px" @click="addAggregate(line)">+ Add aggregate</n-button>
+                  </n-card>
+                </n-space>
+                <n-button size="small" style="margin-top: 8px" @click="addLine">+ Add line grid</n-button>
+              </n-card>
             </template>
 
             <!-- Menu items -->
             <n-card v-if="kind === 'menu' || kind === 'menuExtension'" size="small" title="Menu items">
-              <n-space vertical :size="8">
-                <n-space v-for="(item, i) in menuItems" :key="i" align="center">
-                  <n-input v-model:value="item.label" size="small" placeholder="Label" style="width: 200px" />
-                  <n-select v-model:value="item.form" :options="formOptions" size="small" style="min-width: 260px" filterable />
-                  <n-button size="tiny" quaternary type="error" @click="removeMenuItem(i)">✕</n-button>
-                </n-space>
-              </n-space>
-              <n-button size="small" style="margin-top: 8px" @click="addMenuItem">+ Add item</n-button>
+              <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0 0 8px">
+                Add a form to make an item navigable, or leave it blank to use as a submenu group. Use "+ Sub-item" to nest items.
+              </p>
+              <MenuItemsEditor :items="menuItems" :form-options="formOptions" />
             </n-card>
 
             <!-- Security objects -->

@@ -16,6 +16,7 @@ import { api, ApiError, type Row } from '../api';
 import { useMeta } from '../stores/meta';
 import FieldControl from '../components/FieldControl.vue';
 import LineGrid from '../components/LineGrid.vue';
+import { applyIfBlank } from '../utils/applyDefaults';
 
 const props = defineProps<{ formName: string; id: string; appName?: string }>();
 const router = useRouter();
@@ -89,6 +90,10 @@ async function runAction(action: string) {
   }
 }
 
+function applyRelated(patch: Record<string, unknown>) {
+  applyIfBlank(record.value, patch);
+}
+
 function remove() {
   dialog.warning({
     title: 'Delete record',
@@ -145,6 +150,7 @@ function remove() {
                   :field="field"
                   :model-value="record[field.name]"
                   @update:model-value="(v) => (record[field.name] = v)"
+                  @update:related="applyRelated"
                 />
               </n-form-item>
             </n-grid-item>

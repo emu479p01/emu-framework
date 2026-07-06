@@ -4,9 +4,10 @@ import { NButton, NCard, NDataTable, NSpace, useMessage, type DataTableColumns }
 import { api, ApiError, type Row } from '../api';
 import { useMeta } from '../stores/meta';
 import FieldControl from './FieldControl.vue';
+import { applyIfBlank } from '../utils/applyDefaults';
 
 const props = defineProps<{
-  line: { table: string; refField: string; fields: string[] };
+  line: { table: string; refField: string; fields: string[]; aggregates?: { fn: 'count' | 'sum' | 'avg'; field?: string; label?: string }[] };
   headerId: number;
 }>();
 
@@ -89,6 +90,7 @@ const columns = computed<DataTableColumns<Row>>(() => [
           field: f,
           modelValue: draft.value[f.name],
           'onUpdate:modelValue': (v: unknown) => (draft.value[f.name] = v),
+          'onUpdate:related': (patch: Record<string, unknown>) => applyIfBlank(draft.value, patch),
         });
       }
       const v = row[f.name];
@@ -123,12 +125,28 @@ const columns = computed<DataTableColumns<Row>>(() => [
 const displayRows = computed<Row[]>(() =>
   editingId.value === 0 ? [...rows.value, { id: 0 } as Row] : rows.value,
 );
+
+const aggregateResults = computed(() =>
+  (props.line.aggregates ?? []).map((agg) => {
+    const label = agg.label ?? (agg.fn === 'count' ? 'Count' : `${agg.fn} ${agg.field}`);
+    if (agg.fn === 'count') return { label, value: rows.value.length };
+    const values = rows.value.map((r) => Number(r[agg.field!]) || 0);
+    const sum = values.reduce((a, b) => a + b, 0);
+    const value = agg.fn === 'sum' ? sum : values.length > 0 ? sum / values.length : 0;
+    return { label, value };
+  }),
+);
 </script>
 
 <template>
   <n-card :title="table?.label ?? line.table" size="small">
     <template #header-extra>
-      <n-button size="small" data-testid="add-line" @click="startEdit(null)">Add line</n-button>
+      <n-space align="center">
+        <span v-for="(agg, i) in aggregateResults" :key="i" style="color: var(--n-text-color-3); font-size: 13px">
+          {{ agg.label }}: <b>{{ agg.value }}</b>
+        </span>
+        <n-button size="small" data-testid="add-line" @click="startEdit(null)">Add line</n-button>
+      </n-space>
     </template>
     <n-data-table :columns="columns" :data="displayRows" :row-key="(r: Row) => r.id" size="small" />
   </n-card>

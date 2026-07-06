@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import DatabaseCtor from 'better-sqlite3';
-import { MetadataRegistry, MetadataError, syncSchema, type TableMeta } from '../src/index.js';
+import { MetadataRegistry, MetadataError, syncSchema, type TableMeta, type FormMeta } from '../src/index.js';
 import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable, testRegistry } from './helpers.js';
 
 describe('MetadataRegistry', () => {
@@ -50,6 +50,117 @@ describe('MetadataRegistry', () => {
     expect(() => registry.registerApp({ name: 'ext', dependsOn: ['base'] }, [])).toThrow(
       /depends on 'base'/,
     );
+  });
+
+  it('accepts a line grid with valid count/sum aggregates', () => {
+    const registry = new MetadataRegistry();
+    const header: TableMeta = { kind: 'table', name: 'A_Header', fields: [{ name: 'name', type: 'string' }] };
+    const line: TableMeta = {
+      kind: 'table',
+      name: 'A_Line',
+      fields: [
+        { name: 'headerId', type: 'reference', reference: { table: 'A_Header' } },
+        { name: 'qty', type: 'real' },
+      ],
+    };
+    const form: FormMeta = {
+      kind: 'form',
+      name: 'A_HeaderForm',
+      table: 'A_Header',
+      lines: [
+        {
+          table: 'A_Line',
+          refField: 'headerId',
+          fields: ['qty'],
+          aggregates: [{ fn: 'count' }, { fn: 'sum', field: 'qty', label: 'Total qty' }],
+        },
+      ],
+    };
+    registry.registerApp({ name: 'a' }, [header, line, form]);
+    expect(registry.getForm('A_HeaderForm').lines?.[0].aggregates).toHaveLength(2);
+  });
+
+  it('rejects a sum/avg aggregate missing a field', () => {
+    const registry = new MetadataRegistry();
+    const header: TableMeta = { kind: 'table', name: 'A_Header', fields: [{ name: 'name', type: 'string' }] };
+    const line: TableMeta = {
+      kind: 'table',
+      name: 'A_Line',
+      fields: [{ name: 'headerId', type: 'reference', reference: { table: 'A_Header' } }],
+    };
+    const form: FormMeta = {
+      kind: 'form',
+      name: 'A_HeaderForm',
+      table: 'A_Header',
+      lines: [{ table: 'A_Line', refField: 'headerId', fields: [], aggregates: [{ fn: 'sum' }] }],
+    };
+    expect(() => registry.registerApp({ name: 'a' }, [header, line, form])).toThrow(/requires 'field'/);
+  });
+
+  it('rejects an aggregate on an unknown or non-numeric field', () => {
+    const registry = new MetadataRegistry();
+    const header: TableMeta = { kind: 'table', name: 'A_Header', fields: [{ name: 'name', type: 'string' }] };
+    const line: TableMeta = {
+      kind: 'table',
+      name: 'A_Line',
+      fields: [
+        { name: 'headerId', type: 'reference', reference: { table: 'A_Header' } },
+        { name: 'label', type: 'string' },
+      ],
+    };
+    const formUnknown: FormMeta = {
+      kind: 'form',
+      name: 'A_HeaderForm',
+      table: 'A_Header',
+      lines: [{ table: 'A_Line', refField: 'headerId', fields: [], aggregates: [{ fn: 'sum', field: 'nope' }] }],
+    };
+    expect(() => registry.registerApp({ name: 'a' }, [header, line, formUnknown])).toThrow(/aggregate field 'nope' not found/);
+
+    const registry2 = new MetadataRegistry();
+    const formNonNumeric: FormMeta = {
+      kind: 'form',
+      name: 'A_HeaderForm',
+      table: 'A_Header',
+      lines: [{ table: 'A_Line', refField: 'headerId', fields: [], aggregates: [{ fn: 'sum', field: 'label' }] }],
+    };
+    expect(() => registry2.registerApp({ name: 'a' }, [header, line, formNonNumeric])).toThrow(/must be numeric/);
+  });
+
+  it('accepts a reference field with valid copyFields', () => {
+    const registry = new MetadataRegistry();
+    const ref: TableMeta = { kind: 'table', name: 'A_Item', fields: [{ name: 'price', type: 'real' }] };
+    const main: TableMeta = {
+      kind: 'table',
+      name: 'A_Line',
+      fields: [
+        { name: 'item', type: 'reference', reference: { table: 'A_Item', copyFields: [{ from: 'price', to: 'price' }] } },
+        { name: 'price', type: 'real' },
+      ],
+    };
+    registry.registerApp({ name: 'a' }, [ref, main]);
+    expect(registry.getTable('A_Line').fields[0].reference?.copyFields).toEqual([{ from: 'price', to: 'price' }]);
+  });
+
+  it('rejects copyFields with an unknown source or target field', () => {
+    const registry = new MetadataRegistry();
+    const ref: TableMeta = { kind: 'table', name: 'A_Item', fields: [{ name: 'price', type: 'real' }] };
+    const badFrom: TableMeta = {
+      kind: 'table',
+      name: 'A_Line',
+      fields: [
+        { name: 'item', type: 'reference', reference: { table: 'A_Item', copyFields: [{ from: 'nope', to: 'price' }] } },
+        { name: 'price', type: 'real' },
+      ],
+    };
+    expect(() => registry.registerApp({ name: 'a' }, [ref, badFrom])).toThrow(/copyFields 'from' unknown field/);
+
+    const registry2 = new MetadataRegistry();
+    const badTo: TableMeta = {
+      kind: 'table',
+      name: 'A_Line',
+      fields: [{ name: 'item', type: 'reference', reference: { table: 'A_Item', copyFields: [{ from: 'price', to: 'nope' }] } }],
+    };
+    expect(() => registry2.registerApp({ name: 'a' }, [ref, badTo])).toThrow(/copyFields 'to' unknown\/invalid field/);
   });
 });
 

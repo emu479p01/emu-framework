@@ -13,6 +13,8 @@ import {
   scaffoldPrivilege,
   scaffoldDuty,
   scaffoldRole,
+  type FieldDef,
+  type IndexDef,
 } from '../scaffold/object.js';
 
 type ObjectKind = 'table' | 'enum' | 'form' | 'menu' | 'privilege' | 'duty' | 'role';
@@ -47,6 +49,10 @@ export const addObjectCommand = defineCommand({
       type: 'string',
       description: 'table: comma list "name:type[:mandatory]", e.g. "accountNum:string:mandatory,qty:real"',
     },
+    indexes: {
+      type: 'string',
+      description: 'table: comma list "idxName:field1+field2[:unique]", e.g. "idx_code:code:unique"',
+    },
     values: {
       type: 'string',
       description: 'enum: comma list "Name=0,Other=1" (codes optional)',
@@ -73,6 +79,7 @@ export const addObjectCommand = defineCommand({
       label: args.label as string | undefined,
       titleField: args.titleField as string | undefined,
       fields: args.fields as string | undefined,
+      indexes: args.indexes as string | undefined,
       values: args.values as string | undefined,
       table: args.table as string | undefined,
       items: args.items as string | undefined,
@@ -132,6 +139,7 @@ interface Flags {
   label?: string;
   titleField?: string;
   fields?: string;
+  indexes?: string;
   values?: string;
   table?: string;
   items?: string;
@@ -149,14 +157,28 @@ function parseFields(spec: string) {
     });
 }
 
+/** "idx_code:code+other:unique,idx_qty:qty" → IndexDef[] */
+function parseIndexes(spec: string): IndexDef[] {
+  return spec
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      const [name, fieldsSpec = '', flag] = s.split(':').map((x) => x.trim());
+      return { name, fields: fieldsSpec.split('+').map((f) => f.trim()).filter(Boolean), unique: flag === 'unique' || undefined };
+    });
+}
+
 async function addTable(root: string, appDir: string, flags: Flags) {
   if (flags.name) {
     const fields = parseFields(flags.fields ?? '');
+    const indexes = parseIndexes(flags.indexes ?? '');
     const filepath = scaffoldTable(appDir, {
       name: flags.name,
       label: flags.label ?? flags.name,
       titleField: flags.titleField,
       fields,
+      indexes: indexes.length > 0 ? indexes : undefined,
     });
     p.outro(pc.green(`Created ${filepath}`));
     return;
@@ -192,7 +214,28 @@ async function addTable(root: string, appDir: string, flags: Flags) {
     p.log.success(`  Added: ${fName} (${fType})`);
   }
 
-  const filepath = scaffoldTable(appDir, { name, label, titleField, fields });
+  const indexes: IndexDef[] = [];
+  p.log.step('Add indexes (leave name empty to finish)');
+
+  while (true) {
+    const idxName = await p.text({ message: 'Index name' });
+    if (p.isCancel(idxName) || !idxName) break;
+
+    const idxFields = await p.multiselect({
+      message: 'Fields for this index',
+      options: fields.map((f) => ({ value: f.name, label: f.name })),
+      required: true,
+    }) as string[];
+    if (p.isCancel(idxFields)) process.exit(0);
+
+    const unique = await p.confirm({ message: 'Unique?', initialValue: false });
+    if (p.isCancel(unique)) process.exit(0);
+
+    indexes.push({ name: idxName as string, fields: idxFields, unique: unique === true });
+    p.log.success(`  Added index: ${idxName} (${idxFields.join(', ')})`);
+  }
+
+  const filepath = scaffoldTable(appDir, { name, label, titleField, fields, indexes: indexes.length > 0 ? indexes : undefined });
   p.outro(pc.green(`Created ${filepath}`));
 }
 

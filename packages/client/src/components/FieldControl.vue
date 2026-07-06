@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { NInput, NInputNumber, NSwitch, NSelect, NDatePicker, type SelectOption } from 'naive-ui';
-import { api } from '../api';
+import { api, type Row } from '../api';
 import { useMeta, type FieldMeta } from '../stores/meta';
 
 const props = defineProps<{
@@ -9,7 +9,7 @@ const props = defineProps<{
   modelValue: unknown;
   disabled?: boolean;
 }>();
-const emit = defineEmits<{ 'update:modelValue': [value: unknown] }>();
+const emit = defineEmits<{ 'update:modelValue': [value: unknown]; 'update:related': [patch: Record<string, unknown>] }>();
 
 const meta = useMeta();
 const refOptions = ref<SelectOption[]>([]);
@@ -36,6 +36,17 @@ onMounted(async () => {
 
 function update(value: unknown) {
   emit('update:modelValue', value);
+}
+
+async function onReferenceChange(value: unknown) {
+  update(value);
+  const copyFields = props.field.reference?.copyFields;
+  if (copyFields && copyFields.length > 0 && value != null) {
+    const rec = await api.get<Row>(`/api/data/${props.field.reference!.table}/${value}`);
+    const patch: Record<string, unknown> = {};
+    for (const cf of copyFields) patch[cf.to] = rec[cf.from];
+    emit('update:related', patch);
+  }
 }
 </script>
 
@@ -74,7 +85,7 @@ function update(value: unknown) {
     :options="refOptions"
     filterable
     :disabled="isDisabled"
-    @update:value="update"
+    @update:value="onReferenceChange"
   />
   <n-date-picker
     v-else-if="field.type === 'date'"
