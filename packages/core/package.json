@@ -1,0 +1,23 @@
+{
+  "name": "@emu/core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}

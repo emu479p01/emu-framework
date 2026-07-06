@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+.DS_Store
+coverage/
+.claude/*.lock

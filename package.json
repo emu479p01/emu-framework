@@ -1,0 +1,21 @@
+{
+  "name": "emuframework",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "pnpm --filter @emu/core build",
+    "dev": "concurrently -n server,client -c blue,green \"pnpm --filter @emu/server dev\" \"pnpm --filter @emu/client dev\"",
+    "start": "node packages/server/dist/main.js",
+    "test": "pnpm -r test",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "emu": "tsx packages/cli/src/index.ts",
+    "emu-build": "pnpm --filter @emu/cli build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}

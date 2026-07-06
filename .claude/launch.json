@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@emu/server", "dev"],
+      "port": 3399
+    },
+    {
+      "name": "client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@emu/client", "dev"],
+      "port": 5199
+    }
+  ]
+}

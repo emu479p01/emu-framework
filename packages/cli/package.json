@@ -1,0 +1,24 @@
+{
+  "name": "@emu/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "emu": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "citty": "^0.1.6",
+    "picocolors": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

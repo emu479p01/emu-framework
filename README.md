@@ -1,0 +1,218 @@
+# EmuFramework
+
+**General-purpose metadata-driven application platform** — build business apps (ERP, CRM, any domain)
+by declaring tables, forms, menus as JSON metadata and writing TypeScript business logic. No per-app UI
+code needed — the client auto-generates list/detail pages, field controls, and line grids from metadata.
+
+> **Mini ERP** (included under `apps/erp`) is a **sample app** demonstrating the framework's
+> capabilities — not the framework itself. The platform can host any number of independent apps,
+> extensions, and web-designed customizations simultaneously.
+
+## Stack
+
+- **Core / server**: Node.js + TypeScript, Fastify, better-sqlite3
+- **Client**: Vue 3 + Pinia + Naive UI — fully generated from metadata
+- **DB**: SQLite with additive schema sync (create table / add column, never destructive)
+- **Dev CLI**: `pnpm emu` — interactive scaffolding for apps, modules, objects, and extensions
+
+## Project Structure
+
+```
+packages/core     kernel: metadata registry, schema sync, data API, events, security
+packages/server   Fastify REST + session auth + generic /api/data + /api/action + Web Designer
+packages/client   Vue engine: shell, auto list/form pages, field controls, designer UI
+packages/cli      Dev tool: pnpm emu — scaffold apps, modules, objects, extensions
+apps/erp          Mini ERP app (sample): Sales, Inventory, Customers modules
+apps/erp.credit   Extension app demo: adds credit limit to ERP via events+extensions
+```
+
+The server (`@emu/server`) and client (`@emu/client`) are two separate packages during
+development (client runs its own Vite dev server), but in production the server serves the
+built client itself as static files — one process, one port, no separate frontend hosting.
+The two SQLite database files (`data.db`, `designer.db`) are created automatically the first
+time the server boots — they are never committed to the repo.
+
+## Prerequisites
+
+- **Node.js 20+**
+- **pnpm** (`npm i -g pnpm` if you don't have it)
+
+## Installation (Development)
+
+```sh
+git clone https://github.com/emu479p01/emu-framework.git
+cd emu-framework
+pnpm install   # installs all workspace deps; also builds packages/core automatically
+pnpm dev       # starts API (3399) + client (5199) together, cross-platform
+```
+
+Windows users can also double-click `start.cmd` — installs deps, starts server + client, opens
+browser automatically.
+
+Prefer to run them separately (two terminals)?
+
+```sh
+pnpm --filter @emu/server dev   # API on http://127.0.0.1:3399
+pnpm --filter @emu/client dev   # UI  on http://127.0.0.1:5199
+```
+
+Nothing needs to be created by hand — the first time the server boots it creates `data.db` and
+`designer.db`, seeds the framework's metadata, and creates a default admin account.
+
+## Usage
+
+Default logins (Mini ERP sample app): `admin/admin` (full access), `manager/manager`
+(SalesManager), `clerk/clerk` (SalesClerk).
+
+```sh
+pnpm -r test        # all test suites
+pnpm -r typecheck
+```
+
+Scaffold new apps, modules, tables, forms, menus, and extensions interactively:
+
+```sh
+pnpm emu --help
+```
+
+See [docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md) for the full developer guide.
+
+## Key Concepts
+
+**Platform, not product** — EmuFramework is an app *platform*. You create apps on top of it. Each app
+gets its own sidebar group, menu tree, and security policies. Extensions (dot-named like `erp.credit`)
+add features to existing apps without modifying base code.
+
+**Metadata-driven UI** — apps declare `tables/enums/forms/menus/privileges/duties/roles` as JSON
+under `metadata/`. The registry validates cross-references at boot; the client auto-generates all UI.
+Menus support arbitrary nesting (modules, submenus, items).
+
+**Data API (transactional, table-buffer style)** — all reads/writes go through `DataContext`, so hooks, events and
+security always apply:
+
+```ts
+const cust = ctx.newRecord('CustTable');
+cust.f.accountNum = 'C001';
+cust.insert();
+
+const so = ctx.select('SalesTable').whereEq({ salesId: 'SO-1' }).firstOnly();
+ctx.tts(() => { /* transaction begin/commit with rollback */ });
+```
+
+**Events & hooks** — `kernel.events.on('SalesTable', 'onUpdating', e => e.cancel('...'))`,
+`kernel.hooks.register('SalesTable', { validateDelete })`. Pre-events can cancel the operation.
+Extension apps subscribe to base app events without modifying base code.
+
+**Extensions** — an app never modifies another app's artifacts; it ships
+`tableExtensions/formExtensions/menuExtensions` JSON plus event subscriptions. The registry
+merges them into the effective metadata at load time. `dependsOn` supports multiple references.
+
+**Security** — privileges grant table CRUD + form entry points, duties group privileges, roles
+group duties. Enforced inside the data kernel (403 over REST). User↔role assignments managed
+via the built-in Users page (Admin role).
+
+**Web Designer** — admins can create tables, forms, menus, and even entire new apps from the
+browser. Artifacts are stored in the database (`SystemWebArtifact`) and applied live. When
+creating tables, select the target app and menu destination — the new item appears under
+that app's sidebar group automatically via menuExtension.
+
+**CLI Developer tool** — `pnpm emu` scaffolds apps, hierarchical modules, metadata objects
+(tables, forms, menus, security), and extensions interactively. See `pnpm emu --help`.
+
+## Branding
+
+Set `EMU_APP_TITLE=MyAppName` environment variable to customize the login page and sidebar title.
+Default: "EmuFramework".
+
+## Deployment
+
+EmuFramework deploys as a **single Node.js process**. That one process serves both the API
+and the web UI (the built client is served as static files by the same server), so there's
+no separate frontend hosting and no CORS setup to configure.
+
+### Build & run
+
+```sh
+pnpm install   # installs deps; also builds packages/core automatically
+pnpm build     # compiles core, server, and client for production
+```
+
+Set the environment variables you need (see table below), then start it:
+
+```sh
+PORT=3399 \
+HOST=0.0.0.0 \
+NODE_ENV=production \
+EMU_DB_PATH=/var/lib/emuframework/data.db \
+EMU_DESIGNER_DB_PATH=/var/lib/emuframework/designer.db \
+pnpm start
+```
+
+`pnpm start` runs `node packages/server/dist/main.js`. On first boot it creates both SQLite
+files automatically (if they don't already exist) and seeds an `admin`/`admin` login — **change
+that password immediately after your first login.**
+
+### Keeping it running
+
+A plain `node` process stops if the server reboots or the process crashes. Use a process
+manager so it restarts automatically:
+
+```sh
+npm i -g pm2
+pm2 start packages/server/dist/main.js --name emuframework
+pm2 save
+```
+
+(A `systemd` service works just as well if you prefer that instead of `pm2`.)
+
+### Environment variables
+
+| Variable | Default | What it does |
+|---|---|---|
+| `PORT` | `3399` | Port the server listens on. Many hosting platforms set this for you automatically. |
+| `HOST` | `0.0.0.0` | Which network interface to bind. `0.0.0.0` accepts connections from anywhere (needed for real hosting); `127.0.0.1` only works for local access. |
+| `EMU_APP_TITLE` | `EmuFramework` | The name shown on the login page and browser tab. |
+| `EMU_DB_PATH` | `./data.db` | Where the main application database file lives. Point this at your persistent folder in production. |
+| `EMU_DESIGNER_DB_PATH` | `./designer.db` | Where the metadata/designer database file lives. Point this at your persistent folder in production. |
+| `NODE_ENV` | unset | Set to `production` in deployment. This marks the login cookie `Secure` (HTTPS-only) — required if your host serves the app over HTTPS (most do). Leave unset for local development over plain HTTP. |
+
+### Supported hosting
+
+The app needs a **long-running Node.js process** (not request-per-invocation) and a
+**persistent disk** that survives redeploys (for the two SQLite files) — SQLite is an embedded,
+file-based database, not a managed DB service.
+
+| Hosting type | Supported? | Notes |
+|---|---|---|
+| VPS (DigitalOcean, Linode, Vultr, Hetzner, AWS EC2, GCP Compute Engine, etc.) | ✅ Yes | Full control; run `pnpm build && pnpm start` directly, ideally behind `pm2`/`systemd`. |
+| Railway | ✅ Yes | Attach a persistent volume for the two `.db` files. |
+| Render | ✅ Yes (paid tier) | Requires a persistent disk add-on — the free tier has no persistent storage. |
+| Fly.io | ✅ Yes | Attach a Fly volume for the two `.db` files. |
+| Any Docker-capable host | 🔜 Not yet, but ready | Host/port/DB paths are already env-var driven and `pnpm build`/`pnpm start` are the only two commands needed — a future `Dockerfile` would just wrap them, no code changes required. |
+| Static hosting (GitHub Pages, Netlify/Vercel static sites) | ❌ No | There's no process to run the server at all — these only serve static files. |
+| Serverless functions (Vercel Functions, Netlify Functions, plain AWS Lambda) | ❌ No | Filesystem is ephemeral/read-only between invocations, so SQLite writes don't persist. Would require migrating to a managed database first — out of scope for now. |
+
+### Where your data lives / backing it up
+
+Both `EMU_DB_PATH` and `EMU_DESIGNER_DB_PATH` point at plain SQLite files — together they are
+**100% of your application's data**. Back them up regularly, and always before upgrading:
+
+```sh
+cp /var/lib/emuframework/data.db /var/lib/emuframework/designer.db /path/to/backup/
+```
+
+If those files are ever deleted, the app will simply create fresh empty ones and reseed the
+default `admin`/`admin` account on next boot — all your data will be gone.
+
+### First login
+
+Default credentials are `admin` / `admin`. Log in and change the password right away; this
+account is only meant to get you started, not to be used long-term.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
