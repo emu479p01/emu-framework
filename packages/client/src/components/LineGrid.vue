@@ -23,6 +23,7 @@ const lookups = ref<Record<string, Record<number, string>>>({});
 const table = computed(() => meta.table(props.line.table));
 const fields = computed(() =>
   props.line.fields
+    .filter((n) => n !== props.line.refField)
     .map((n) => table.value?.fields.find((f) => f.name === n))
     .filter((f): f is NonNullable<typeof f> => f !== undefined),
 );

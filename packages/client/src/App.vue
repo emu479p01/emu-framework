@@ -24,8 +24,12 @@ const meta = useMeta();
 const route = useRoute();
 const router = useRouter();
 
-function itemToOption(item: MenuItemType, parentKey: string, appName: string): MenuOption {
-  const key = `${parentKey}:${item.route ?? item.form ?? item.label ?? 'sub'}`;
+type NavMenuOption = MenuOption & { formName?: string; routeTo?: string };
+
+function itemToOption(item: MenuItemType, parentKey: string, appName: string): NavMenuOption {
+  // use `||` (not `??`) so an empty-string form/route (saved by the Designer for group-only
+  // items with no form selected) falls through to the label instead of colliding on ""
+  const key = `${parentKey}:${item.route || item.form || item.label || 'sub'}`;
   if (item.items && item.items.length > 0) {
     return {
       label: item.label ?? '',
@@ -36,16 +40,33 @@ function itemToOption(item: MenuItemType, parentKey: string, appName: string): M
   if (item.route) {
     const to = item.route;
     return {
-      key: to,
+      key,
+      routeTo: to,
       label: () =>
         h(RouterLink, { to }, { default: () => item.label ?? to }),
     };
   }
   return {
-    key: item.form ?? key,
+    key,
+    formName: item.form,
     label: () =>
       h(RouterLink, { to: `/app/${appName}/form/${item.form}` }, { default: () => item.label ?? item.form ?? '' }),
   };
+}
+
+/** Walk the option tree to find the key of the node matching the active route (by form or route target). */
+function findActiveKey(options: NavMenuOption[], formName: string, routeTo: string): string | undefined {
+  for (const opt of options) {
+    if ((formName && opt.formName === formName) || (routeTo && opt.routeTo === routeTo)) {
+      return opt.key as string;
+    }
+    const children = opt.children as NavMenuOption[] | undefined;
+    if (children) {
+      const found = findActiveKey(children, formName, routeTo);
+      if (found) return found;
+    }
+  }
+  return undefined;
 }
 
 const menuOptions = computed<MenuOption[]>(() => {
@@ -79,7 +100,11 @@ const menuOptions = computed<MenuOption[]>(() => {
   return groups;
 });
 
-const activeKey = computed(() => (route.params.formName as string) ?? (route.params.appName as string) ?? '');
+const activeKey = computed(() => {
+  const formName = (route.params.formName as string) ?? '';
+  const routeTo = route.path;
+  return findActiveKey(menuOptions.value, formName, routeTo) ?? '';
+});
 const collapsed = computed(() => meta.apps.reduce((acc, app) => {
   acc[app.name] = false;
   return acc;

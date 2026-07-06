@@ -199,6 +199,17 @@ function numericFieldOptionsFor(tableName: string) {
     .filter((f) => f.type === 'int' || f.type === 'real')
     .map((f) => ({ label: f.name, value: f.name }));
 }
+function referenceFieldOptionsFor(tableName: string) {
+  return (meta.table(tableName)?.fields ?? [])
+    .filter((f) => f.type === 'reference')
+    .map((f) => ({ label: f.name, value: f.name }));
+}
+function displayFieldOptionsFor(line: EditableLine) {
+  return fieldOptionsFor(line.table).filter((o) => o.value !== line.refField);
+}
+function onLineRefFieldChange(line: EditableLine) {
+  line.fields = line.fields.filter((f) => f !== line.refField);
+}
 const formOptions = computed(() =>
   (meta.meta?.forms ?? []).map((f) => ({ label: f.name, value: f.name })),
 );
@@ -588,10 +599,17 @@ function removeTablePermission(i: number) { (artifact.value.tablePermissions as 
                         <n-select v-model:value="line.table" :options="tableOptions" size="small" style="min-width: 200px" filterable />
                       </n-form-item>
                       <n-form-item label="Ref field (on line table)">
-                        <n-select v-model:value="line.refField" :options="fieldOptionsFor(line.table)" size="small" style="min-width: 200px" filterable />
+                        <n-select
+                          v-model:value="line.refField"
+                          :options="referenceFieldOptionsFor(line.table)"
+                          size="small"
+                          style="min-width: 200px"
+                          filterable
+                          @update:value="onLineRefFieldChange(line)"
+                        />
                       </n-form-item>
                       <n-form-item label="Display fields">
-                        <n-select v-model:value="line.fields" :options="fieldOptionsFor(line.table)" multiple size="small" style="min-width: 260px" />
+                        <n-select v-model:value="line.fields" :options="displayFieldOptionsFor(line)" multiple size="small" style="min-width: 260px" />
                       </n-form-item>
                       <n-button size="tiny" quaternary type="error" @click="removeLine(li)">✕ Remove line</n-button>
                     </n-space>

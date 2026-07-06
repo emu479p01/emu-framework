@@ -80,6 +80,28 @@ describe('MetadataRegistry', () => {
     expect(registry.getForm('A_HeaderForm').lines?.[0].aggregates).toHaveLength(2);
   });
 
+  it('rejects a line grid that displays its own refField as an editable column', () => {
+    const registry = new MetadataRegistry();
+    const header: TableMeta = { kind: 'table', name: 'A_Header', fields: [{ name: 'name', type: 'string' }] };
+    const line: TableMeta = {
+      kind: 'table',
+      name: 'A_Line',
+      fields: [
+        { name: 'headerId', type: 'reference', reference: { table: 'A_Header' } },
+        { name: 'qty', type: 'real' },
+      ],
+    };
+    const form: FormMeta = {
+      kind: 'form',
+      name: 'A_HeaderForm',
+      table: 'A_Header',
+      lines: [{ table: 'A_Line', refField: 'headerId', fields: ['headerId', 'qty'] }],
+    };
+    expect(() => registry.registerApp({ name: 'a' }, [header, line, form])).toThrow(
+      /cannot display its own refField/,
+    );
+  });
+
   it('rejects a sum/avg aggregate missing a field', () => {
     const registry = new MetadataRegistry();
     const header: TableMeta = { kind: 'table', name: 'A_Header', fields: [{ name: 'name', type: 'string' }] };

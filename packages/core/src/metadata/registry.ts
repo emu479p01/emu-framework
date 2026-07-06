@@ -380,6 +380,11 @@ export class MetadataRegistry {
             `Form '${form.name}': line table '${line.table}' has no refField '${line.refField}'`,
           );
         }
+        if (line.fields.includes(line.refField)) {
+          throw new MetadataError(
+            `Form '${form.name}': line '${line.table}' cannot display its own refField '${line.refField}' as an editable column`,
+          );
+        }
         for (const agg of line.aggregates ?? []) {
           if (agg.fn !== 'count') {
             if (!agg.field) {
