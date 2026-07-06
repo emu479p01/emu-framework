@@ -6,7 +6,7 @@ const FW_MODEL = 'Framework';
  * Framework metadata seeder — runs on EVERY boot and upserts the SYS-layer
  * framework artifacts (idempotent), so upgrades add new framework tables/forms
  * (e.g. FW_AppAccess) to existing installations. Business apps are created via
- * CLI (`pnpm nf add app`) or the Web Designer and are never touched here.
+ * CLI (`pnpm emu add app`) or the Web Designer and are never touched here.
  */
 export function seedDesignerDb(kernel: Kernel): void {
   const ctx = kernel.designerContext();
@@ -19,14 +19,10 @@ export function seedDesignerDb(kernel: Kernel): void {
   const fw = { app: 'system', model: FW_MODEL, layer: SYS };
 
   const artifacts: (AnyMeta & { app?: string })[] = [
-    { kind: 'enum', name: 'FW_Role', label: 'Roles', ...fw, values: [
-      { name: 'FW_FrameworkUser', value: 0, label: 'Framework administrator' },
-      { name: 'FW_SystemAdminRole', value: 2, label: 'System administrator' },
-    ] } as any,
     { kind: 'table', name: 'FW_UserRole', label: 'User roles', ...fw, fields: [
       { name: 'userId', type: 'reference', reference: { table: 'FW_User' } },
       { name: 'username', type: 'string' },
-      { name: 'role', type: 'enum', enumName: 'FW_Role', mandatory: true },
+      { name: 'role', type: 'string', mandatory: true, maxLength: 60 },
     ], indexes: [{ name: 'UserRoleIdx', fields: ['userId', 'role'], unique: true }] } as any,
     { kind: 'table', name: 'FW_AppAccess', label: 'App access', ...fw, fields: [
       { name: 'userId', type: 'reference', label: 'User', mandatory: true, reference: { table: 'FW_User' } },

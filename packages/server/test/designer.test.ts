@@ -23,10 +23,6 @@ describe('web designer API', () => {
     admin = { cookie: (res.headers['set-cookie'] as string).split(';')[0] };
   });
 
-  function roleCode(kernel: Kernel, name: string): number {
-    return kernel.registry.getEnum('FW_Role').values.find((v) => v.name === name)!.value;
-  }
-
   it('rejects non-admin users', async () => {
     const kernel = (app as unknown as { kernel: Kernel }).kernel;
     const ctx = kernel.context();
@@ -34,7 +30,7 @@ describe('web designer API', () => {
       .newRecord('FW_User')
       .setMany({ username: 'clerk2', passwordHash: hashPassword('pw'), enabled: true });
     u.insert();
-    ctx.newRecord('FW_UserRole').setMany({ userId: u.id, role: roleCode(kernel, 'ERP_SalesClerk') }).insert();
+    ctx.newRecord('FW_UserRole').setMany({ userId: u.id, role: 'ERP_SalesClerk' }).insert();
     const login = await app.inject({
       method: 'POST',
       url: '/api/login',

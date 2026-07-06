@@ -20,9 +20,6 @@ describe('FW_AppAccess enforcement', () => {
     return { cookie: (res.headers['set-cookie'] as string).split(';')[0] };
   };
 
-  const roleCode = (name: string): number =>
-    kernel.registry.getEnum('FW_Role').values.find((v) => v.name === name)!.value;
-
   beforeAll(async () => {
     app = buildServer();
     await app.ready();
@@ -36,7 +33,7 @@ describe('FW_AppAccess enforcement', () => {
     user.insert();
     bobId = user.id!;
     // bob has an ERP role — but role alone must NOT make the app visible
-    ctx.newRecord('FW_UserRole').setMany({ userId: bobId, role: roleCode('ERP_SalesClerk') }).insert();
+    ctx.newRecord('FW_UserRole').setMany({ userId: bobId, role: 'ERP_SalesClerk' }).insert();
     bob = await loginAs('bob', 'pw');
   });
 

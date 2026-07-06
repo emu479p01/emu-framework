@@ -147,8 +147,7 @@ describe('server', () => {
       .newRecord('FW_User')
       .setMany({ username: 'clerk', passwordHash: hashPassword('pw'), enabled: true });
     clerkUser.insert();
-    const code = kernel.registry.getEnum('FW_Role').values.find((v) => v.name === 'ERP_SalesClerk')!.value;
-    ctx.newRecord('FW_UserRole').setMany({ userId: clerkUser.id, role: code }).insert();
+    ctx.newRecord('FW_UserRole').setMany({ userId: clerkUser.id, role: 'ERP_SalesClerk' }).insert();
     // app visibility is explicit since FW_AppAccess: grant clerk access to the erp app
     ctx.newRecord('FW_AppAccess').setMany({ userId: clerkUser.id, appName: 'erp', canOpen: true }).insert();
 

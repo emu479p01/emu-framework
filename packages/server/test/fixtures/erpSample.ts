@@ -1,27 +1,10 @@
 import type { AnyMeta, Kernel } from '@emu/core';
 
-const FW_MODEL = 'Framework';
 const ERP_MODEL = 'MiniERPApplication';
 const SYS = 'SYS' as const;
 const P = 'ERP' as const;
 
-const fw = { app: 'system', model: FW_MODEL, layer: SYS };
 const erp = { app: 'erp', model: ERP_MODEL, layer: SYS };
-
-/** Extended FW_Role enum used by ERP security tests. */
-export const fwRoleWithErp: AnyMeta = {
-  kind: 'enum',
-  name: 'FW_Role',
-  label: 'Roles',
-  ...fw,
-  values: [
-    { name: 'FW_FrameworkUser', value: 0, label: 'Framework administrator' },
-    { name: 'ERP_Admin', value: 1, label: 'ERP administrator' },
-    { name: 'FW_SystemAdminRole', value: 2, label: 'System administrator' },
-    { name: 'ERP_SalesManager', value: 3, label: 'Sales manager' },
-    { name: 'ERP_SalesClerk', value: 4, label: 'Sales clerk' },
-  ],
-} as any;
 
 /** Mini ERP sample metadata — for tests only, not seeded in production. */
 export const erpSampleArtifacts: (AnyMeta & { app?: string })[] = [
@@ -34,7 +17,6 @@ export const erpSampleArtifacts: (AnyMeta & { app?: string })[] = [
       { name: 'ClientCustom', label: 'Client Custom', layer: 'CUS' },
     ],
   } as any,
-  fwRoleWithErp,
   { kind: 'enum', name: 'ERP_DirPartyType', label: 'Party type', ...erp, values: [
     { name: 'Organization', value: 0, label: 'Organization' },
     { name: 'Person', value: 1, label: 'Person' },
@@ -141,7 +123,7 @@ function loadStoredArtifacts(kernel: Kernel): AnyMeta[] {
 /** Merge framework artifacts with the ERP sample and apply to the kernel (test helper). */
 export function applyErpSample(kernel: Kernel): void {
   const erpNames = new Set(erpSampleArtifacts.map((a) => a.name));
-  const framework = loadStoredArtifacts(kernel).filter((a) => !erpNames.has(a.name) && a.name !== 'FW_Role');
+  const framework = loadStoredArtifacts(kernel).filter((a) => !erpNames.has(a.name));
   const merged = [...framework, ...erpSampleArtifacts];
   const errors = kernel.applyWebArtifacts(merged);
   if (errors.length > 0) {
@@ -163,15 +145,13 @@ export function applyErpSample(kernel: Kernel): void {
   const ctx = kernel.context();
   const admin = ctx.select('FW_User').whereEq({ username: 'admin' }).firstOnly();
   if (!admin?.f.id) return;
-  const roleEnum = kernel.registry.getEnum('FW_Role');
-  const erpAdmin = roleEnum.values.find((v) => v.name === 'ERP_Admin');
-  if (!erpAdmin) return;
+  if (!kernel.registry.getRole('ERP_Admin')) return;
   const exists = ctx
     .select('FW_UserRole')
     .whereEq({ userId: admin.f.id as number })
-    .where('role', '=', erpAdmin.value)
+    .where('role', '=', 'ERP_Admin')
     .firstOnly();
   if (!exists) {
-    ctx.newRecord('FW_UserRole').setMany({ userId: admin.f.id as number, username: 'admin', role: erpAdmin.value }).insert();
+    ctx.newRecord('FW_UserRole').setMany({ userId: admin.f.id as number, username: 'admin', role: 'ERP_Admin' }).insert();
   }
 }
