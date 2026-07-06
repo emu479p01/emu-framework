@@ -2,13 +2,42 @@
 
 **Version: v0.0.0.5**
 
-**General-purpose metadata-driven application platform** — build business apps (ERP, CRM, any domain)
-by declaring tables, forms, menus as JSON metadata and writing TypeScript business logic. No per-app UI
-code needed — the client auto-generates list/detail pages, field controls, and line grids from metadata.
+**Build business apps by describing them, not coding them.** EmuFramework is a low-code,
+metadata-driven platform for ERP, CRM, or any other line-of-business app. Declare your
+tables, forms, and menus as JSON metadata, write your business logic in TypeScript — and the
+client auto-generates every list page, detail page, and field control from that metadata. No
+hand-built CRUD screens, ever.
 
 This repository ships the framework itself (`packages/core|server|client|cli`). Business apps
-are not included — you scaffold them under `apps/` with `pnpm emu add app`. The platform can
-host any number of independent apps, extensions, and web-designed customizations simultaneously.
+aren't included — you scaffold them under `apps/` with one CLI command, and the platform can
+host any number of independent apps, extensions, and web-designed customizations side by side.
+
+## Why EmuFramework
+
+- **Ship apps in days, not months** — describe a table and a form in JSON and the full
+  list/detail UI, field controls, and line grids already work. No frontend code to write.
+- **One platform, many apps** — host multiple independent business apps at once, each with
+  its own sidebar, menu tree, and security policy, without them stepping on each other.
+- **Extend without forking** — dot-named extensions (e.g. `crm.reporting`) add tables, forms,
+  menus, and event handlers to an existing app without ever touching its base code.
+- **Self-hosted, single process** — one Node.js process, an embedded SQLite database, no
+  message queue, no separate frontend hosting, no vendor lock-in. Deploy it anywhere Node runs.
+- **No-code Web Designer** — admins can create tables, forms, menus, and even entire new apps
+  from the browser, live, with no deploy step.
+
+## What it looks like
+
+All reads and writes go through `DataContext`, so hooks, events, and security always apply —
+whether the call comes from generated UI or your own code:
+
+```ts
+const cust = ctx.newRecord('CustTable');
+cust.f.accountNum = 'C001';
+cust.insert();
+
+const so = ctx.select('SalesTable').whereEq({ salesId: 'SO-1' }).firstOnly();
+ctx.tts(() => { /* transaction begin/commit with rollback */ });
+```
 
 ## Stack
 
@@ -38,7 +67,9 @@ time the server boots — they are never committed to the repo.
 - **Node.js 20+**
 - **pnpm** (`npm i -g pnpm` if you don't have it)
 
-## Installation (Development)
+## Quick Start
+
+Up and running in a few commands — nothing to configure by hand:
 
 ```sh
 git clone https://github.com/emu479p01/emu-framework.git
@@ -89,16 +120,7 @@ under `metadata/`. The registry validates cross-references at boot; the client a
 Menus support arbitrary nesting (modules, submenus, items).
 
 **Data API (transactional, table-buffer style)** — all reads/writes go through `DataContext`, so hooks, events and
-security always apply:
-
-```ts
-const cust = ctx.newRecord('CustTable');
-cust.f.accountNum = 'C001';
-cust.insert();
-
-const so = ctx.select('SalesTable').whereEq({ salesId: 'SO-1' }).firstOnly();
-ctx.tts(() => { /* transaction begin/commit with rollback */ });
-```
+security always apply. See the code sample above for `newRecord`, `select`, and `tts`.
 
 **Events & hooks** — `kernel.events.on('SalesTable', 'onUpdating', e => e.cancel('...'))`,
 `kernel.hooks.register('SalesTable', { validateDelete })`. Pre-events can cancel the operation.
