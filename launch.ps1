@@ -20,15 +20,86 @@ $appUrl = "http://localhost:$clientPort"
 $serverTitle = "Emu-Server"
 $clientTitle = "Emu-Client"
 
-function Test-Port($port) {
+# Pinned, known-good toolchain — downloaded portably into .tools\ so a completely
+# bare Windows machine (no Node/pnpm preinstalled, no admin rights) can still run this.
+$nodeVersion = "24.18.0"
+$pnpmVersion = "11.10.0"
+$toolsDir = Join-Path $root ".tools"
+$localNodeDir = Join-Path $toolsDir "node-v$nodeVersion-win-x64"
+$nodeExe = Join-Path $localNodeDir "node.exe"
+$corepackCmd = Join-Path $localNodeDir "corepack.cmd"
+$pnpmCmd = Join-Path $localNodeDir "pnpm.cmd"
+
+function Ensure-Node {
+  if (Test-Path $nodeExe) { return }
+
+  Write-Host "Downloading Node.js v$nodeVersion (portable, one-time, ~30MB)..." -ForegroundColor Yellow
+  New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+  $zipUrl = "https://nodejs.org/dist/v$nodeVersion/node-v$nodeVersion-win-x64.zip"
+  $zipPath = Join-Path $toolsDir "node-download.zip"
+
   try {
-    $c = New-Object Net.Sockets.TcpClient
-    $c.Connect('localhost', $port)
-    $c.Close()
-    return $true
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+    Expand-Archive -Path $zipPath -DestinationPath $toolsDir -Force
+    Remove-Item $zipPath -Force
   } catch {
-    return $false
+    Write-Host "[ERROR] Failed to download Node.js: $_" -ForegroundColor Red
+    Write-Host "Check your internet connection, or install Node.js $nodeVersion manually from https://nodejs.org/" -ForegroundColor Yellow
+    Read-Host "Press Enter to exit"
+    exit 1
   }
+
+  if (-not (Test-Path $nodeExe)) {
+    Write-Host "[ERROR] Node.js download succeeded but node.exe was not found at the expected path." -ForegroundColor Red
+    Read-Host "Press Enter to exit"
+    exit 1
+  }
+  Write-Host "  Node.js ready." -ForegroundColor Green
+}
+
+function Ensure-Pnpm {
+  if (Test-Path $pnpmCmd) {
+    $currentVersion = (& $pnpmCmd --version) 2>$null
+    if ($currentVersion -eq $pnpmVersion) { return }
+  }
+
+  Write-Host "Setting up pnpm v$pnpmVersion (via corepack)..." -ForegroundColor Yellow
+  & $corepackCmd enable 2>&1 | Out-Null
+  & $corepackCmd prepare "pnpm@$pnpmVersion" --activate 2>&1 | Out-Null
+
+  if (-not (Test-Path $pnpmCmd)) {
+    Write-Host "[ERROR] Failed to set up pnpm via corepack." -ForegroundColor Red
+    Read-Host "Press Enter to exit"
+    exit 1
+  }
+  Write-Host "  pnpm ready." -ForegroundColor Green
+}
+
+function Ensure-Prerequisites {
+  Ensure-Node
+  # Put our pinned Node.js first on PATH for this session (and any child processes
+  # this script spawns) so `node`, `npm`, `corepack` and `pnpm` all resolve to it —
+  # without touching the machine's global PATH, registry, or requiring admin rights.
+  $env:PATH = "$localNodeDir;$env:PATH"
+  Ensure-Pnpm
+}
+
+function Test-Port($port) {
+  # Try both loopback families explicitly — dev servers (Vite in particular) can bind
+  # to only ::1 or only 127.0.0.1 depending on the machine's DNS/IPv6 setup, and
+  # relying on 'localhost' resolution alone caused false negatives here.
+  foreach ($addr in @('127.0.0.1', '::1')) {
+    try {
+      $c = New-Object Net.Sockets.TcpClient
+      $c.Connect($addr, $port)
+      $c.Close()
+      return $true
+    } catch {
+      continue
+    }
+  }
+  return $false
 }
 
 function Stop-All {
@@ -54,17 +125,13 @@ function Stop-All {
 function Start-App {
   Write-Host ""
   Write-Host "======================================" -ForegroundColor Cyan
-  Write-Host "  EmuFramework v0.0.0.5 Launcher" -ForegroundColor Cyan
+  Write-Host "  EmuFramework v0.0.0.6 Launcher" -ForegroundColor Cyan
   Write-Host "======================================" -ForegroundColor Cyan
   Write-Host ""
 
-  # Check pnpm
-  if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
-    Write-Host "[ERROR] pnpm not found in PATH." -ForegroundColor Red
-    Write-Host "Install Node.js then run: npm install -g pnpm" -ForegroundColor Yellow
-    Read-Host "Press Enter to exit"
-    return
-  }
+  # Make sure Node.js + pnpm are available — downloads them portably into .tools\
+  # on first run if this is a completely bare machine. No admin rights needed.
+  Ensure-Prerequisites
 
   # Already running?
   if (Test-Port $clientPort) {

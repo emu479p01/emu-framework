@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${PORT:-3399}:3399"
+    environment:
+      NODE_ENV: production
+      EMU_APP_TITLE: ${EMU_APP_TITLE:-EmuFramework}
+      EMU_DB_PATH: /data/data.db
+      EMU_DESIGNER_DB_PATH: /data/designer.db
+      EMU_SECURE_COOKIES: ${EMU_SECURE_COOKIES:-}
+    volumes:
+      - emu-data:/data
+    restart: unless-stopped
+
+volumes:
+  emu-data:

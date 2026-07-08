@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.tools
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+.env
+.env.*
+coverage
+*.log
+.vscode
+.idea
