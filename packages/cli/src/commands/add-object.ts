@@ -327,7 +327,7 @@ async function addMenu(root: string, appDir: string, flags: Flags) {
     p.outro(pc.green(`Created ${filepath}`));
     return;
   }
-  requireInteractive('Non-interactive: pnpm emu add object <app> menu --name MainMenu --items "Customers=CustTableForm,Items=InventItemForm"');
+  requireInteractive('Non-interactive: pnpm emu add object <app> menu --name MainMenu --items "Members=MemberForm,Books=BookForm"');
 
   const allForms = listAllByKind(root, 'forms');
   const name = await p.text({ message: 'Menu name (PascalCase)', placeholder: 'MainMenu' });

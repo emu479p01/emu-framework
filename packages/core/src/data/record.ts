@@ -7,13 +7,13 @@ export type FieldValue = string | number | boolean | null;
 
 /**
  * A single row of a metadata-defined table, table-buffer style:
- *   const cust = ctx.newRecord('CustTable');
- *   cust.set('accountNum', 'C001');   // or cust.f.accountNum = 'C001'
- *   cust.insert();
+ *   const member = ctx.newRecord('Member');
+ *   member.set('memberNo', 'M-001');   // or member.f.memberNo = 'M-001'
+ *   member.insert();
  * Field access is validated against table metadata at runtime.
  */
 export class Record {
-  /** Proxy for natural field access: rec.f.accountNum */
+  /** Proxy for natural field access: rec.f.memberNo */
   readonly f: { [field: string]: FieldValue };
 
   private values = new Map<string, FieldValue>();

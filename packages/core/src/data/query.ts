@@ -14,8 +14,8 @@ interface Condition {
 
 /**
  * Fluent query builder over one table:
- *   ctx.select('CustTable').where('accountNum', '=', 'C001').firstOnly()
- *   for (const so of ctx.select('SalesTable').where('status', '=', SalesStatus.Open)) { ... }
+ *   ctx.select('Member').where('memberNo', '=', 'M-001').firstOnly()
+ *   for (const loan of ctx.select('BookLoan').where('status', '=', LoanStatus.Open)) { ... }
  */
 export class Query implements Iterable<Record> {
   private conditions: Condition[] = [];

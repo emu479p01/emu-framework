@@ -1,6 +1,8 @@
 # EmuFramework
 
-**Version: v0.0.0.5**
+**Version: v0.0.0.6**
+
+📦 [Download the latest release](https://github.com/emu479p01/emu-framework/releases)
 
 **Build business apps by describing them, not coding them.** EmuFramework is a low-code,
 metadata-driven platform for ERP, CRM, or any other line-of-business app. Declare your
@@ -31,11 +33,11 @@ All reads and writes go through `DataContext`, so hooks, events, and security al
 whether the call comes from generated UI or your own code:
 
 ```ts
-const cust = ctx.newRecord('CustTable');
-cust.f.accountNum = 'C001';
-cust.insert();
+const member = ctx.newRecord('Member');
+member.f.memberNo = 'M-001';
+member.insert();
 
-const so = ctx.select('SalesTable').whereEq({ salesId: 'SO-1' }).firstOnly();
+const loan = ctx.select('BookLoan').whereEq({ loanId: 'L-1' }).firstOnly();
 ctx.tts(() => { /* transaction begin/commit with rollback */ });
 ```
 
@@ -64,22 +66,27 @@ time the server boots — they are never committed to the repo.
 
 ## Prerequisites
 
-- **Node.js 20+**
-- **pnpm** (`npm i -g pnpm` if you don't have it)
+- **Windows:** none — `start.cmd` downloads its own pinned Node.js + pnpm into a local
+  `.tools\` folder on first run (no admin rights, doesn't touch your system PATH). Just clone
+  and double-click.
+- **macOS/Linux/manual setup:** **Node.js 22.13+ / 24+ (LTS lines only)** and
+  **pnpm 11.10.0** (`corepack enable && corepack prepare pnpm@11.10.0 --activate`)
 
 ## Quick Start
 
-Up and running in a few commands — nothing to configure by hand:
+Windows users: clone the repo and double-click `start.cmd` — it downloads Node.js + pnpm if
+needed, installs deps, starts server + client, and opens the browser automatically. Nothing
+else to install first.
+
+For macOS/Linux or a manual setup:
 
 ```sh
 git clone https://github.com/emu479p01/emu-framework.git
 cd emu-framework
+corepack enable && corepack prepare pnpm@11.10.0 --activate
 pnpm install   # installs all workspace deps; also builds packages/core automatically
 pnpm dev       # starts API (3399) + client (5199) together, cross-platform
 ```
-
-Windows users can also double-click `start.cmd` — installs deps, starts server + client, opens
-browser automatically.
 
 Prefer to run them separately (two terminals)?
 
@@ -90,6 +97,12 @@ pnpm --filter @emu/client dev   # UI  on http://127.0.0.1:5199
 
 Nothing needs to be created by hand — the first time the server boots it creates `data.db` and
 `designer.db`, seeds the framework's metadata, and creates a default admin account.
+
+## Run with Docker
+
+Prefer containers? `docker compose up -d --build` builds the image and starts the app on
+`http://localhost:3399`, persisting the two SQLite files in a named volume. See
+[docs/DOCKER.md](docs/DOCKER.md) for details, env var overrides, and backup instructions.
 
 ## Usage
 
@@ -122,8 +135,8 @@ Menus support arbitrary nesting (modules, submenus, items).
 **Data API (transactional, table-buffer style)** — all reads/writes go through `DataContext`, so hooks, events and
 security always apply. See the code sample above for `newRecord`, `select`, and `tts`.
 
-**Events & hooks** — `kernel.events.on('SalesTable', 'onUpdating', e => e.cancel('...'))`,
-`kernel.hooks.register('SalesTable', { validateDelete })`. Pre-events can cancel the operation.
+**Events & hooks** — `kernel.events.on('BookLoan', 'onUpdating', e => e.cancel('...'))`,
+`kernel.hooks.register('BookLoan', { validateDelete })`. Pre-events can cancel the operation.
 Extension apps subscribe to base app events without modifying base code.
 
 **Extensions** — an app never modifies another app's artifacts; it ships
@@ -231,7 +244,7 @@ file-based database, not a managed DB service.
 | Railway | ✅ Yes | Hobby/Pro plan sized to 1–2 vCPU / 2GB+ | Attach a persistent volume for the two `.db` files. |
 | Render | ✅ Yes (paid tier) | Starter/Standard instance + persistent disk add-on | Requires a persistent disk add-on — the free tier has no persistent storage. |
 | Fly.io | ✅ Yes | shared-cpu-1x with 1GB+ RAM to start | Attach a Fly volume for the two `.db` files. |
-| Any Docker-capable host | 🔜 Not yet, but ready | Same as VPS above | Host/port/DB paths are already env-var driven and `pnpm build`/`pnpm start` are the only two commands needed — a future `Dockerfile` would just wrap them, no code changes required. |
+| Any Docker-capable host | ✅ Yes | Same as VPS above | Use the included `Dockerfile`/`docker-compose.yml` — see [docs/DOCKER.md](docs/DOCKER.md). |
 | Static hosting (GitHub Pages, Netlify/Vercel static sites) | ❌ No | — | There's no process to run the server at all — these only serve static files. |
 | Serverless functions (Vercel Functions, Netlify Functions, plain AWS Lambda) | ❌ No | — | Filesystem is ephemeral/read-only between invocations, so SQLite writes don't persist. Would require migrating to a managed database first — out of scope for now. |
 
