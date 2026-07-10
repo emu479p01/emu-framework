@@ -3,6 +3,15 @@ import { DataEventCancelled, ValidationError } from '../src/index.js';
 import { testContext } from './helpers.js';
 
 describe('DataContext CRUD', () => {
+  it('searches safely across selected metadata fields', () => {
+    const { ctx } = testContext();
+    ctx.newRecord('TESTAPP_CustTable').setMany({ accountNum: 'C001', name: 'Northwind', creditMax: 100 }).insert();
+    ctx.newRecord('TESTAPP_CustTable').setMany({ accountNum: 'C002', name: 'Contoso', creditMax: 200 }).insert();
+    const rows = ctx.select('TESTAPP_CustTable').search(['accountNum', 'name'], 'wind').toArray();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].f.name).toBe('Northwind');
+  });
+
   it('inserts with system columns and reads back', () => {
     const { ctx } = testContext();
     const cust = ctx.newRecord('TESTAPP_CustTable');

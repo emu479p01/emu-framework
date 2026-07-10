@@ -20,6 +20,7 @@ export function buildFilteredQuery(
   tableName: string,
   query: { [key: string]: string | undefined },
   coerce: ImportExportDeps['coerce'],
+  searchableFields: string[] = [],
 ) {
   const q = ctx.select(tableName);
   for (const [key, value] of Object.entries(query)) {
@@ -28,6 +29,7 @@ export function buildFilteredQuery(
       q.where(field, '=', coerce(tableName, field, value));
     }
   }
+  if (query.search) q.search(searchableFields, query.search);
   if (query.sort) {
     const [field, dir] = query.sort.split(':');
     q.orderBy(field, dir === 'desc' ? 'desc' : 'asc');
@@ -146,7 +148,7 @@ export function registerImportExportRoutes(app: FastifyInstance, kernel: Kernel,
     async (req, reply) => {
       const table = dataTable(req.params.table, req);
       const ctx = userCtx(req);
-      const q = buildFilteredQuery(ctx, table.name, req.query, coerce);
+      const q = buildFilteredQuery(ctx, table.name, req.query, coerce, table.fields.map((field) => field.name));
       q.limit(EXPORT_ROW_CAP);
       const rows = q.toArray().map((r) => r.toObject());
       const columns = ['id', ...table.fields.map((f) => f.name)];

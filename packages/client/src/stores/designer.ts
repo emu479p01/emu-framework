@@ -17,6 +17,13 @@ export interface DesignerApp {
   label?: string;
   models?: { name: string; label?: string; layer: string }[];
 }
+export interface ChangeSetPreview {
+  previewId: string; expiresAt: string; valid: boolean; baseRevision: string; nextRevision: string;
+  diff: { op: 'create' | 'update' | 'delete'; kind: string; name: string; highRisk?: boolean }[];
+  schemaEffects: { type: string; target: string }[]; destructive: boolean;
+  diagnostics: { path: string; code: string; message: string }[];
+  registryErrors: { kind: string; name: string; error: string }[];
+}
 
 export const useDesigner = defineStore('designer', {
   state: () => ({ artifacts: [] as WebArtifactEntry[], apps: [] as DesignerApp[], loaded: false }),
@@ -32,8 +39,22 @@ export const useDesigner = defineStore('designer', {
       this.loaded = true;
     },
     async save(artifact: Artifact) {
+      if (artifact.kind === 'script' || artifact.kind === 'scriptExtension') {
+        if (!window.confirm('Executable scripts can change data and server behavior. Review the code carefully and confirm this high-risk change.')) {
+          return false;
+        }
+        const snapshot = await this.snapshot();
+        const preview = await this.validateChangeSet({
+          version: 1, baseRevision: snapshot.revision, source: 'designer',
+          description: `Update high-risk ${artifact.kind} ${artifact.name}`,
+          operations: [{ op: 'upsert', kind: artifact.kind, name: artifact.name, artifact }],
+        });
+        await this.applyChangeSet(preview.previewId, true);
+        return true;
+      }
       await api.put(`/api/designer/artifacts/${artifact.kind}/${artifact.name}`, artifact);
       await Promise.all([this.load(), useMeta().load()]);
+      return true;
     },
     async remove(kind: string, name: string) {
       await api.delete(`/api/designer/artifacts/${kind}/${name}`);
@@ -50,6 +71,17 @@ export const useDesigner = defineStore('designer', {
     async reloadFromDisk() {
       await api.post('/api/designer/reload');
       await Promise.all([this.load(), useMeta().load()]);
+    },
+    async snapshot(app?: string) {
+      return api.get<{ revision: string; artifacts: Artifact[] }>(`/api/designer/snapshot${app ? `?app=${encodeURIComponent(app)}` : ''}`);
+    },
+    async validateChangeSet(changeSet: Record<string, unknown>) {
+      return api.post<ChangeSetPreview>('/api/designer/change-sets/validate', changeSet);
+    },
+    async applyChangeSet(previewId: string, confirmHighRisk = false) {
+      const result = await api.post<{ ok: boolean; revision: string }>('/api/designer/change-sets/apply', { previewId, confirmation: true, confirmHighRisk });
+      await Promise.all([this.load(), useMeta().load()]);
+      return result;
     },
   },
 });

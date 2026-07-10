@@ -1,13 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useSession } from './stores/session';
 import { useMeta } from './stores/meta';
-import LoginPage from './views/LoginPage.vue';
-import HomePage from './views/HomePage.vue';
-import ListPage from './views/ListPage.vue';
-import FormPage from './views/FormPage.vue';
-import DesignerPage from './views/designer/DesignerPage.vue';
-import DesignerEditPage from './views/designer/DesignerEditPage.vue';
-import ReportEditPage from './views/report-designer/ReportEditPage.vue';
+const LoginPage = () => import('./views/LoginPage.vue');
+const HomePage = () => import('./views/HomePage.vue');
+const ListPage = () => import('./views/ListPage.vue');
+const FormPage = () => import('./views/FormPage.vue');
+const DesignerPage = () => import('./views/designer/DesignerPage.vue');
+const DesignerEditPage = () => import('./views/designer/DesignerEditPage.vue');
+const ReportEditPage = () => import('./views/report-designer/ReportEditPage.vue');
 
 export const router = createRouter({
   history: createWebHistory(),

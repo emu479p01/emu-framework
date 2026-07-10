@@ -1,6 +1,6 @@
 # EmuFramework Developer Guide
 
-**Version: v0.0.0.7**
+**Version: v0.0.0.8**
 
 ## Table of Contents
 1. [Architecture Overview](#1-architecture-overview)
@@ -22,6 +22,7 @@
 17. [Web Designer — Build & Customize Apps from the Browser](#17-web-designer--build--customize-apps-from-the-browser)
 18. [Contact Pattern (Member/Publisher → Contact)](#18-contact-pattern-memberpublisher--contact)
 19. [System Requirements](#19-system-requirements)
+20. [AI Development Contract](#20-ai-development-contract)
 
 ---
 
@@ -1068,3 +1069,14 @@ Requirements that always apply, regardless of scale:
 
 For the full list of supported hosting plans (VPS, Railway, Render, Fly.io) with the environment variables table,
 see [README.md — Deployment](../README.md#deployment)
+
+## 20. AI Development Contract
+
+Use `pnpm emu inspect --json` and `pnpm emu schema --json` to give an AI a bounded,
+machine-readable view of a workspace. AI-authored work is represented as a revisioned
+`MetadataChangeSet` and checked with `pnpm emu validate <file> --json` without changing files,
+databases, or the runtime registry. A developer must review and confirm `pnpm emu apply <file>`.
+
+The optional local `@emu/mcp` package exposes the same inspect and validation contract over
+stdio. It intentionally has no apply, delete, SQL, business-record, or script-execution tools.
+See [AI-DEVELOPER-GUIDE.md](AI-DEVELOPER-GUIDE.md) for schemas, examples, and setup.

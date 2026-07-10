@@ -1,6 +1,6 @@
 {
   "name": "emuframework",
-  "version": "0.0.0.6",
+  "version": "0.0.0.8",
   "private": true,
   "license": "MIT",
   "packageManager": "pnpm@11.10.0",
@@ -14,6 +14,7 @@
     "test": "pnpm -r test",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "check:versions": "node scripts/check-versions.mjs",
     "emu": "tsx packages/cli/src/index.ts",
     "emu-build": "pnpm --filter @emu/cli build"
   },

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   NAvatar,
   NButton,
@@ -24,10 +24,13 @@ import {
 import { useDesigner } from '../../stores/designer';
 import { useMeta } from '../../stores/meta';
 import { ApiError } from '../../api';
+import SimpleBuilder from './SimpleBuilder.vue';
 
 const designer = useDesigner();
 const meta = useMeta();
 const router = useRouter();
+const route = useRoute();
+const workspaceMode = ref(route.query.mode === 'advanced' ? 'advanced' : 'simple');
 const message = useMessage();
 const dialog = useDialog();
 
@@ -342,7 +345,13 @@ async function onReload() {
 </script>
 
 <template>
-  <div class="designer-root">
+  <div>
+    <div class="mode-switch" role="tablist" aria-label="Builder mode">
+      <n-button :type="workspaceMode === 'simple' ? 'primary' : 'default'" :secondary="workspaceMode === 'simple'" @click="workspaceMode = 'simple'">Simple Builder</n-button>
+      <n-button :type="workspaceMode === 'advanced' ? 'primary' : 'default'" :secondary="workspaceMode === 'advanced'" @click="workspaceMode = 'advanced'">Advanced</n-button>
+    </div>
+    <SimpleBuilder v-if="workspaceMode === 'simple'" />
+    <div v-else class="designer-root">
     <!-- Header -->
     <div class="designer-toolbar">
       <div class="designer-toolbar-left">
@@ -599,6 +608,7 @@ async function onReload() {
         </n-space>
       </template>
     </n-modal>
+    </div>
   </div>
 </template>
 
@@ -607,6 +617,7 @@ async function onReload() {
   max-width: 880px;
   margin: 0 auto;
 }
+.mode-switch { max-width:920px; margin:0 auto 20px; display:flex; gap:8px; }
 
 .designer-toolbar {
   display: flex;

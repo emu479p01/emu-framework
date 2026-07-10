@@ -19,8 +19,10 @@ Logins: `admin/admin`, `manager/manager`, `clerk/clerk`.
 ## Before opening a PR
 
 ```sh
+pnpm check:versions
 pnpm -r typecheck
 pnpm -r test
+pnpm -r build
 ```
 
 ## Project layout

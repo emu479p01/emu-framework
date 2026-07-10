@@ -2,7 +2,7 @@
 
 # EmuFramework
 
-**Version: v0.0.0.7**
+**Version: v0.0.0.8**
 
 📦 [Download the latest release](https://github.com/emu479p01/emu-framework/releases)
 
@@ -29,6 +29,9 @@ host any number of independent apps, extensions, and web-designed customizations
 - **No-code Web Designer** — admins can create tables, forms, menus, and even entire new apps
   from the browser, live, with no deploy step. See
   [docs/WEB-DESIGNER-GUIDE.md](docs/WEB-DESIGNER-GUIDE.md) for the full walkthrough.
+- **AI-ready, human-controlled** — JSON Schema, revisioned change sets, CLI JSON output, and
+  a local read/validate-only MCP server let AI assistants understand and draft changes without
+  receiving permission to apply them or read business records.
 
 ## What it looks like
 
@@ -128,6 +131,18 @@ Scaffold new apps, modules, tables, forms, menus, and extensions interactively:
 ```sh
 pnpm emu --help
 ```
+
+AI-friendly developer commands:
+
+```sh
+pnpm emu inspect --json
+pnpm emu schema --json
+pnpm emu validate changes.json --json
+pnpm emu apply changes.json       # shows a diff and asks for confirmation
+```
+
+See [docs/AI-DEVELOPER-GUIDE.md](docs/AI-DEVELOPER-GUIDE.md) for the change-set contract
+and local MCP setup.
 
 See [docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md) for the full developer guide, or
 [docs/WEB-DESIGNER-GUIDE.md](docs/WEB-DESIGNER-GUIDE.md) if you want to customize an app

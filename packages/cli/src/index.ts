@@ -5,6 +5,7 @@ import { addObjectCommand } from './commands/add-object.js';
 import { addExtensionCommand } from './commands/add-extension.js';
 import { addModuleCommand } from './commands/add-module.js';
 import { listCommand } from './commands/list.js';
+import { inspectCommand, schemaCommand, validateCommand, applyCommand } from './commands/ai.js';
 
 const addCommand = defineCommand({
   meta: {
@@ -23,12 +24,16 @@ const main = defineCommand({
   meta: {
     name: 'emu',
     description: 'EmuFramework Developer CLI — scaffold apps, objects, and extensions interactively',
-    version: '0.0.0.3',
+    version: '0.0.0.8',
   },
   subCommands: {
     setup: setupCommand,
     add: addCommand,
     list: listCommand,
+    inspect: inspectCommand,
+    schema: schemaCommand,
+    validate: validateCommand,
+    apply: applyCommand,
   },
 });
 
