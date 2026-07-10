@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { NButton, NDataTable, NDropdown, NSpace, useMessage, type DataTableColumns } from 'naive-ui';
+import {
+  NButton, NCheckbox, NCheckboxGroup, NDataTable, NDropdown, NEmpty, NInput,
+  NPopover, NSpace, useMessage, type DataTableColumns, type DataTableSortState,
+} from 'naive-ui';
 import { api, ApiError, type Row } from '../api';
 import { useMeta } from '../stores/meta';
 import ImportDialog from './ImportDialog.vue';
@@ -10,140 +13,112 @@ const props = defineProps<{ formName: string; appName?: string }>();
 const router = useRouter();
 const meta = useMeta();
 const message = useMessage();
-
 const rows = ref<Row[]>([]);
 const total = ref(0);
 const loading = ref(false);
+const errorMessage = ref('');
 const page = ref(1);
 const pageSize = 25;
-/** id → display text per referenced table */
+const search = ref('');
+const appliedSearch = ref('');
+const sortKey = ref('id');
+const sortDir = ref<'asc' | 'desc'>('desc');
+const visibleFields = ref<string[]>([]);
 const lookups = ref<Record<string, Record<number, string>>>({});
+const showImport = ref(false);
 
 const form = computed(() => meta.form(props.formName));
 const table = computed(() => (form.value ? meta.table(form.value.table) : undefined));
 const listFields = computed(() => {
   if (!form.value || !table.value) return [];
-  const names = form.value.listFields ?? table.value.fields.map((f) => f.name);
-  return names
-    .map((n) => table.value!.fields.find((f) => f.name === n))
-    .filter((f): f is NonNullable<typeof f> => f !== undefined);
+  const names = form.value.listFields ?? table.value.fields.map((field) => field.name);
+  return names.map((fieldName) => table.value!.fields.find((field) => field.name === fieldName)).filter((field): field is NonNullable<typeof field> => Boolean(field));
 });
-
-const columns = computed<DataTableColumns<Row>>(() =>
-  listFields.value.map((f) => ({
-    title: f.label ?? f.name,
-    key: f.name,
-    sorter: true,
-    render: (row) => {
-      const v = row[f.name];
-      if (f.type === 'enum' && f.enumName) return meta.enumLabel(f.enumName, v);
-      if (f.type === 'reference' && f.reference) {
-        return lookups.value[f.reference.table]?.[v as number] ?? String(v ?? '');
-      }
-      if (f.type === 'boolean') return v ? 'Yes' : 'No';
-      return String(v ?? '');
-    },
+watch(listFields, (fields) => { visibleFields.value = fields.map((field) => field.name); }, { immediate: true });
+const shownFields = computed(() => listFields.value.filter((field) => visibleFields.value.includes(field.name)));
+const formPath = computed(() => props.appName ? `/app/${props.appName}` : '');
+function display(field: (typeof listFields.value)[number], row: Row): string {
+  const value = row[field.name];
+  if (field.type === 'enum' && field.enumName) return meta.enumLabel(field.enumName, value);
+  if (field.type === 'reference' && field.reference) return lookups.value[field.reference.table]?.[value as number] ?? String(value ?? '');
+  if (field.type === 'boolean') return value ? 'Yes' : 'No';
+  return String(value ?? '');
+}
+const columns = computed<DataTableColumns<Row>>(() => [
+  ...shownFields.value.map((field) => ({
+    title: field.label ?? field.name, key: field.name, sorter: true,
+    sortOrder: sortKey.value === field.name ? (sortDir.value === 'asc' ? 'ascend' as const : 'descend' as const) : false as const,
+    render: (row: Row) => display(field, row),
   })),
-);
+  { title: '', key: '_actions', width: 86, render: (row: Row) => h(NButton, { size: 'small', quaternary: true, onClick: (event: MouseEvent) => { event.stopPropagation(); router.push(`${formPath.value}/form/${props.formName}/${row.id}`); } }, () => 'Edit') },
+]);
 
 async function loadLookups() {
-  const refTables = new Set(
-    listFields.value
-      .filter((f) => f.type === 'reference' && f.reference)
-      .map((f) => f.reference!.table),
-  );
-  for (const t of refTables) {
-    const display = meta.table(t)?.titleField ?? 'id';
-    const { data } = await api.list(t, { limit: 500 });
-    lookups.value[t] = Object.fromEntries(data.map((r) => [r.id, String(r[display] ?? r.id)]));
+  const references = new Set(listFields.value.filter((field) => field.type === 'reference' && field.reference).map((field) => field.reference!.table));
+  for (const name of references) {
+    const titleField = meta.table(name)?.titleField ?? 'id';
+    const { data } = await api.list(name, { limit: 500 });
+    lookups.value[name] = Object.fromEntries(data.map((row) => [row.id, String(row[titleField] ?? row.id)]));
   }
 }
-
 async function load() {
   if (!table.value) return;
-  loading.value = true;
+  loading.value = true; errorMessage.value = '';
   try {
     await loadLookups();
-    const res = await api.list(table.value.name, {
-      limit: pageSize,
-      offset: (page.value - 1) * pageSize,
-      sort: 'id:desc',
+    const result = await api.list(table.value.name, {
+      limit: pageSize, offset: (page.value - 1) * pageSize, sort: `${sortKey.value}:${sortDir.value}`,
+      ...(appliedSearch.value ? { search: appliedSearch.value } : {}),
     });
-    rows.value = res.data;
-    total.value = res.total;
-  } catch (err) {
-    if (err instanceof ApiError) message.error(err.message);
-    else throw err;
-  } finally {
-    loading.value = false;
-  }
+    rows.value = result.data; total.value = result.total;
+  } catch (error) {
+    errorMessage.value = error instanceof ApiError ? error.message : 'Records could not be loaded.';
+    message.error(errorMessage.value);
+  } finally { loading.value = false; }
 }
-
-watch([() => props.formName, page], load, { immediate: true });
-
-const formPath = computed(() => props.appName ? `/app/${props.appName}` : '');
-
-const rowProps = (row: Row) => ({
-  style: 'cursor: pointer',
-  onClick: () => router.push(`${formPath.value}/form/${props.formName}/${row.id}`),
-});
-
-const exportOptions = [
-  { label: 'Export CSV', key: 'csv' },
-  { label: 'Export Excel', key: 'xlsx' },
-];
-
-const reportOptions = computed(() =>
-  (table.value ? meta.reportsFor(table.value.name) : []).map((r) => ({ label: r.label ?? r.name, key: r.name })),
-);
-
-function printReport(reportName: string) {
-  window.open(`/api/report/${encodeURIComponent(reportName)}/pdf`, '_blank', 'noopener');
+watch([() => props.formName, page, sortKey, sortDir], load, { immediate: true });
+function applySearch() { page.value = 1; appliedSearch.value = search.value.trim(); load(); }
+function clearSearch() { search.value = ''; appliedSearch.value = ''; page.value = 1; load(); }
+function onSorterChange(sorter: DataTableSortState | DataTableSortState[] | null) {
+  const selected = Array.isArray(sorter) ? sorter[0] : sorter;
+  if (!selected?.columnKey || !selected.order) { sortKey.value = 'id'; sortDir.value = 'desc'; return; }
+  sortKey.value = String(selected.columnKey); sortDir.value = selected.order === 'ascend' ? 'asc' : 'desc';
 }
-
+const rowProps = (row: Row) => ({ style: 'cursor:pointer', onClick: () => router.push(`${formPath.value}/form/${props.formName}/${row.id}`) });
+const exportOptions = [{ label: 'Export CSV', key: 'csv' }, { label: 'Export Excel', key: 'xlsx' }];
+const reportOptions = computed(() => (table.value ? meta.reportsFor(table.value.name) : []).map((report) => ({ label: report.label ?? report.name, key: report.name })));
+function printReport(name: string) { window.open(`/api/report/${encodeURIComponent(name)}/pdf`, '_blank', 'noopener'); }
 function exportData(format: string) {
   if (!table.value) return;
-  const url = api.exportUrl(table.value.name, format as 'csv' | 'xlsx');
-  const a = document.createElement('a');
-  a.href = url;
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  const link = document.createElement('a'); link.href = api.exportUrl(table.value.name, format as 'csv' | 'xlsx'); link.rel = 'noopener'; document.body.appendChild(link); link.click(); link.remove();
 }
-
-const showImport = ref(false);
 </script>
 
 <template>
   <div v-if="form && table">
-    <n-space justify="space-between" style="margin-bottom: 16px">
-      <h2 style="margin: 0">{{ form.label ?? form.name }}</h2>
+    <div class="list-heading">
+      <div><h1>{{ form.label ?? form.name }}</h1><p>{{ total }} records</p></div>
       <n-space>
-        <n-dropdown v-if="reportOptions.length > 0" trigger="click" :options="reportOptions" @select="printReport">
-          <n-button data-testid="print-report">Print</n-button>
-        </n-dropdown>
-        <n-dropdown trigger="click" :options="exportOptions" @select="exportData">
-          <n-button data-testid="export-data">Export</n-button>
-        </n-dropdown>
-        <n-button data-testid="import-data" @click="showImport = true">Import</n-button>
-        <n-button type="primary" data-testid="new-record" @click="router.push(`${formPath}/form/${formName}/new`)">
-          New
-        </n-button>
+        <n-dropdown v-if="reportOptions.length" trigger="click" :options="reportOptions" @select="printReport"><n-button data-testid="print-report">Print</n-button></n-dropdown>
+        <n-dropdown trigger="click" :options="exportOptions" @select="exportData"><n-button data-testid="export-data">Export</n-button></n-dropdown>
+        <n-button data-testid="import-data" @click="showImport=true">Import</n-button>
+        <n-button type="primary" data-testid="new-record" @click="router.push(`${formPath}/form/${formName}/new`)">+ New</n-button>
       </n-space>
-    </n-space>
-    <n-data-table
-      :columns="columns"
-      :data="rows"
-      :loading="loading"
-      :row-props="rowProps"
-      :pagination="{ page, pageSize, itemCount: total, 'onUpdate:page': (p: number) => (page = p) }"
-      remote
-    />
-    <ImportDialog
-      v-model:show="showImport"
-      :table-name="table.name"
-      @imported="load"
-    />
+    </div>
+    <div class="list-tools">
+      <n-input v-model:value="search" clearable placeholder="Search records…" data-testid="list-search" @keyup.enter="applySearch" @clear="clearSearch" />
+      <n-button @click="applySearch">Search</n-button>
+      <n-popover trigger="click" placement="bottom-end"><template #trigger><n-button>Columns</n-button></template><n-checkbox-group v-model:value="visibleFields"><n-space vertical><n-checkbox v-for="field in listFields" :key="field.name" :value="field.name" :label="field.label ?? field.name" /></n-space></n-checkbox-group></n-popover>
+    </div>
+    <n-empty v-if="!loading && !errorMessage && rows.length === 0" :description="appliedSearch ? 'No records match your search.' : 'No records yet. Create the first one to get started.'" class="list-empty" />
+    <div v-if="rows.length" class="mobile-cards">
+      <button v-for="row in rows" :key="row.id" class="record-card" @click="router.push(`${formPath}/form/${formName}/${row.id}`)"><span v-for="field in shownFields.slice(0,4)" :key="field.name"><small>{{ field.label ?? field.name }}</small>{{ display(field,row) || '—' }}</span></button>
+    </div>
+    <n-data-table v-show="rows.length" class="desktop-table" :columns="columns" :data="rows" :loading="loading" :row-props="rowProps" :pagination="{ page, pageSize, itemCount: total, 'onUpdate:page': (value: number) => (page = value) }" remote @update:sorter="onSorterChange" />
+    <ImportDialog v-model:show="showImport" :table-name="table.name" @imported="load" />
   </div>
 </template>
+
+<style scoped>
+.list-heading{display:flex;justify-content:space-between;gap:16px;align-items:start;margin-bottom:18px}.list-heading h1{margin:0;font-size:28px}.list-heading p{margin:4px 0;color:var(--emu-muted)}.list-tools{display:grid;grid-template-columns:minmax(220px,420px) auto auto;gap:8px;margin-bottom:16px}.list-empty{padding:70px 0}.mobile-cards{display:none}.record-card{width:100%;border:1px solid var(--emu-border);background:#fff;border-radius:10px;padding:14px;text-align:left;margin-bottom:10px}.record-card span{display:block;margin-bottom:8px}.record-card small{display:block;color:var(--emu-muted);font-size:11px}@media(max-width:700px){.list-heading{display:block}.list-heading>.n-space{margin-top:12px}.list-tools{grid-template-columns:1fr auto}.list-tools>*:last-child{display:none}.desktop-table{display:none!important}.mobile-cards{display:block}}
+</style>

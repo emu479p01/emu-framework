@@ -24,6 +24,7 @@ import type {
   TableMeta,
 } from './types.js';
 import { SYSTEM_FIELDS, LAYER_ORDER, DEFAULT_LAYER, EXTENSION_KINDS, type LayerType } from './types.js';
+import { validateMetadataArtifact } from './schema.js';
 
 export class MetadataError extends Error {}
 
@@ -599,6 +600,10 @@ function readArtifacts(dir: string, kind: AnyMeta['kind'], out: AnyMeta[]): void
     const meta = JSON.parse(readFileSync(join(dir, file), 'utf-8')) as AnyMeta;
     if (meta.kind !== kind) {
       throw new MetadataError(`${file}: expected kind '${kind}', got '${meta.kind}'`);
+    }
+    const diagnostics = validateMetadataArtifact(meta);
+    if (diagnostics.length > 0) {
+      throw new MetadataError(`${file}: ${diagnostics.map((item) => `${item.path} ${item.message}`).join('; ')}`);
     }
     out.push(meta);
   }

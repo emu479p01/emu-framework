@@ -1,6 +1,17 @@
 # Web Designer Guide — Customize EmuFramework from Your Browser
 
-**Version: v0.0.0.7**
+**Version: v0.0.0.8**
+
+## Simple Builder (recommended)
+
+Open **Designer** and keep **Simple Builder** selected. The guided flow asks for an App,
+Entity, Fields, Page, and Navigation label. It then validates the complete change set and
+shows a review screen before anything is applied. The generated artifacts use the
+`Customizations` model and `CUS` layer automatically.
+
+Use **Advanced** when you need direct access to models, layers, individual artifacts,
+extensions, security objects, reports, or scripts. Script changes are marked high-risk and
+require a separate confirmation.
 
 This guide is for anyone who wants to customize an EmuFramework app **without writing code** —
 admins, business analysts, or power users. Everything here happens inside the **Web Designer**,

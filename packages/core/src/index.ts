@@ -1,4 +1,4 @@
-export const CORE_VERSION = '0.0.0.3';
+export const CORE_VERSION = '0.0.0.8';
 
 export { Kernel, type ActionHandler, type WebArtifactError } from './kernel.js';
 export {
@@ -10,6 +10,9 @@ export {
 } from './security/policy.js';
 
 export * from './metadata/types.js';
+export * from './metadata/schema.js';
+export * from './metadata/changeSet.js';
+export * from './metadata/workspace.js';
 export { MetadataRegistry, MetadataError } from './metadata/registry.js';
 export { syncSchema, type SyncResult } from './db/schemaSync.js';
 export { DataContext, type SessionInfo } from './data/context.js';

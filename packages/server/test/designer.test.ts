@@ -127,7 +127,7 @@ describe('web designer API', () => {
     expect(meta.json().forms.map((f: { name: string }) => f.name)).not.toContain('WEB_WebProjectForm');
   });
 
-  it('deleting an app cascades artifacts and drops its data tables', async () => {
+  it('deleting an app cascades metadata but preserves its data tables', async () => {
     const kernel = (app as unknown as { kernel: Kernel }).kernel;
     // create a small app with one table + data
     await app.inject({
@@ -158,15 +158,66 @@ describe('web designer API', () => {
 
     const del = await app.inject({ method: 'DELETE', url: '/api/designer/artifacts/app/tmpapp', headers: admin });
     expect(del.statusCode).toBe(200);
-    expect(del.json().droppedTables).toContain('TMPAPP_Thing');
-    // registry + physical table gone
+    expect(del.json().orphanedTables).toContain('TMPAPP_Thing');
+    // registry is gone while the physical table and its data are retained
     expect(kernel.registry.hasTable('TMPAPP_Thing')).toBe(false);
     const row = kernel.db
       .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='TMPAPP_Thing'`)
       .get();
-    expect(row).toBeUndefined();
+    expect(row).toBeDefined();
+    expect(kernel.db.prepare('SELECT thing FROM "TMPAPP_Thing"').get()).toMatchObject({ thing: 'x' });
     // app gone from loadedApps
     expect(kernel.registry.loadedApps().map((a) => a.name)).not.toContain('tmpapp');
+
+    const rejectedPurge = await app.inject({ method: 'POST', url: '/api/designer/orphans/TMPAPP_Thing/purge', headers: admin, payload: { confirmation: 'wrong' } });
+    expect(rejectedPurge.statusCode).toBe(400);
+    const purge = await app.inject({ method: 'POST', url: '/api/designer/orphans/TMPAPP_Thing/purge', headers: admin, payload: { confirmation: 'TMPAPP_Thing' } });
+    expect(purge.statusCode).toBe(200);
+    expect(kernel.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='TMPAPP_Thing'`).get()).toBeUndefined();
+  });
+
+  it('validates and applies an atomic change set with audit history', async () => {
+    const capabilities = await app.inject({ method: 'GET', url: '/api/designer/capabilities', headers: admin });
+    expect(capabilities.statusCode).toBe(200);
+    expect(capabilities.json().ai.apply).toBe(false);
+    const snapshot = await app.inject({ method: 'GET', url: '/api/designer/snapshot', headers: admin });
+    const baseRevision = snapshot.json().revision as string;
+    const artifacts = [
+      { kind: 'app', name: 'builder', label: 'Builder', models: [{ name: 'Customizations', label: 'Customizations', layer: 'CUS' }] },
+      { kind: 'table', name: 'BUILDER_Task', app: 'builder', model: 'Customizations', layer: 'CUS', label: 'Tasks', titleField: 'title', fields: [{ name: 'title', type: 'string', mandatory: true }] },
+      { kind: 'form', name: 'BUILDER_TaskForm', app: 'builder', model: 'Customizations', layer: 'CUS', label: 'Tasks', table: 'BUILDER_Task', listFields: ['title'], groups: [{ label: 'Details', fields: ['title'] }] },
+      { kind: 'menu', name: 'BUILDER_MainMenu', app: 'builder', model: 'Customizations', layer: 'CUS', label: 'Navigation', items: [{ label: 'Tasks', form: 'BUILDER_TaskForm' }] },
+    ];
+    const changeSet = {
+      version: 1,
+      baseRevision,
+      source: 'ai',
+      description: 'Create the first builder app',
+      operations: artifacts.map((artifact) => ({ op: 'upsert', kind: artifact.kind, name: artifact.name, artifact })),
+    };
+    const validate = await app.inject({ method: 'POST', url: '/api/designer/change-sets/validate', headers: admin, payload: changeSet });
+    expect(validate.statusCode).toBe(200);
+    expect(validate.json().diff).toHaveLength(4);
+    const apply = await app.inject({
+      method: 'POST', url: '/api/designer/change-sets/apply', headers: admin,
+      payload: { previewId: validate.json().previewId, confirmation: true },
+    });
+    expect(apply.statusCode).toBe(200);
+    const kernel = (app as unknown as { kernel: Kernel }).kernel;
+    expect(kernel.registry.hasTable('BUILDER_Task')).toBe(true);
+    expect((kernel.designerDb.prepare('SELECT COUNT(*) AS count FROM "FW_ChangeSetAudit"').get() as { count: number }).count).toBe(1);
+  });
+
+  it('rejects stale previews and requires human confirmation', async () => {
+    const snapshot = await app.inject({ method: 'GET', url: '/api/designer/snapshot', headers: admin });
+    const artifact = { kind: 'table', name: 'BUILDER_Note', app: 'builder', model: 'Customizations', layer: 'CUS', fields: [{ name: 'text', type: 'string' }] };
+    const validate = await app.inject({
+      method: 'POST', url: '/api/designer/change-sets/validate', headers: admin,
+      payload: { version: 1, baseRevision: snapshot.json().revision, source: 'ai', operations: [{ op: 'upsert', kind: artifact.kind, name: artifact.name, artifact }] },
+    });
+    expect(validate.statusCode).toBe(200);
+    const apply = await app.inject({ method: 'POST', url: '/api/designer/change-sets/apply', headers: admin, payload: { previewId: validate.json().previewId } });
+    expect(apply.statusCode).toBe(400);
   });
 
   it('lists stored artifacts', async () => {

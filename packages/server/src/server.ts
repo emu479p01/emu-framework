@@ -454,7 +454,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   // ---- web designer ----
 
-  const requireDesigner = (req: FastifyRequest): void => {
+  const requireDesigner = (req: FastifyRequest): string => {
     const user = requireUser(req);
     const access = appAccessOf(user.username);
     const allowed =
@@ -464,6 +464,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     if (!allowed) {
       throw Object.assign(new Error('Designer requires an administrator role'), { statusCode: 403 });
     }
+    return user.username;
   };
 
   /** Which apps this user may customize in the Designer ('all' for framework admins). */
@@ -498,8 +499,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const table = dataTable(req.params.table, req);
       const ctx = userCtx(req);
       const query = req.query as unknown as { [key: string]: string | undefined };
-      const q = buildFilteredQuery(ctx, table.name, query, coerce);
-      const countQ = buildFilteredQuery(ctx, table.name, query, coerce);
+      const searchable = table.fields.filter((field) => field.type === 'string' || field.type === 'int' || field.type === 'real').map((field) => field.name);
+      const q = buildFilteredQuery(ctx, table.name, query, coerce, searchable);
+      const countQ = buildFilteredQuery(ctx, table.name, query, coerce, searchable);
       const limit = Math.min(Number(req.query.limit ?? 50), 500);
       const offset = Number(req.query.offset ?? 0);
       q.limit(limit, offset);

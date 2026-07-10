@@ -290,6 +290,28 @@ export class Kernel {
     return errors;
   }
 
+  /** Validate a complete web-artifact candidate set without touching the live registry or either database. */
+  previewWebArtifacts(artifacts: AnyMeta[]): WebArtifactError[] {
+    const preview = new Kernel(':memory:', ':memory:');
+    for (const step of this.bootSteps) {
+      if (step.kind === 'dir') preview.loadAppFromDir(step.dir);
+      else preview.registerApp(step.manifest, step.artifacts);
+    }
+    // Never execute user-provided scripts during a preview. Metadata registration does not
+    // depend on script bodies, so blanking them preserves structural validation safely.
+    const safe = artifacts.map((artifact) =>
+      artifact.kind === 'script' || artifact.kind === 'scriptExtension'
+        ? ({ ...artifact, code: '' } as AnyMeta)
+        : artifact,
+    );
+    try {
+      return preview.applyWebArtifacts(safe);
+    } finally {
+      preview.db.close();
+      preview.designerDb.close();
+    }
+  }
+
   /** Run accepted `script` artifacts via new Function() sandbox. */
   private executeWebScripts(
     scripts: (AnyMeta & { name: string; code?: string })[],

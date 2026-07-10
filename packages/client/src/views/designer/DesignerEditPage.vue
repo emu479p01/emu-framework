@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   NButton,
+  NAlert,
   NCard,
   NCheckbox,
   NForm,
@@ -272,7 +273,8 @@ async function save() {
       }
     }
 
-    await designer.save(art);
+    const saved = await designer.save(art);
+    if (saved === false) return;
 
     // convenience: new table → create form + menuExtension
     if (props.kind === 'table' && isNew.value) {
@@ -515,6 +517,9 @@ function removeTablePermission(i: number) { (artifact.value.tablePermissions as 
             <!-- Script editor -->
             <n-card v-if="kind === 'script' || kind === 'scriptExtension'" size="small" title="Business Logic Script">
               <n-space vertical>
+                <n-alert type="warning" title="High-risk executable code">
+                  Saving a script requires separate confirmation. AI and MCP change sets cannot create or update scripts.
+                </n-alert>
                 <n-form-item>
                   <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0">
                     Write JavaScript code that registers events, hooks, and actions.

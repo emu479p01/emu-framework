@@ -20,6 +20,7 @@ interface Condition {
 export class Query implements Iterable<Record> {
   private conditions: Condition[] = [];
   private orderings: { field: string; dir: 'ASC' | 'DESC' }[] = [];
+  private anyLike?: { fields: string[]; value: string };
   private limitN?: number;
   private offsetN?: number;
 
@@ -47,6 +48,13 @@ export class Query implements Iterable<Record> {
     return this;
   }
 
+  /** Case-insensitive free-text search across metadata-defined fields. */
+  search(fields: string[], value: string): this {
+    for (const field of fields) this.assertField(field);
+    if (fields.length > 0 && value.trim()) this.anyLike = { fields, value: `%${value.trim()}%` };
+    return this;
+  }
+
   orderBy(field: string, dir: 'asc' | 'desc' = 'asc'): this {
     this.assertField(field);
     this.orderings.push({ field, dir: dir.toUpperCase() as 'ASC' | 'DESC' });
@@ -62,7 +70,7 @@ export class Query implements Iterable<Record> {
   private buildSql(selectExpr: string): { sql: string; params: FieldValue[] } {
     const params: FieldValue[] = [];
     let sql = `SELECT ${selectExpr} FROM "${this.table.name}"`;
-    if (this.conditions.length > 0) {
+    if (this.conditions.length > 0 || this.anyLike) {
       const clauses = this.conditions.map((c) => {
         if (c.op === 'IN') {
           const arr = Array.isArray(c.value) ? c.value : [c.value];
@@ -72,6 +80,10 @@ export class Query implements Iterable<Record> {
         params.push(c.value as FieldValue);
         return `"${c.field}" ${c.op} ?`;
       });
+      if (this.anyLike) {
+        clauses.push(`(${this.anyLike.fields.map((field) => `CAST("${field}" AS TEXT) LIKE ? COLLATE NOCASE`).join(' OR ')})`);
+        params.push(...this.anyLike.fields.map(() => this.anyLike!.value));
+      }
       sql += ` WHERE ${clauses.join(' AND ')}`;
     }
     if (this.orderings.length > 0) {
