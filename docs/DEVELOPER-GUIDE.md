@@ -1,6 +1,6 @@
 # EmuFramework Developer Guide
 
-**Version: v0.0.0.6**
+**Version: v0.0.0.7**
 
 ## Table of Contents
 1. [Architecture Overview](#1-architecture-overview)
@@ -1012,68 +1012,17 @@ ctx.tts(() => {
 ## 17. Web Designer — Build & Customize Apps from the Browser
 
 The Web Designer is an in-browser tool that lets an admin create/edit metadata in real time,
-with no server restart. Everything is stored in the `FW_WebArtifact` table and applied immediately.
+with no server restart. Everything is stored in the `FW_WebArtifact` table and applied
+immediately. This section is deliberately brief — see
+[docs/WEB-DESIGNER-GUIDE.md](./WEB-DESIGNER-GUIDE.md) for the full no-code walkthrough
+(creating apps, tables, forms, menus, extensions, and its current limitations), written for
+non-developers.
 
-### 17.1 Accessing It
-
-- Log in as `admin` (or a user with `FW_FrameworkUser`/`FW_SystemAdminRole`)
-- **Development → Designer** menu
-
-### 17.2 Creating a New App (New Domain)
-
-1. Click **New… → App (new domain)**
-2. Fill in **Name** (lowercase, no spaces) and **Label** (the display name)
-3. Save → the new app appears in the sidebar as its own group
-
-### 17.3 Creating a Table Under an App
-
-1. Click **New… → Table (+ form + menu)**
-2. Choose the **App** (sidebar group) — which app the table should belong to
-   - Pick an existing app (e.g. one you created earlier)
-   - Default: the first non-system app
-3. Choose a **Menu destination** — the target menu the new item should appear in:
-   - Pick an existing menu (e.g. `MainMenu`) → the framework auto-creates a `menuExtension` → the item joins that menu, in that app's group
-   - Pick `(new menu for ...)` → the framework creates a new menu for that app
-4. Fill in Name, Label, Fields
-5. Check **Create form** → the framework generates a form automatically
-6. Save → the table + form + menu item appear in the sidebar immediately
-
-### 17.4 Extension (Adding a Field to an Existing Table)
-
-1. On the Designer page → the **Customize existing tables** section → click a table's name
-2. Add fields → Save
-3. The framework creates a `tableExtension` + `formExtension` automatically
-
-### 17.5 Creating a Standalone Form, Menu, or Enum
-
-- **New… → Form / Menu / Enum**
-- Form: pick a table → configure listFields, groups
-- Menu: pick items → pick the form for each item
-- Menus support nested items (multi-level menus)
-
-### 17.6 JSON Tab
-
-For artifacts without a structured editor (or when you need to edit raw JSON), switch to the **JSON** tab,
-edit the JSON directly, and click Save.
-
-### 17.7 Deleting
-
-- The **Del** button next to each artifact → removes it from the registry + DB
-- Schema (columns/tables) is **never dropped** — sync is additive-only
-
-### 17.8 Key Principles
-
-- **App selector**: choose which app the object belongs to → the sidebar groups it correctly
-- **Menu destination**: choose the target menu → uses `menuExtension` instead of creating a separate menu
-- **No server restart**: everything applies immediately via `kernel.applyWebArtifacts()`
-- **Branding**: change the system name via the `EMU_APP_TITLE=MySystem` env var → shown on login + sidebar
-
-### 17.9 Limitations (v1)
-
-- You still **can't create a privilege/duty/role from the web** — tables created from the web are only accessible to admin until you grant access via a metadata file
-- **Business logic can't be written from the web** — hooks/events/actions are still TypeScript in the app
-- **Deleting an artifact doesn't drop the column/table in SQLite** (additive-only) — existing data stays, it just disappears from the screen
-- The web layer can't create something with the same name as a file-based app object — to change an existing one, use "Customize" (extension)
+Quick reference: log in as `admin` (or a user with `FW_FrameworkUser`/`FW_SystemAdminRole`) →
+**Development → Designer** menu → **New…** to create an app/table/form/menu/enum, or click an
+existing table under **Customize existing tables** to extend it. Everything applies live via
+`kernel.applyWebArtifacts()`; schema sync stays additive-only (deleting an artifact never drops
+the underlying column/table).
 
 ---
 

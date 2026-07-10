@@ -31,7 +31,8 @@ async function submit() {
 </script>
 
 <template>
-  <div style="display: flex; align-items: center; justify-content: center; height: 100vh; background: #f5f6f8">
+  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; height: 100vh; background: #f5f6f8">
+    <img src="/logo.svg" alt="" width="56" height="56" />
     <n-card :title="title" style="width: 360px">
       <n-form @keyup.enter="submit">
         <n-form-item label="Username">

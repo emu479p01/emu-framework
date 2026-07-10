@@ -123,7 +123,10 @@ async function onLogout() {
         <template v-if="session.user">
           <n-layout has-sider style="height: 100vh">
             <n-layout-sider bordered :width="240">
-              <div style="padding: 16px; font-weight: 600; font-size: 16px">{{ meta.meta?.branding.title ?? 'EmuFramework' }}</div>
+              <div style="padding: 16px; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 16px">
+                <img src="/logo.svg" alt="" width="24" height="24" />
+                <span>{{ meta.meta?.branding.title ?? 'EmuFramework' }}</span>
+              </div>
               <n-menu
                 :options="menuOptions"
                 :value="activeKey"
