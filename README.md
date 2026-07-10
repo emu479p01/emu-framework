@@ -1,6 +1,8 @@
+<img src="docs/assets/logo.svg" alt="EmuFramework logo" width="72" height="72" />
+
 # EmuFramework
 
-**Version: v0.0.0.6**
+**Version: v0.0.0.7**
 
 📦 [Download the latest release](https://github.com/emu479p01/emu-framework/releases)
 
@@ -25,9 +27,16 @@ host any number of independent apps, extensions, and web-designed customizations
 - **Self-hosted, single process** — one Node.js process, an embedded SQLite database, no
   message queue, no separate frontend hosting, no vendor lock-in. Deploy it anywhere Node runs.
 - **No-code Web Designer** — admins can create tables, forms, menus, and even entire new apps
-  from the browser, live, with no deploy step.
+  from the browser, live, with no deploy step. See
+  [docs/WEB-DESIGNER-GUIDE.md](docs/WEB-DESIGNER-GUIDE.md) for the full walkthrough.
 
 ## What it looks like
+
+![EmuFramework app shell and Web Designer](docs/assets/screenshots/app-shell.png)
+
+Creating a table from the browser, live, with no deploy step:
+
+![Creating a table in the Web Designer](docs/assets/screenshots/web-designer-demo.gif)
 
 All reads and writes go through `DataContext`, so hooks, events, and security always apply —
 whether the call comes from generated UI or your own code:
@@ -120,7 +129,9 @@ Scaffold new apps, modules, tables, forms, menus, and extensions interactively:
 pnpm emu --help
 ```
 
-See [docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md) for the full developer guide.
+See [docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md) for the full developer guide, or
+[docs/WEB-DESIGNER-GUIDE.md](docs/WEB-DESIGNER-GUIDE.md) if you want to customize an app
+from the browser without writing code.
 
 ## Key Concepts
 
