@@ -44,6 +44,15 @@ export type LayerType = 'SYS' | 'ISV' | 'LOC' | 'DEV' | 'CUS';
 export const LAYER_ORDER: readonly LayerType[] = ['SYS', 'ISV', 'LOC', 'DEV', 'CUS'] as const;
 export const DEFAULT_LAYER: LayerType = 'SYS';
 
+/** Safe, code-owned icon catalog used by app manifests and navigation metadata. */
+export const ICON_NAMES = [
+  'app', 'grid', 'users', 'settings', 'database', 'table', 'chart', 'shield', 'wrench', 'file',
+] as const;
+export type IconName = (typeof ICON_NAMES)[number];
+export function isIconName(value: unknown): value is IconName {
+  return typeof value === 'string' && (ICON_NAMES as readonly string[]).includes(value);
+}
+
 export interface TableMeta {
   kind: 'table';
   name: string;
@@ -112,6 +121,7 @@ export interface FormMeta {
 
 export interface MenuItemMeta {
   label?: string;
+  icon?: IconName;
   form?: string;
   route?: string;
   items?: MenuItemMeta[];
@@ -337,6 +347,7 @@ export interface ReportMeta {
 export interface AppManifest {
   name: string;
   label?: string;
+  icon?: IconName;
   dependsOn?: string[];
   /** Model definitions: name → layer */
   models?: { name: string; label?: string; layer: LayerType }[];

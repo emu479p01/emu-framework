@@ -23,6 +23,7 @@ import { bootWebArtifacts, registerDesignerRoutes } from './designer.js';
 import { seedDesignerDb } from './seeder.js';
 import { buildFilteredQuery, registerImportExportRoutes } from './importExport.js';
 import { registerReportRoutes } from './reports.js';
+import { registerSystemMaintenanceRoutes } from './systemMaintenance.js';
 
 export interface ServerOptions {
   dbPath?: string;
@@ -367,7 +368,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
     // Recursively filter menu items by security
     const filterItems = (
-      items: { label?: string; form?: string; route?: string; items?: typeof items }[] | undefined,
+      items: { label?: string; icon?: import('@emu/core').IconName; form?: string; route?: string; items?: typeof items }[] | undefined,
       allowRoutes = false,
     ): typeof items => {
       if (!items) return items;
@@ -396,11 +397,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       userRoles.includes('FW_SystemAdminRole');
     const access = appAccessOf(user.username);
     const frameworkMenus: typeof allMenus = [];
-    const appMap = new Map<string, { name: string; label: string; modules: string[]; menus: typeof allMenus }>();
+    const appMap = new Map<string, { name: string; label: string; icon?: import('@emu/core').IconName; modules: string[]; menus: typeof allMenus }>();
     for (const app of kernel.registry.loadedApps()) {
       appMap.set(app.name, {
         name: app.name,
         label: app.label ?? app.name,
+        icon: app.icon,
         modules: kernel.modulesForApp(app.name),
         menus: [],
       });
@@ -479,6 +481,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return appAccessOf(user.username).customizeApps;
   };
   registerDesignerRoutes(app, kernel, requireDesigner, designerScope);
+  const requireFrameworkAdmin = (req: FastifyRequest): string => {
+    const user = requireUser(req);
+    if (!ADMIN_USERS.has(user.username) && !rolesOf(user.username).includes('FW_SystemAdminRole')) {
+      throw Object.assign(new Error('System maintenance requires a framework administrator'), { statusCode: 403 });
+    }
+    return user.username;
+  };
+  registerSystemMaintenanceRoutes(app, kernel, requireFrameworkAdmin);
 
   // ---- actions (named server-side operations, e.g. SalesOrderPost) ----
 

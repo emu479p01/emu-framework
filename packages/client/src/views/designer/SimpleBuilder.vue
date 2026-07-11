@@ -7,6 +7,8 @@ import {
 } from 'naive-ui';
 import { ApiError } from '../../api';
 import { useDesigner, type ChangeSetPreview } from '../../stores/designer';
+import { ICON_OPTIONS } from '../../navigation';
+import type { IconName } from '@emu/core';
 
 const designer = useDesigner();
 const router = useRouter();
@@ -16,7 +18,7 @@ const busy = ref(false);
 const preview = ref<ChangeSetPreview | null>(null);
 const showReview = ref(false);
 const model = reactive({
-  appName: '', appLabel: '', entityName: '', entityLabel: '', pageLabel: '', navigationLabel: '',
+  appName: '', appLabel: '', appIcon: 'app' as IconName, entityName: '', entityLabel: '', pageLabel: '', navigationLabel: '', navigationIcon: 'table' as IconName,
   fields: [{ name: 'name', label: 'Name', type: 'string', mandatory: true }],
 });
 const fieldTypes = ['string', 'int', 'real', 'boolean', 'date', 'datetime'].map((value) => ({ label: value, value }));
@@ -34,10 +36,10 @@ function artifacts() {
   const menuName = `${prefix.value}_MainMenu`;
   const common = { app: model.appName, model: 'Customizations', layer: 'CUS' };
   return [
-    { kind: 'app', name: model.appName, label: model.appLabel, models: [{ name: 'Customizations', label: 'Customizations', layer: 'CUS' }] },
+    { kind: 'app', name: model.appName, label: model.appLabel, icon: model.appIcon, models: [{ name: 'Customizations', label: 'Customizations', layer: 'CUS' }] },
     { kind: 'table', name: tableName, ...common, label: model.entityLabel, titleField: model.fields[0].name, fields: model.fields.map((field) => ({ name: field.name, label: field.label || field.name, type: field.type, mandatory: field.mandatory || undefined })) },
     { kind: 'form', name: formName, ...common, label: model.pageLabel || model.entityLabel, table: tableName, listFields: model.fields.map((field) => field.name), groups: [{ label: 'Details', fields: model.fields.map((field) => field.name) }] },
-    { kind: 'menu', name: menuName, ...common, label: 'Navigation', items: [{ label: model.navigationLabel || model.entityLabel, form: formName }] },
+    { kind: 'menu', name: menuName, ...common, label: 'Navigation', items: [{ label: model.navigationLabel || model.entityLabel, icon: model.navigationIcon, form: formName }] },
   ];
 }
 async function review() {
@@ -79,7 +81,7 @@ async function apply() {
       <div class="step-body">
         <template v-if="step === 1">
           <h2>Name your app</h2><p class="help">Use a short internal name and a friendly name people will recognize.</p>
-          <div class="two-col"><n-form-item label="Internal name" required><n-input v-model:value="model.appName" placeholder="service" data-testid="builder-app-name" /></n-form-item><n-form-item label="Display name" required><n-input v-model:value="model.appLabel" placeholder="Service Management" /></n-form-item></div>
+          <div class="two-col"><n-form-item label="Internal name" required><n-input v-model:value="model.appName" placeholder="service" data-testid="builder-app-name" /></n-form-item><n-form-item label="Display name" required><n-input v-model:value="model.appLabel" placeholder="Service Management" /></n-form-item><n-form-item label="App icon"><n-select v-model:value="model.appIcon" :options="ICON_OPTIONS" /></n-form-item></div>
         </template>
         <template v-else-if="step === 2">
           <h2>What do you want to manage?</h2><p class="help">An entity is a business concept such as Customer, Asset, or Work Order.</p>
@@ -99,7 +101,7 @@ async function apply() {
         </template>
         <template v-else>
           <h2>Add it to navigation</h2><p class="help">This is the label people select in the sidebar.</p>
-          <n-form-item label="Navigation label"><n-input v-model:value="model.navigationLabel" :placeholder="model.entityLabel || 'Work orders'" /></n-form-item>
+          <div class="two-col"><n-form-item label="Navigation label"><n-input v-model:value="model.navigationLabel" :placeholder="model.entityLabel || 'Work orders'" /></n-form-item><n-form-item label="Navigation icon"><n-select v-model:value="model.navigationIcon" :options="ICON_OPTIONS" /></n-form-item></div>
           <n-alert type="info">The app will use safe Customizations defaults. Technical settings remain available in Advanced mode.</n-alert>
         </template>
       </div>

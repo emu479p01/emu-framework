@@ -30,7 +30,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 
 export type Row = { id: number; [field: string]: unknown };
 
-async function requestForm<T>(url: string, form: FormData): Promise<T> {
+export async function requestForm<T>(url: string, form: FormData): Promise<T> {
   const res = await fetch(url, { method: 'POST', body: form, credentials: 'same-origin' });
   if (!res.ok) {
     let message = res.statusText;
@@ -56,6 +56,21 @@ export interface ImportResult {
   updated: number;
   skipped: number;
   failed: { row: number; error: string }[];
+}
+
+export interface MetadataPackagePreview {
+  previewId: string;
+  expiresAt: string;
+  valid: boolean;
+  destructive: boolean;
+  diff: { op: 'create' | 'update' | 'delete'; kind: string; name: string; highRisk?: boolean }[];
+  diagnostics: { path: string; code: string; message: string }[];
+  package: {
+    scope: { type: 'app'; app: string } | { type: 'model'; app: string; model: string };
+    frameworkVersion: string;
+    exportedAt: string;
+    artifactCount: number;
+  };
 }
 
 export const api = {
@@ -91,5 +106,19 @@ export const api = {
     if (keyField) form.append('keyField', keyField);
     form.append('file', file);
     return requestForm<ImportResult>(`/api/data/${table}/import/commit`, form);
+  },
+
+  metadataPackagePreview: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return requestForm<MetadataPackagePreview>('/api/designer/packages/import/preview', form);
+  },
+
+  validateSystemBackup: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return requestForm<{ ok: boolean; manifest: { frameworkVersion: string; createdAt: string; files: { name: string; bytes: number }[] } }>(
+      '/api/system/backup/validate', form,
+    );
   },
 };

@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
+  CORE_VERSION,
   metadataArtifactSchema,
   metadataChangeSetSchema,
   metadataRevision,
@@ -16,6 +17,7 @@ import { readdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { createMetadataPackage, mergeAppManifest, parseMetadataPackage } from './metadataPackage.js';
 
 /**
  * Web Designer API — CRUD over runtime metadata artifacts stored in
@@ -154,7 +156,7 @@ export function registerDesignerRoutes(
     requireDesigner(req);
     const artifacts = loadStored(kernel);
     return {
-      version: '0.0.0.8',
+      version: CORE_VERSION,
       revision: metadataRevision(artifacts),
       changeSets: { version: 1, previewTtlSeconds: 600, humanConfirmationRequired: true },
       ai: { inspect: true, validate: true, apply: false, businessData: false, scripts: false },
@@ -178,6 +180,110 @@ export function registerDesignerRoutes(
       revision: metadataRevision(loadStored(kernel)),
       apps: kernel.registry.loadedApps().filter((entry) => (!requestedApp || entry.name === requestedApp) && (scope === 'all' || scope.has(entry.name))),
       artifacts,
+    };
+  });
+
+  const exportArtifacts = (appName: string, model?: string): MetadataArtifact[] => {
+    const stored = loadStored(kernel);
+    const manifest = stored.find((artifact) => artifact.kind === 'app' && artifact.name === appName);
+    if (!manifest) {
+      throw Object.assign(new Error(`App '${appName}' is file-based and must be moved using its apps/ folder`), { statusCode: 409 });
+    }
+    if (!model) {
+      return stored.filter((artifact) => artifact === manifest || ('app' in artifact && artifact.app === appName));
+    }
+    const appManifest = manifest as MetadataArtifact & { models?: { name: string; label?: string; layer: 'SYS' | 'ISV' | 'LOC' | 'DEV' | 'CUS' }[] };
+    const definition = appManifest.models?.find((entry) => entry.name === model);
+    if (!definition) throw Object.assign(new Error(`Unknown model '${model}' in app '${appName}'`), { statusCode: 404 });
+    const scopedManifest = { ...appManifest, models: [definition] } as MetadataArtifact;
+    return [
+      scopedManifest,
+      ...stored.filter((artifact) => artifact.kind !== 'app' && 'app' in artifact && artifact.app === appName && artifact.model === model),
+    ];
+  };
+
+  app.get<{ Params: { app: string } }>('/api/designer/packages/app/:app/export', (req, reply) => {
+    requireDesigner(req);
+    assertScope(req, { kind: 'app', name: req.params.app, app: req.params.app });
+    if (req.params.app === 'system') return reply.status(400).send({ error: 'System app cannot be exported' });
+    const pkg = createMetadataPackage(CORE_VERSION, { type: 'app', app: req.params.app }, exportArtifacts(req.params.app));
+    reply.header('Content-Type', 'application/json; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="${req.params.app}.emuapp.json"`);
+    return reply.send(JSON.stringify(pkg, null, 2));
+  });
+
+  app.get<{ Params: { app: string; model: string } }>('/api/designer/packages/model/:app/:model/export', (req, reply) => {
+    requireDesigner(req);
+    assertScope(req, { app: req.params.app });
+    if (req.params.app === 'system') return reply.status(400).send({ error: 'System models cannot be exported' });
+    const pkg = createMetadataPackage(
+      CORE_VERSION,
+      { type: 'model', app: req.params.app, model: req.params.model },
+      exportArtifacts(req.params.app, req.params.model),
+    );
+    reply.header('Content-Type', 'application/json; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="${req.params.app}-${req.params.model}.emumodel.json"`);
+    return reply.send(JSON.stringify(pkg, null, 2));
+  });
+
+  app.post('/api/designer/packages/import/preview', async (req, reply) => {
+    const actor = requireDesigner(req);
+    const file = await req.file();
+    if (!file) return reply.status(400).send({ error: 'No package uploaded' });
+    if (file.file.truncated) return reply.status(413).send({ error: 'Package is too large' });
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse((await file.toBuffer()).toString('utf8'));
+    } catch {
+      return reply.status(400).send({ error: 'Package is not valid JSON' });
+    }
+    let pkg;
+    try {
+      pkg = parseMetadataPackage(parsed);
+    } catch (error) {
+      return reply.status(422).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+    if (pkg.scope.app === 'system') return reply.status(400).send({ error: 'System metadata cannot be imported' });
+    assertScope(req, { kind: pkg.scope.type === 'app' ? 'app' : undefined, name: pkg.scope.app, app: pkg.scope.app });
+
+    const stored = loadStored(kernel);
+    const incomingNames = new Set<string>();
+    const operations: MetadataChangeSet['operations'] = [];
+    for (const raw of pkg.artifacts) {
+      const artifact = raw.kind === 'app'
+        ? mergeAppManifest(stored.find((candidate) => candidate.kind === 'app' && candidate.name === raw.name), raw)
+        : raw;
+      if (incomingNames.has(artifact.name)) return reply.status(422).send({ error: `Duplicate artifact '${artifact.name}' in package` });
+      incomingNames.add(artifact.name);
+      const diagnostics = validateMetadataArtifact(artifact);
+      if (diagnostics.length) return reply.status(422).send({ error: `Invalid artifact '${artifact.name}'`, diagnostics });
+      if (artifact.kind === 'app') {
+        if (artifact.name !== pkg.scope.app) return reply.status(422).send({ error: 'App manifest does not match package scope' });
+      } else if (!('app' in artifact) || artifact.app !== pkg.scope.app) {
+        return reply.status(422).send({ error: `Artifact '${artifact.name}' is outside package app scope` });
+      } else if (pkg.scope.type === 'model' && artifact.model !== pkg.scope.model) {
+        return reply.status(422).send({ error: `Artifact '${artifact.name}' is outside package model scope` });
+      }
+      operations.push({ op: 'upsert', kind: artifact.kind, name: artifact.name, artifact });
+    }
+
+    const changeSet: MetadataChangeSet = {
+      version: 1,
+      baseRevision: metadataRevision(stored),
+      source: 'designer',
+      description: `Import ${pkg.scope.type} package ${pkg.scope.app}${pkg.scope.type === 'model' ? `/${pkg.scope.model}` : ''}`,
+      operations,
+    };
+    const preview = previewMetadataChangeSet(kernel, stored, changeSet, { allowScripts: true });
+    if (!preview.valid) return reply.status(422).send(preview);
+    const previewId = randomUUID();
+    previews.set(previewId, { actor, expiresAt: Date.now() + 10 * 60_000, changeSet, preview });
+    const { candidateArtifacts: _candidateArtifacts, ...safePreview } = preview;
+    return {
+      ...safePreview,
+      previewId,
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      package: { scope: pkg.scope, frameworkVersion: pkg.frameworkVersion, exportedAt: pkg.exportedAt, artifactCount: pkg.artifacts.length },
     };
   });
 

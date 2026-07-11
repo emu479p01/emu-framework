@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue';
-import { RouterLink, useRoute, useRouter } from 'vue-router';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import {
   NButton, NConfigProvider, NDialogProvider, NDrawer, NDrawerContent, NDropdown,
   NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NMessageProvider,
-  type MenuOption,
+  type GlobalThemeOverrides,
 } from 'naive-ui';
 import { useSession } from './stores/session';
-import { useMeta, type MenuItem } from './stores/meta';
+import { useMeta } from './stores/meta';
 import { t } from './i18n';
+import { buildNavigationOptions, findActiveKey, type NavMenuOption } from './navigation';
 
 const session = useSession();
 const meta = useMeta();
@@ -17,36 +18,30 @@ const router = useRouter();
 const mobile = ref(false);
 const drawerOpen = ref(false);
 const siderCollapsed = ref(false);
+const themeOverrides: GlobalThemeOverrides = {
+  common: {
+    primaryColor: '#4f46e5', primaryColorHover: '#4338ca', primaryColorPressed: '#3730a3',
+    borderRadius: '10px', fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+  },
+  Button: { borderRadiusMedium: '9px', heightMedium: '38px', fontWeight: '600' },
+  Card: { borderRadius: '14px' },
+  DataTable: { thColor: '#f8fafc', thTextColor: '#475569', tdColorHover: '#f8fafc' },
+};
 
-type NavMenuOption = MenuOption & { formName?: string; routeTo?: string };
-function itemToOption(item: MenuItem, parentKey: string, appName: string): NavMenuOption {
-  const key = `${parentKey}:${item.route || item.form || item.label || 'sub'}`;
-  if (item.items?.length) return { label: item.label ?? '', key, children: item.items.map((child) => itemToOption(child, key, appName)) };
-  const to = item.route || `/app/${appName}/form/${item.form}`;
-  return { key, routeTo: item.route, formName: item.form, label: () => h(RouterLink, { to, onClick: () => (drawerOpen.value = false) }, { default: () => item.label ?? item.form ?? to }) };
-}
-function findActiveKey(options: NavMenuOption[], formName: string, path: string): string | undefined {
-  for (const option of options) {
-    if ((formName && option.formName === formName) || option.routeTo === path) return option.key as string;
-    const found = option.children && findActiveKey(option.children as NavMenuOption[], formName, path);
-    if (found) return found;
-  }
-}
 const menuOptions = computed<NavMenuOption[]>(() => {
-  const groups: NavMenuOption[] = [];
-  if (session.isFrameworkUser && meta.frameworkMenus.length) {
-    groups.push({ label: t('nav.settings'), key: 'framework-settings', type: 'group', children: meta.frameworkMenus.flatMap((menu) => menu.items.map((item) => itemToOption(item, `fw-${menu.name}`, 'system'))) });
-  }
-  groups.push(...meta.apps.map((app) => ({
-    label: app.label, key: `app-${app.name}`, type: 'group' as const,
-    children: app.menus.flatMap((menu) => menu.items.map((item) => itemToOption(item, `app-${app.name}`, app.name))),
-  })));
-  return groups;
+  return buildNavigationOptions({
+    isFrameworkUser: session.isFrameworkUser,
+    settingsLabel: t('nav.settings'),
+    frameworkMenus: meta.frameworkMenus,
+    apps: meta.apps,
+    onNavigate: () => (drawerOpen.value = false),
+  });
 });
 const activeKey = computed(() => findActiveKey(menuOptions.value, String(route.params.formName ?? ''), route.path) ?? '');
 const breadcrumb = computed(() => {
   if (route.path === '/') return t('home.title');
   if (route.path.startsWith('/designer')) return t('designer.title');
+  if (route.path.startsWith('/system/maintenance')) return 'System Maintenance';
   const form = meta.form(String(route.params.formName ?? ''));
   return form?.label ?? form?.name ?? t('home.title');
 });
@@ -58,16 +53,16 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewport));
 </script>
 
 <template>
-  <n-config-provider>
+  <n-config-provider :theme-overrides="themeOverrides">
     <n-message-provider><n-dialog-provider>
       <template v-if="session.user">
         <n-layout has-sider class="app-shell">
-          <n-layout-sider v-if="!mobile" bordered collapse-mode="width" :collapsed="siderCollapsed" :collapsed-width="68" :width="252">
+          <n-layout-sider v-if="!mobile" class="app-sider" bordered collapse-mode="width" :collapsed="siderCollapsed" :collapsed-width="72" :width="264">
             <div class="brand" :class="{ compact: siderCollapsed }">
               <img src="/logo.svg" alt="" width="28" height="28" />
               <span v-if="!siderCollapsed">{{ meta.meta?.branding.title ?? 'EmuFramework' }}</span>
             </div>
-            <n-menu :options="menuOptions" :value="activeKey" :collapsed="siderCollapsed" :collapsed-width="68" :default-expanded-keys="menuOptions.map((item) => item.key as string)" />
+            <n-menu class="app-menu" :options="menuOptions" :value="activeKey" :collapsed="siderCollapsed" :collapsed-width="72" :default-expanded-keys="menuOptions.map((item) => item.key as string)" inverted />
           </n-layout-sider>
           <n-drawer v-model:show="drawerOpen" placement="left" :width="280">
             <n-drawer-content :title="meta.meta?.branding.title ?? 'EmuFramework'" closable body-content-style="padding:0">
@@ -92,17 +87,19 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewport));
 </template>
 
 <style>
-:root { color-scheme: light; --emu-bg:#f6f8fb; --emu-border:#e5e9f0; --emu-text:#172033; --emu-muted:#667085; }
+:root { color-scheme:light; --emu-bg:#f5f7fb; --emu-surface:#fff; --emu-border:#e2e8f0; --emu-text:#152033; --emu-muted:#64748b; --emu-primary:#4f46e5; --emu-radius-lg:14px; --emu-shadow-sm:0 1px 3px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.04); }
 * { box-sizing:border-box; }
-body { margin:0; color:var(--emu-text); background:var(--emu-bg); font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+body { margin:0; color:var(--emu-text); background:var(--emu-bg); font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; }
 .app-shell { min-height:100vh; }
-.brand { height:60px; display:flex; align-items:center; gap:10px; padding:0 18px; font-weight:700; font-size:16px; overflow:hidden; white-space:nowrap; }
+.app-sider { background:linear-gradient(180deg,#111827 0%,#172033 100%)!important; }
+.brand { height:68px; display:flex; align-items:center; gap:11px; padding:0 20px; font-weight:750; font-size:16px; overflow:hidden; white-space:nowrap; color:#fff;letter-spacing:-.02em;border-bottom:1px solid rgba(255,255,255,.08) }
+.brand img{filter:drop-shadow(0 4px 10px rgba(99,102,241,.35))}.app-menu{padding:12px 8px}.app-menu .n-menu-item-content{border-radius:8px}.nav-icon{width:24px;height:24px;display:inline-grid;place-items:center;flex:0 0 24px}.nav-monogram{border-radius:7px;background:rgba(99,102,241,.24);color:#c7d2fe;font-size:12px;font-weight:800}.n-menu--collapsed .nav-icon{width:32px;height:32px}.n-menu--collapsed .nav-monogram{border-radius:9px}
 .brand.compact { justify-content:center; padding:0; }
-.topbar { height:60px; padding:0 20px; display:flex; align-items:center; gap:12px; background:#fff; }
+.topbar { height:68px; padding:0 28px; display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.92);backdrop-filter:blur(12px);box-shadow:0 1px 0 rgba(15,23,42,.06); }
 .page-context { flex:1; min-width:0; }
-.crumb { font-size:14px; font-weight:600; }
+.crumb { font-size:14px; font-weight:700;letter-spacing:-.01em; }
 .user-button { max-width:220px; }
-.page-content { min-height:calc(100vh - 60px); padding:28px; background:var(--emu-bg); }
-:focus-visible { outline:3px solid #2563eb !important; outline-offset:2px; }
-@media (max-width:899px) { .topbar{padding:0 12px}.page-content{padding:16px}.user-button{max-width:145px} }
+.page-content { min-height:calc(100vh - 68px); padding:32px; background:radial-gradient(circle at 100% 0,rgba(99,102,241,.055),transparent 28%),var(--emu-bg); }
+:focus-visible { outline:3px solid rgba(79,70,229,.45) !important; outline-offset:2px; }
+@media (max-width:899px) { .topbar{padding:0 14px}.page-content{padding:18px 14px}.user-button{max-width:145px} }
 </style>

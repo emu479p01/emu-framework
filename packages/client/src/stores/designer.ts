@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { api } from '../api';
+import { api, type MetadataPackagePreview } from '../api';
 import { useMeta } from './meta';
 
 /** Any metadata artifact as edited in the designer (shape depends on kind). */
@@ -15,6 +15,7 @@ export interface WebArtifactEntry {
 export interface DesignerApp {
   name: string;
   label?: string;
+  icon?: import('@emu/core').IconName;
   models?: { name: string; label?: string; layer: string }[];
 }
 export interface ChangeSetPreview {
@@ -82,6 +83,15 @@ export const useDesigner = defineStore('designer', {
       const result = await api.post<{ ok: boolean; revision: string }>('/api/designer/change-sets/apply', { previewId, confirmation: true, confirmHighRisk });
       await Promise.all([this.load(), useMeta().load()]);
       return result;
+    },
+    exportAppUrl(app: string) {
+      return `/api/designer/packages/app/${encodeURIComponent(app)}/export`;
+    },
+    exportModelUrl(app: string, model: string) {
+      return `/api/designer/packages/model/${encodeURIComponent(app)}/${encodeURIComponent(model)}/export`;
+    },
+    previewPackage(file: File): Promise<MetadataPackagePreview> {
+      return api.metadataPackagePreview(file);
     },
   },
 });

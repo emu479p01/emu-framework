@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { NButton, NInput, NSelect, NSpace } from 'naive-ui';
+import { ICON_OPTIONS } from '../../navigation';
+import type { IconName } from '@emu/core';
 
 export interface EditableMenuItem {
   label?: string;
+  icon?: IconName;
   form?: string;
   route?: string;
   items?: EditableMenuItem[];
@@ -15,12 +18,12 @@ const props = defineProps<{
 }>();
 
 function addItem() {
-  props.items.push({ label: '', form: '' });
+  props.items.push({ label: '', icon: 'table', form: '' });
 }
 
 function addSubItem(item: EditableMenuItem) {
   if (!item.items) item.items = [];
-  item.items.push({ label: '', form: '' });
+  item.items.push({ label: '', icon: 'grid', form: '' });
 }
 
 function removeItem(i: number) {
@@ -34,6 +37,7 @@ function removeItem(i: number) {
       <div v-for="(item, i) in items" :key="i">
         <n-space align="center">
           <n-input v-model:value="item.label" size="small" placeholder="Label" style="width: 200px" />
+          <n-select v-model:value="item.icon" :options="ICON_OPTIONS" size="small" clearable placeholder="Icon" style="width: 130px" />
           <n-select
             v-model:value="item.form"
             :options="formOptions"

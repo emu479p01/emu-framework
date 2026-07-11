@@ -22,6 +22,7 @@ import { ApiError } from '../../api';
 import FieldsEditor, { type EditableField } from './FieldsEditor.vue';
 import IndexesEditor, { type EditableIndex } from './IndexesEditor.vue';
 import MenuItemsEditor, { type EditableMenuItem } from './MenuItemsEditor.vue';
+import { ICON_OPTIONS } from '../../navigation';
 
 const props = defineProps<{ kind: string; name?: string }>();
 const route = useRoute();
@@ -543,6 +544,9 @@ function removeTablePermission(i: number) { (artifact.value.tablePermissions as 
               <n-space vertical>
                 <n-form-item label="Description">
                   <n-input v-model:value="(artifact.label as string)" placeholder="Display name for this app" />
+                </n-form-item>
+                <n-form-item label="App icon">
+                  <n-select v-model:value="(artifact.icon as string)" :options="ICON_OPTIONS" clearable placeholder="Automatic monogram" />
                 </n-form-item>
                 <n-form-item>
                   <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0">

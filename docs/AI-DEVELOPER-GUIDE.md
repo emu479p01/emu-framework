@@ -1,9 +1,13 @@
 # AI Developer Guide
 
-**Version: v0.0.0.8**
+**Version: v0.0.0.9**
 
 EmuFramework exposes metadata context and validation without granting an AI permission to
 apply changes, delete artifacts, execute scripts, run SQL, or read business records.
+
+Public App and menu metadata may include the optional safe `icon` field. Valid values are
+`app`, `grid`, `users`, `settings`, `database`, `table`, `chart`, `shield`, `wrench`, and
+`file`. Omit it for backward compatibility; the client supplies a deterministic fallback.
 
 ## Change-set workflow
 
@@ -69,8 +73,17 @@ There is deliberately no apply, delete, SQL, business-data, or script-execution 
 - `GET /api/designer/snapshot?app=<name>`
 - `POST /api/designer/change-sets/validate`
 - `POST /api/designer/change-sets/apply`
+- `GET /api/designer/packages/app/:app/export`
+- `GET /api/designer/packages/model/:model/export`
+- `POST /api/designer/packages/import/preview`
+- `POST /api/designer/packages/import/apply`
 
 Validate returns a session-bound preview ID that expires after ten minutes. Apply requires an
 authenticated Designer user, matching customization scope, an unchanged base revision, and
 explicit human confirmation. High-risk changes require a second confirmation. Applied change
 sets are recorded in `FW_ChangeSetAudit` in the designer database.
+
+Metadata packages contain definitions only—never business rows, users, or sessions. Import
+preview verifies the package checksum and schema, including icon tokens, before returning the
+create/update merge plan. Full database recovery uses the checksummed `.emubackup` workflow in
+**Settings → System Maintenance**, not the metadata-package endpoints.
