@@ -1,9 +1,10 @@
 import AjvModule, { type ErrorObject } from 'ajv';
 import { Type, type TSchema } from '@sinclair/typebox';
-import type { AnyMeta, AppManifest } from './types.js';
+import { ICON_NAMES, type AnyMeta, type AppManifest } from './types.js';
 
 const name = Type.String({ minLength: 1, pattern: '^[A-Za-z_][A-Za-z0-9_.-]*$' });
 const layer = Type.Union(['SYS', 'ISV', 'LOC', 'DEV', 'CUS'].map((value) => Type.Literal(value)));
+const icon = Type.Optional(Type.Union(ICON_NAMES.map((value) => Type.Literal(value))));
 const common = {
   name,
   app: Type.Optional(Type.String({ minLength: 1 })),
@@ -37,6 +38,7 @@ const indexSchema = Type.Object({
 }, { additionalProperties: false });
 const menuItemSchema = Type.Object({
   label: Type.Optional(Type.String()),
+  icon,
   form: Type.Optional(Type.String()),
   route: Type.Optional(Type.String()),
   // Nested items use the same wire shape. Cross-reference and nested shape validation
@@ -74,7 +76,7 @@ const reportBandSchema = Type.Object({
 }, { additionalProperties: false });
 
 const artifactSchemas = [
-  Type.Object({ kind: Type.Literal('app'), name, label: Type.Optional(Type.String()), dependsOn: Type.Optional(Type.Array(Type.String())), models: Type.Optional(Type.Array(Type.Object({ name, label: Type.Optional(Type.String()), layer }))) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('app'), name, label: Type.Optional(Type.String()), icon, dependsOn: Type.Optional(Type.Array(Type.String())), models: Type.Optional(Type.Array(Type.Object({ name, label: Type.Optional(Type.String()), layer }))) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('table'), ...common, fields: Type.Array(fieldSchema), titleField: Type.Optional(Type.String()), indexes: Type.Optional(Type.Array(indexSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('enum'), ...common, values: Type.Array(Type.Object({ name, value: Type.Integer(), label: Type.Optional(Type.String()) }, { additionalProperties: false })) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('form'), ...common, table: Type.String(), actions: Type.Optional(Type.Array(Type.Object({ label: Type.String(), action: Type.String() }))), listFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), lines: Type.Optional(Type.Array(lineGridSchema)) }, { additionalProperties: false }),

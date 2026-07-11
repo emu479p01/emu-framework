@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*', '0.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.10.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24.18.0, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:versions
+      - run: pnpm test
+      - run: pnpm typecheck
+      - run: pnpm build
+      - name: Package updater asset
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p release/emuframework-$VERSION
+          rsync -a --exclude='.git' --exclude='node_modules' --exclude='release' --exclude='*.db*' ./ release/emuframework-$VERSION/
+          cd release
+          zip -qr "emuframework-$VERSION.zip" "emuframework-$VERSION"
+          sha256sum "emuframework-$VERSION.zip" > "emuframework-$VERSION.zip.sha256"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/emuframework-*.zip
+            release/emuframework-*.zip.sha256
+          generate_release_notes: true

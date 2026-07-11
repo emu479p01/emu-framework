@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   NAvatar,
+  NAlert,
   NButton,
   NCard,
   NDropdown,
@@ -24,6 +25,7 @@ import {
 import { useDesigner } from '../../stores/designer';
 import { useMeta } from '../../stores/meta';
 import { ApiError } from '../../api';
+import type { MetadataPackagePreview } from '../../api';
 import SimpleBuilder from './SimpleBuilder.vue';
 
 const designer = useDesigner();
@@ -83,21 +85,84 @@ function avatarColor(name: string): string {
 // ---- kebab menus ----
 function appMenuOptions(appName: string) {
   const opts = [{ key: 'edit', label: 'Edit App' }];
-  if (appName !== 'system') opts.push({ key: 'delete', label: 'Delete App' });
+  if (appName !== 'system') opts.push(
+    { key: 'export', label: 'Export App' },
+    { key: 'import', label: 'Import / Merge App' },
+    { key: 'delete', label: 'Delete App' },
+  );
   return opts;
 }
 function modelMenuOptions(appName: string, modelName: string) {
   const opts = [{ key: 'edit', label: 'Edit Model' }];
-  if (appName !== 'system') opts.push({ key: 'delete', label: 'Delete Model' });
+  if (appName !== 'system') opts.push(
+    { key: 'export', label: 'Export Model' },
+    { key: 'import', label: 'Import / Merge Model' },
+    { key: 'delete', label: 'Delete Model' },
+  );
   return opts;
 }
 function handleAppMenu(appName: string, key: string) {
   if (key === 'edit') router.push(`/designer/app/${encodeURIComponent(appName)}`);
+  else if (key === 'export') downloadPackage(designer.exportAppUrl(appName));
+  else if (key === 'import') choosePackage();
   else if (key === 'delete') removeApp(appName);
 }
 function handleModelMenu(appName: string, model: { name: string; label?: string; layer: string }, key: string) {
   if (key === 'edit') openEditModel(appName, model.name, model.label ?? '', model.layer);
+  else if (key === 'export') downloadPackage(designer.exportModelUrl(appName, model.name));
+  else if (key === 'import') choosePackage();
   else if (key === 'delete') removeModel(appName, model.name);
+}
+
+const showPackagePreview = ref(false);
+const packagePreview = ref<MetadataPackagePreview | null>(null);
+const packageBusy = ref(false);
+
+function downloadPackage(url: string) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function choosePackage() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,.emuapp.json,.emumodel.json,application/json';
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    packageBusy.value = true;
+    try {
+      packagePreview.value = await designer.previewPackage(file);
+      showPackagePreview.value = true;
+    } catch (err) {
+      message.error(err instanceof ApiError ? err.message : 'Package could not be validated');
+    } finally {
+      packageBusy.value = false;
+    }
+  };
+  input.click();
+}
+
+async function commitPackage() {
+  if (!packagePreview.value) return;
+  packageBusy.value = true;
+  try {
+    await designer.applyChangeSet(
+      packagePreview.value.previewId,
+      packagePreview.value.diff.some((item) => item.highRisk),
+    );
+    showPackagePreview.value = false;
+    packagePreview.value = null;
+    message.success('Metadata package imported');
+  } catch (err) {
+    message.error(err instanceof ApiError ? err.message : 'Package import failed');
+  } finally {
+    packageBusy.value = false;
+  }
 }
 
 // ---- kind icon/label ----
@@ -365,6 +430,7 @@ async function onReload() {
         </div>
       </div>
       <n-space>
+        <n-button secondary :loading="packageBusy" @click="choosePackage">Import Package</n-button>
         <n-button text @click="onReload" :loading="reloading">
           Sync from disk
         </n-button>
@@ -608,6 +674,30 @@ async function onReload() {
         </n-space>
       </template>
     </n-modal>
+    <n-modal v-model:show="showPackagePreview" preset="card" title="Review Metadata Import" style="width:min(720px, 92vw)">
+      <template v-if="packagePreview">
+        <n-alert v-if="packagePreview.diff.some((item) => item.highRisk)" type="warning" style="margin-bottom:16px">
+          This package contains executable scripts. Import only packages from a trusted source.
+        </n-alert>
+        <div class="package-summary">
+          <strong>{{ packagePreview.package.scope.type === 'app' ? 'App' : 'Model' }}:</strong>
+          {{ packagePreview.package.scope.app }}<template v-if="packagePreview.package.scope.type === 'model'"> / {{ packagePreview.package.scope.model }}</template>
+          · {{ packagePreview.package.artifactCount }} artifacts
+          · from v{{ packagePreview.package.frameworkVersion }}
+        </div>
+        <n-table size="small" :bordered="false" style="margin-top:16px;max-height:360px;overflow:auto">
+          <thead><tr><th>Change</th><th>Kind</th><th>Name</th><th>Risk</th></tr></thead>
+          <tbody><tr v-for="item in packagePreview.diff" :key="`${item.kind}:${item.name}`">
+            <td><n-tag size="small" :type="item.op === 'create' ? 'success' : 'warning'">{{ item.op }}</n-tag></td>
+            <td>{{ item.kind }}</td><td>{{ item.name }}</td><td>{{ item.highRisk ? 'High' : 'Normal' }}</td>
+          </tr></tbody>
+        </n-table>
+      </template>
+      <template #footer><n-space justify="end">
+        <n-button @click="showPackagePreview=false">Cancel</n-button>
+        <n-button type="primary" :loading="packageBusy" @click="commitPackage">Confirm Merge</n-button>
+      </n-space></template>
+    </n-modal>
     </div>
   </div>
 </template>
@@ -618,6 +708,7 @@ async function onReload() {
   margin: 0 auto;
 }
 .mode-switch { max-width:920px; margin:0 auto 20px; display:flex; gap:8px; }
+.package-summary { color:var(--emu-muted); font-size:13px; }
 
 .designer-toolbar {
   display: flex;

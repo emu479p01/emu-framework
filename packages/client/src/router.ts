@@ -8,6 +8,7 @@ const FormPage = () => import('./views/FormPage.vue');
 const DesignerPage = () => import('./views/designer/DesignerPage.vue');
 const DesignerEditPage = () => import('./views/designer/DesignerEditPage.vue');
 const ReportEditPage = () => import('./views/report-designer/ReportEditPage.vue');
+const SystemMaintenancePage = () => import('./views/SystemMaintenancePage.vue');
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -28,6 +29,7 @@ export const router = createRouter({
     { path: '/designer/report/:name', component: ReportEditPage, props: true },
     { path: '/designer/new/:kind', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind }) },
     { path: '/designer/:kind/:name', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind, name: r.params.name }) },
+    { path: '/system/maintenance', component: SystemMaintenancePage },
   ],
 });
 

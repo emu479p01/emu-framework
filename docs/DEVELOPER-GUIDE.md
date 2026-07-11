@@ -1,6 +1,9 @@
 # EmuFramework Developer Guide
 
-**Version: v0.0.0.8**
+**Version: v0.0.0.9**
+
+> Upgrade existing Git clones or downloaded copies with `Update.cmd`. The updater consumes
+> checksummed stable GitHub Release assets and preserves application code and both SQLite files.
 
 ## Table of Contents
 1. [Architecture Overview](#1-architecture-overview)
@@ -201,9 +204,14 @@ Good to know:
 {
   "name": "crm",
   "label": "CRM System",
+  "icon": "users",
   "dependsOn": []
 }
 ```
+
+`icon` is optional. Supported tokens are `app`, `grid`, `users`, `settings`, `database`,
+`table`, `chart`, `shield`, `wrench`, and `file`. Apps without an icon use their initial in a
+circle, so existing `app.json` files and CLI-created apps remain valid.
 
 For an extension app:
 ```json
@@ -490,7 +498,7 @@ The framework generates a **List Page** + **Detail Form** automatically from For
   "name": "MainMenu",
   "label": "My Library",
   "items": [
-    { "label": "Members", "form": "MemberForm" }
+    { "label": "Members", "form": "MemberForm", "icon": "users" }
   ]
 }
 ```
@@ -505,8 +513,9 @@ The framework generates a **List Page** + **Detail Form** automatically from For
   "items": [
     {
       "label": "Loans",
+      "icon": "table",
       "items": [
-        { "label": "Book loans", "form": "BookLoanForm" }
+        { "label": "Book loans", "form": "BookLoanForm", "icon": "file" }
       ]
     },
     {
@@ -515,12 +524,15 @@ The framework generates a **List Page** + **Detail Form** automatically from For
         { "label": "Books", "form": "BookForm" }
       ]
     },
-    { "label": "Members", "form": "MemberForm" }
+    { "label": "Members", "form": "MemberForm", "icon": "users" }
   ]
 }
 ```
 
 Nesting is supported to **unlimited depth** — submenus can go as deep as you like.
+`icon` is optional on every item and uses the same safe token catalog as `app.json`. Missing
+menu icons fall back according to their route/form (or to the generic File icon). In collapsed
+mode the top-level App/Settings icons remain visible and open their submenu as a popup.
 
 ### Security Filtering
 

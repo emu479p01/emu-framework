@@ -2,7 +2,7 @@
 
 # EmuFramework
 
-**Version: v0.0.0.8**
+**Version: v0.0.0.9**
 
 📦 [Download the latest release](https://github.com/emu479p01/emu-framework/releases)
 
@@ -21,7 +21,7 @@ host any number of independent apps, extensions, and web-designed customizations
 - **Ship apps in days, not months** — describe a table and a form in JSON and the full
   list/detail UI, field controls, and line grids already work. No frontend code to write.
 - **One platform, many apps** — host multiple independent business apps at once, each with
-  its own sidebar, menu tree, and security policy, without them stepping on each other.
+  its own icon, collapsible navigation tree, and security policy, without them stepping on each other.
 - **Extend without forking** — dot-named extensions (e.g. `crm.reporting`) add tables, forms,
   menus, and event handlers to an existing app without ever touching its base code.
 - **Self-hosted, single process** — one Node.js process, an embedded SQLite database, no
@@ -37,9 +37,13 @@ host any number of independent apps, extensions, and web-designed customizations
 
 ![EmuFramework app shell and Web Designer](docs/assets/screenshots/app-shell.png)
 
+The responsive navigation keeps App and Settings icons visible when the sidebar is collapsed:
+
+![Collapsed navigation](docs/assets/screenshots/sidebar-collapsed.png)
+
 Creating a table from the browser, live, with no deploy step:
 
-![Creating a table in the Web Designer](docs/assets/screenshots/web-designer-demo.gif)
+![Creating a table in the Web Designer](docs/assets/screenshots/designer-new-table.png)
 
 All reads and writes go through `DataContext`, so hooks, events, and security always apply —
 whether the call comes from generated UI or your own code:
@@ -151,12 +155,14 @@ from the browser without writing code.
 ## Key Concepts
 
 **Platform, not product** — EmuFramework is an app *platform*. You create apps on top of it. Each app
-gets its own sidebar group, menu tree, and security policies. Extensions (dot-named like `crm.reporting`)
+gets its own icon-enabled sidebar submenu, menu tree, and security policies. Extensions (dot-named like `crm.reporting`)
 add features to existing apps without modifying base code.
 
 **Metadata-driven UI** — apps declare `tables/enums/forms/menus/privileges/duties/roles` as JSON
 under `metadata/`. The registry validates cross-references at boot; the client auto-generates all UI.
-Menus support arbitrary nesting (modules, submenus, items).
+Menus support arbitrary nesting (modules, submenus, items). App and menu metadata can use the
+optional safe icon tokens `app`, `grid`, `users`, `settings`, `database`, `table`, `chart`,
+`shield`, `wrench`, and `file`; older metadata receives an automatic fallback.
 
 **Data API (transactional, table-buffer style)** — all reads/writes go through `DataContext`, so hooks, events and
 security always apply. See the code sample above for `newRecord`, `select`, and `tts`.
@@ -175,8 +181,9 @@ via the built-in Users page (Admin role).
 
 **Web Designer** — admins can create tables, forms, menus, and even entire new apps from the
 browser. Artifacts are stored in the database (`SystemWebArtifact`) and applied live. When
-creating tables, select the target app and menu destination — the new item appears under
-that app's sidebar group automatically via menuExtension.
+creating tables, select the target app, icon, and menu destination — the new item appears under
+that app's sidebar submenu automatically via menuExtension. Advanced mode can export an App or
+Model as a checksummed metadata package and preview every change before importing it.
 
 **CLI Developer tool** — `pnpm emu` scaffolds apps, hierarchical modules, metadata objects
 (tables, forms, menus, security), and extensions interactively. See `pnpm emu --help`.
@@ -279,12 +286,35 @@ file-based database, not a managed DB service.
 Both `EMU_DB_PATH` and `EMU_DESIGNER_DB_PATH` point at plain SQLite files — together they are
 **100% of your application's data**. Back them up regularly, and always before upgrading:
 
+Framework administrators can open **Settings → System Maintenance → Export Full Backup** to
+download a checksummed `.emubackup` containing consistent snapshots of both databases. To
+restore it safely, stop the application and run:
+
+```bat
+RestoreDatabase.cmd "C:\path\to\backup.emubackup"
+```
+
+The restore tool validates checksums and SQLite integrity, saves the current databases under
+`backups/`, and rolls back if the restored application does not start successfully.
+
+![System Maintenance](docs/assets/screenshots/system-maintenance.png)
+
 ```sh
 cp /var/lib/emuframework/data.db /var/lib/emuframework/designer.db /path/to/backup/
 ```
 
 If those files are ever deleted, the app will simply create fresh empty ones and reseed the
 default `admin`/`admin` account on next boot — all your data will be gone.
+
+### Updating from GitHub
+
+First create a full backup, then run `Update.cmd` from the framework folder. It checks the latest stable GitHub Release,
+verifies the release checksum, preserves `apps/`, databases, portable tools, and generated app
+registration blocks, then installs dependencies, typechecks, and builds the updated version.
+It supports both Git clones and folders originally downloaded as ZIP files. A Git checkout
+with unrelated local framework edits is stopped for manual conflict review rather than being
+overwritten. Running `Update.cmd` upgrades v0.0.0.9 to the newest stable release (for example,
+v0.0.1.0); use `Update.cmd -Version 0.0.1.0` to select that release explicitly.
 
 ### First login
 

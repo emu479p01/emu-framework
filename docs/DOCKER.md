@@ -54,10 +54,24 @@ as-is unless you're customizing the volume mount path too.
 
 Both SQLite files (plus their `-wal`/`-shm` sidecar files) live in the `emu-data` volume:
 
+The recommended live workflow is **Settings → System Maintenance → Export Full Backup**. It
+produces a checksummed `.emubackup` with consistent snapshots of both databases. Store it
+outside the container/volume. The tar command below is an infrastructure-level alternative;
+stop writes first so SQLite and its WAL files are captured consistently.
+
 ```sh
 docker run --rm -v emu-data:/data -v "$PWD":/backup debian \
   tar czf /backup/emu-backup.tar.gz -C /data .
 ```
+
+For restore, stop the container, validate the archive/checksums, replace both database files,
+then start the container and verify the application before discarding the previous volume
+snapshot. `RestoreDatabase.cmd` is the guarded Windows-host workflow for `.emubackup` files;
+inside Docker, perform the equivalent replacement in a maintenance window.
+
+Framework upgrades should be delivered by rebuilding/pulling the new image while retaining the
+`emu-data` volume. `Update.cmd` is for Git clones and ZIP installations running directly on
+Windows, not for a live container filesystem.
 
 ## Putting it behind a reverse proxy / HTTPS
 

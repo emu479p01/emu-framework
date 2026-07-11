@@ -9,7 +9,7 @@ export type { AggregateMeta, EnumMeta, FieldMeta, FormMeta, MenuMeta, ReportMeta
 export type MenuItem = MenuItemMeta;
 export type SecurityMeta = Pick<PrivilegeMeta | DutyMeta | RoleMeta, 'name' | 'label' | 'app' | 'model' | 'layer'>;
 export interface ModelEntry { name: string; label?: string; layer: string }
-export interface AppEntry { name: string; label: string; models?: ModelEntry[]; modules: string[]; menus: MenuMeta[] }
+export interface AppEntry { name: string; label: string; icon?: import('@emu/core').IconName; models?: ModelEntry[]; modules: string[]; menus: MenuMeta[] }
 export interface Metadata {
   branding: { title: string };
   tables: TableMeta[]; enums: EnumMeta[]; forms: FormMeta[]; reports: ReportMeta[];

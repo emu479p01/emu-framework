@@ -1,9 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import DatabaseCtor from 'better-sqlite3';
-import { MetadataRegistry, MetadataError, syncSchema, type TableMeta, type FormMeta, type ReportMeta } from '../src/index.js';
+import { MetadataRegistry, MetadataError, syncSchema, validateMetadataArtifact, type TableMeta, type FormMeta, type ReportMeta } from '../src/index.js';
 import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable, testRegistry } from './helpers.js';
 
 describe('MetadataRegistry', () => {
+  it('accepts optional safe icons and rejects unknown icon tokens', () => {
+    expect(validateMetadataArtifact({ kind: 'app', name: 'plain' })).toEqual([]);
+    expect(validateMetadataArtifact({ kind: 'app', name: 'safe', icon: 'chart' })).toEqual([]);
+    expect(validateMetadataArtifact({ kind: 'app', name: 'unsafe', icon: '<svg>' }).some((item) => item.path.includes('icon'))).toBe(true);
+
+    const registry = new MetadataRegistry();
+    expect(() => registry.registerApp({ name: 'a' }, [{
+      kind: 'menu', name: 'A_Menu', items: [{ label: 'Nested', items: [{ label: 'Bad', icon: 'unknown' as any }] }],
+    }])).toThrow(/unknown icon/);
+  });
+
   it('loads and validates a well-formed app', () => {
     const registry = testRegistry();
     expect(registry.getTable('TESTAPP_CustTable').fields).toHaveLength(3);

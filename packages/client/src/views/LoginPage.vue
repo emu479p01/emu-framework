@@ -31,9 +31,10 @@ async function submit() {
 </script>
 
 <template>
-  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; height: 100vh; background: #f5f6f8">
-    <img src="/logo.svg" alt="" width="56" height="56" />
-    <n-card :title="title" style="width: 360px">
+  <div class="login-page">
+    <div class="login-brand"><img src="/logo.svg" alt="" width="58" height="58" /><div><strong>{{ title }}</strong><span>Business application platform</span></div></div>
+    <n-card class="login-card">
+      <h1>Welcome back</h1><p class="login-copy">Sign in to continue to your workspace.</p>
       <n-form @keyup.enter="submit">
         <n-form-item label="Username">
           <n-input v-model:value="username" placeholder="admin" data-testid="username" />
@@ -49,3 +50,7 @@ async function submit() {
     </n-card>
   </div>
 </template>
+
+<style scoped>
+.login-page{min-height:100vh;display:grid;place-content:center;gap:22px;padding:24px;background:radial-gradient(circle at 15% 15%,rgba(99,102,241,.18),transparent 30%),radial-gradient(circle at 85% 80%,rgba(14,165,233,.12),transparent 30%),#f5f7fb}.login-brand{display:flex;align-items:center;gap:13px}.login-brand strong{display:block;font-size:18px;letter-spacing:-.02em}.login-brand span{display:block;color:var(--emu-muted);font-size:12px;margin-top:2px}.login-card{width:min(400px,calc(100vw - 32px));padding:8px;border:1px solid rgba(226,232,240,.9);box-shadow:0 24px 70px rgba(15,23,42,.13)}.login-card h1{font-size:24px;letter-spacing:-.035em;margin:2px 0 4px}.login-copy{color:var(--emu-muted);margin:0 0 22px}
+</style>

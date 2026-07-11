@@ -1,6 +1,6 @@
 {
   "name": "@emu/server",
-  "version": "0.0.0.8",
+  "version": "0.0.0.9",
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
@@ -23,6 +23,7 @@
     "csv-stringify": "^6.5.1",
     "exceljs": "^4.4.0",
     "fastify": "^4.28.1",
+    "fflate": "0.8.2",
     "pdfmake": "^0.3.11"
   },
   "devDependencies": {

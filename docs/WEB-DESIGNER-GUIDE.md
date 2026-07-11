@@ -1,6 +1,6 @@
 # Web Designer Guide — Customize EmuFramework from Your Browser
 
-**Version: v0.0.0.8**
+**Version: v0.0.0.9**
 
 ## Simple Builder (recommended)
 
@@ -30,7 +30,8 @@ a page built into the app itself. If you're a developer looking for the code-bas
 7. [Editing Raw JSON](#7-editing-raw-json)
 8. [Deleting Something You Created](#8-deleting-something-you-created)
 9. [Good Habits and Key Rules](#9-good-habits-and-key-rules)
-10. [What You Can't Do from the Browser (Yet)](#10-what-you-cant-do-from-the-browser-yet)
+10. [System Maintenance and Updates](#10-system-maintenance-and-updates)
+11. [What Still Requires Code](#11-what-still-requires-code)
 
 ---
 
@@ -41,7 +42,9 @@ the forms used to edit them, and the menu items that link to them — directly f
 while the app is running. There's nothing to install, no server restart, and no code to write.
 
 Everything you create is saved to the database immediately and shows up in the app's sidebar
-right away, for every user who has access to it.
+right away, for every user who has access to it. The modern navigation shows App and Settings
+as expandable submenus. Collapse it to a compact icon rail; hover or click an icon to open its
+menu. The same tree is used by the mobile drawer.
 
 ![Web Designer home screen](assets/screenshots/designer-home.png)
 
@@ -54,10 +57,16 @@ right away, for every user who has access to it.
 
 ![Login screen](assets/screenshots/login.png)
 
-You'll land on the Designer home page, which lists every app currently on the system and how
-many tables/artifacts each one has.
+You'll land on the Designer home page. **Simple Builder** provides the guided App → Entity →
+Fields → Page → Navigation flow; **Advanced** lists every app, model, and artifact.
+
+![Workspace app cards](assets/screenshots/workspace.png)
 
 ![Sidebar and app shell](assets/screenshots/app-shell.png)
+
+![Collapsed sidebar](assets/screenshots/sidebar-collapsed.png)
+
+![Mobile navigation drawer](assets/screenshots/mobile-navigation.png)
 
 ---
 
@@ -73,10 +82,12 @@ that, everything else (tables, forms, menus) gets added under it.
    - **Name** — a short, lowercase identifier with no spaces (e.g. `inventory`). This is used
      internally and can't be changed later.
    - **Label** — the friendly name shown in the sidebar (e.g. `Inventory`).
+   - **Icon** — an optional safe icon token. Choose from App, Grid, Users, Settings, Database,
+     Table, Chart, Shield, Wrench, or File.
 4. Click **Save**.
 
-Your new app immediately appears in the sidebar as its own group — currently empty, ready for
-tables.
+Your new app immediately appears in the sidebar as its own submenu — currently empty, ready
+for tables. Older or CLI-created apps without an icon use a circular initial automatically.
 
 ---
 
@@ -88,7 +99,7 @@ to add/edit one record) and the **menu item** (the sidebar link that opens it), 
 
 1. On the Designer page, click **+ New**.
 2. Choose **Table (+ form + menu)**.
-3. **Choose the App** — pick which app (sidebar group) this table belongs to. If you just
+3. **Choose the App** — pick which app (sidebar submenu) this table belongs to. If you just
    created a new app in step 3, select it here.
 4. **Choose a menu destination** — where should the sidebar link for this table appear?
    - Pick an existing menu (e.g. `MainMenu`) to add your item alongside what's already there.
@@ -99,8 +110,6 @@ to add/edit one record) and the **menu item** (the sidebar link that opens it), 
 7. Click **Save**.
 
 ![Creating a new table](assets/screenshots/designer-new-table.png)
-
-![Filling in the new table form, live](assets/screenshots/web-designer-demo.gif)
 
 The table, its form, and its menu item all appear in the sidebar immediately — no page reload,
 no server restart.
@@ -131,7 +140,8 @@ bundle from Section 4:
 - **New… → Form** — pick an existing table, then choose which fields show in the list view and
   how fields are grouped on the edit screen.
 - **New… → Menu** — pick which items belong in it, and which form each item should open.
-  Menus support multiple levels (a menu can contain sub-menus).
+  Menus support multiple levels (a menu can contain sub-menus). Every item can select an
+  optional icon; routes/forms without one receive a safe automatic fallback.
 - **New… → Enum** — define a fixed list of choices (e.g. `Draft / Approved / Rejected`) that a
   field can use as a dropdown.
 
@@ -159,27 +169,46 @@ you re-create the same field or table later, the old data is still there.
 
 ## 9. Good Habits and Key Rules
 
-- **Always pick the right App** when creating something — it determines which sidebar group it
+- **Always pick the right App** when creating something — it determines which sidebar submenu it
   shows up in.
 - **Prefer an existing menu** over creating a new one, unless you're intentionally starting a
   new section of the sidebar.
 - **Nothing requires a server restart.** Every save applies live, for every logged-in user.
+- Use **Export App** or **Export Model** from the item menu to create a checksummed metadata-only
+  package. **Import Package** validates the schema and checksum, then shows every create/update
+  change before merge. Optional App/Menu icon values are preserved automatically.
+  Packages never contain business records, users, or sessions. File-based apps continue to be
+  moved using their `apps/` folders.
 - **Renaming the system's display name** (the text shown on the login page and sidebar) isn't
   done from the Designer — it's set once by whoever deploys the app, via the `EMU_APP_TITLE`
   environment variable.
 
 ---
 
-## 10. What You Can't Do from the Browser (Yet)
+## 10. System Maintenance and Updates
+
+Open **Settings → System Maintenance** to see the installed version and create a verified
+recovery point. **Export Full Backup** downloads a checksummed `.emubackup` containing both
+the business database and Designer metadata database. **Validate Restore File** checks a backup
+before a maintenance-window restore.
+
+![System Maintenance](assets/screenshots/system-maintenance.png)
+
+Before upgrading, export a full backup and keep it outside the framework folder. On Windows,
+close the running app and run `Update.cmd`; it finds the newest stable GitHub Release, verifies
+its checksum, preserves both databases and `apps/`, then typechecks and builds the result. Use
+`Update.cmd -Version 0.0.1.0` when you want that exact release. Restore a verified backup with
+`RestoreDatabase.cmd "C:\path\to\backup.emubackup"` while the app is stopped.
+
+## 11. What Still Requires Code
 
 The Web Designer is intentionally limited to keep it safe for non-developers to use. A few
 things still require a developer and the code-based path (see the
 [Developer Guide](DEVELOPER-GUIDE.md)):
 
-- **Access control** — you can't create a privilege, duty, or role from the browser yet. Tables
-  you create are only visible to admins until a developer grants access through a metadata file.
-- **Business logic** — validation rules, automatic calculations, and anything that reacts to
-  data changing (hooks, events, actions) still has to be written in TypeScript.
+- **Compiled business logic** — validation rules, calculations, hooks, events, and actions that
+  must ship as reviewed TypeScript still use the code-based path. Advanced mode exposes script
+  artifacts, but marks them high-risk and requires a second confirmation.
 - **Renaming an existing file-based object** — if a table/form/menu already exists as a file in
   the codebase, the Designer can't create something with the exact same name. Use the
   **Customize existing tables** flow from Section 5 instead.

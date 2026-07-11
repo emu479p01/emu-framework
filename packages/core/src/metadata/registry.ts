@@ -23,7 +23,7 @@ import type {
   TableExtensionMeta,
   TableMeta,
 } from './types.js';
-import { SYSTEM_FIELDS, LAYER_ORDER, DEFAULT_LAYER, EXTENSION_KINDS, type LayerType } from './types.js';
+import { SYSTEM_FIELDS, LAYER_ORDER, DEFAULT_LAYER, EXTENSION_KINDS, isIconName, type LayerType } from './types.js';
 import { validateMetadataArtifact } from './schema.js';
 
 export class MetadataError extends Error {}
@@ -119,6 +119,9 @@ export class MetadataRegistry {
 
   /** Register an app programmatically (useful for tests and built-in system app). */
   registerApp(manifest: AppManifest, artifacts: AnyMeta[]): void {
+    if (manifest.icon !== undefined && !isIconName(manifest.icon)) {
+      throw new MetadataError(`App '${manifest.name}': unknown icon '${String(manifest.icon)}'`);
+    }
     for (const dep of manifest.dependsOn ?? []) {
       if (!this.apps.some((a) => a.manifest.name === dep)) {
         throw new MetadataError(`App '${manifest.name}' depends on '${dep}' which is not loaded`);
@@ -484,6 +487,9 @@ export class MetadataRegistry {
 
   private validateMenuItems(items: MenuItemMeta[], context: string): void {
     for (const item of items) {
+      if (item.icon !== undefined && !isIconName(item.icon)) {
+        throw new MetadataError(`${context}: unknown icon '${String(item.icon)}'`);
+      }
       if (item.form && !this.forms.has(item.form)) {
         throw new MetadataError(`${context}: unknown form '${item.form}'`);
       }

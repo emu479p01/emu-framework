@@ -55,9 +55,10 @@ export function seedDesignerDb(kernel: Kernel): void {
     { kind: 'duty', name: 'FW_FrameworkUserDuty', label: 'Framework user', ...fw, privileges: ['FW_FrameworkUserPrivilege'] } as any,
     { kind: 'role', name: 'FW_FrameworkUser', label: 'Framework administrator', ...fw, duties: ['FW_FrameworkUserDuty'] } as any,
     { kind: 'menu', name: 'FW_SettingsMenu', label: 'Settings', ...fw, items: [
-      { label: 'Users', form: 'FW_UserForm' },
-      { label: 'App Access', form: 'FW_AppAccessForm' },
-      { label: 'Designer', route: '/designer' },
+      { label: 'Users', icon: 'users', form: 'FW_UserForm' },
+      { label: 'App Access', icon: 'shield', form: 'FW_AppAccessForm' },
+      { label: 'Designer', icon: 'wrench', route: '/designer' },
+      { label: 'System Maintenance', icon: 'database', route: '/system/maintenance' },
     ] } as any,
     // Example report — a working recipe for the Report Designer, printable from the Users list ("Print" button).
     { kind: 'report', name: 'FW_UserListReport', label: 'User list', ...fw, dataSource: 'FW_User',
