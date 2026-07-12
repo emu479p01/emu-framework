@@ -23,7 +23,7 @@
     "csv-stringify": "^6.5.1",
     "exceljs": "^4.4.0",
     "fastify": "^4.28.1",
-    "fflate": "0.8.2",
+    "fflate": "0.8.3",
     "pdfmake": "^0.3.11"
   },
   "devDependencies": {

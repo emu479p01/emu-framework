@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
-const Database = require(join(root, 'node_modules', '.pnpm', 'better-sqlite3@11.10.0', 'node_modules', 'better-sqlite3'));
+const Database = require(require.resolve('better-sqlite3', { paths: [join(root, 'packages', 'core')] }));
 
 console.log('=== DESIGNER.DB ===');
 const designer = new Database(join(root, 'designer.db'));

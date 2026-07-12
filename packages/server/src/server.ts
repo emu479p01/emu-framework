@@ -261,6 +261,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   }
 
   app.decorate('kernel', kernel);
+  app.get('/api/health', () => ({ ok: true }));
 
   const systemCtx = () => kernel.context({ user: 'system' });
 
@@ -442,6 +443,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       ADMIN_USERS.has(user.username) ||
       userRoles.includes('FW_FrameworkUser') ||
       userRoles.includes('FW_SystemAdminRole');
+    const isFrameworkAdmin = ADMIN_USERS.has(user.username) || userRoles.includes('FW_SystemAdminRole');
     const access = appAccessOf(user.username);
     const frameworkMenus: typeof allMenus = [];
     const appMap = new Map<string, { name: string; label: string; icon?: import('@emu/core').IconName; modules: string[]; menus: typeof allMenus }>();
@@ -459,7 +461,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const appName = kernel.appForArtifact(menu.name);
       if (appName === 'system') {
         if (isFrameworkUser) {
-          const systemItems = menu.items.filter((item) => item.route !== '/system/tables' || ADMIN_USERS.has(user.username) || userRoles.includes('FW_SystemAdminRole'));
+          const systemItems = menu.items.filter((item) => {
+            if (item.route === '/system/tables' || item.route === '/system/maintenance') return isFrameworkAdmin;
+            return true;
+          });
           const filtered = { ...menu, items: filterItems(systemItems, true) ?? [] };
           if (filtered.items.length > 0) frameworkMenus.push(filtered);
         }
@@ -481,8 +486,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       branding: { title: options.appTitle ?? 'EmuFramework' },
       capabilities: {
         designer: isFrameworkUser || access.customizeApps.size > 0,
-        maintenance: isFrameworkUser,
-        tableBrowser: ADMIN_USERS.has(user.username) || userRoles.includes('FW_SystemAdminRole'),
+        maintenance: isFrameworkAdmin,
+        tableBrowser: isFrameworkAdmin,
       },
       tables: kernel.registry
         .allTables()
@@ -537,7 +542,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   registerDesignerRoutes(app, kernel, requireDesigner, designerScope);
   const requireFrameworkAdmin = (req: FastifyRequest): string => {
     const user = requireUser(req);
-    if (!ADMIN_USERS.has(user.username) && !rolesOf(user.username).some((r) => r === 'FW_SystemAdminRole' || r === 'FW_FrameworkUser')) {
+    if (!ADMIN_USERS.has(user.username) && !rolesOf(user.username).includes('FW_SystemAdminRole')) {
       throw Object.assign(new Error('System maintenance requires a framework administrator'), { statusCode: 403 });
     }
     return user.username;

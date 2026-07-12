@@ -1,6 +1,8 @@
 param(
   [string]$Version,
-  [switch]$Force
+  [switch]$Force,
+  [string]$StatusPath,
+  [string]$JobId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,6 +29,20 @@ $expanded = Join-Path $temp 'release'
 $backupRoot = Join-Path $root "backups\framework-$current-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
 $mainPath = Join-Path $root 'packages\server\src\main.ts'
 $isGit = Test-Path -LiteralPath (Join-Path $root '.git')
+
+function Set-UpdateStatus([string]$Status, [string]$ErrorMessage = '') {
+  if (-not $StatusPath -or -not (Test-Path -LiteralPath $StatusPath)) { return }
+  try {
+    $state = Get-Content -LiteralPath $StatusPath -Raw | ConvertFrom-Json
+    if ($JobId -and $state.id -ne $JobId) { return }
+    $state.status = $Status
+    $state.updatedAt = (Get-Date).ToUniversalTime().ToString('o')
+    if ($ErrorMessage) { $state | Add-Member -NotePropertyName error -NotePropertyValue $ErrorMessage -Force }
+    $parent = Split-Path -Parent $StatusPath
+    if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    [IO.File]::WriteAllText($StatusPath, ($state | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
+  } catch { Write-Warning "Could not write updater status: $_" }
+}
 
 function Read-MarkerBlock([string]$Text, [string]$Name) {
   $begin = "// @emu:$Name-begin"
@@ -58,6 +74,7 @@ function Copy-ReleaseItem([IO.FileSystemInfo]$Item, [string]$Destination) {
 }
 
 try {
+  Set-UpdateStatus 'running'
   New-Item -ItemType Directory -Path $temp,$expanded,$backupRoot -Force | Out-Null
   Invoke-WebRequest -Uri $zipAsset.browser_download_url -OutFile $download -Headers $apiHeaders
   $expected = ((Invoke-WebRequest -Uri $hashAsset.browser_download_url -Headers $apiHeaders).Content -split '\s+')[0].ToLowerInvariant()
@@ -69,6 +86,7 @@ try {
   $sourceVersion = (Get-Content -LiteralPath (Join-Path $source.FullName 'package.json') -Raw | ConvertFrom-Json).version
   if ($sourceVersion -ne $target) { throw "Release package version $sourceVersion does not match tag $target" }
 
+  Set-UpdateStatus 'restarting'
   & (Join-Path $root 'launch.ps1') -Stop
   foreach ($db in @('data.db','designer.db')) {
     $path = Join-Path $root $db
@@ -122,8 +140,10 @@ try {
     } catch { Start-Sleep -Seconds 1 }
   }
   if (-not $healthy) { throw 'Updated application did not pass the startup health check' }
+  Set-UpdateStatus 'succeeded'
   Write-Host "Updated EmuFramework v$current -> v$target. Backup: $backupRoot" -ForegroundColor Green
 } catch {
+  Set-UpdateStatus 'failed' ([string]$_)
   & (Join-Path $root 'launch.ps1') -Stop 2>$null
   if (-not $isGit -and (Test-Path -LiteralPath $backupRoot)) {
     foreach ($item in Get-ChildItem -LiteralPath $backupRoot -Force) {

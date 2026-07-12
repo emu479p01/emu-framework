@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
@@ -13,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with: { version: 11.10.0 }
+        with: { version: 11.12.0 }
       - uses: actions/setup-node@v4
         with: { node-version: 24.18.0, cache: pnpm }
       - run: pnpm install --frozen-lockfile
@@ -21,6 +22,22 @@ jobs:
       - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm build
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish immutable container images
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          docker buildx build --push \
+            --tag "ghcr.io/emu479p01/emu-framework:$VERSION" \
+            --tag "ghcr.io/emu479p01/emu-framework:latest" .
+          docker buildx build --push --file Dockerfile.updater \
+            --tag "ghcr.io/emu479p01/emu-framework-updater:$VERSION" \
+            --tag "ghcr.io/emu479p01/emu-framework-updater:latest" .
       - name: Package updater asset
         shell: bash
         run: |

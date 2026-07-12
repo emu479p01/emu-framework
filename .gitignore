@@ -7,3 +7,4 @@ dist/
 *.db-*
 .DS_Store
 coverage/
+backups/
