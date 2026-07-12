@@ -19,6 +19,7 @@ export class DataContext {
   readonly events: EventBus;
   readonly hooks: HookRegistry;
   private ttsLevel = 0;
+  private deleting = new Set<string>();
 
   constructor(
     private readonly db: Database,
@@ -95,8 +96,17 @@ export class DataContext {
 
   private validateWrite(table: TableMeta, rec: Record): void {
     for (const f of table.fields) {
+      const value = rec.get(f.name);
       if (f.mandatory && (rec.get(f.name) === null || rec.get(f.name) === '')) {
         throw new ValidationError(`${table.name}.${f.name} is mandatory`);
+      }
+      if (value !== null) {
+        if ((f.type === 'int' || f.type === 'real' || f.type === 'enum' || f.type === 'reference') && typeof value !== 'number') {
+          throw new ValidationError(`${table.name}.${f.name} expects ${f.type === 'reference' ? 'a numeric record id' : 'a number'}; received '${String(value)}'`);
+        }
+        if ((f.type === 'string' || f.type === 'date' || f.type === 'datetime') && typeof value !== 'string') {
+          throw new ValidationError(`${table.name}.${f.name} expects text; received ${typeof value}`);
+        }
       }
     }
     this.events.emit(table.name, 'onValidating', rec, this);
@@ -143,9 +153,42 @@ export class DataContext {
   }
 
   _delete(rec: Record): void {
+    if (this.ttsLevel === 0) {
+      this.tts(() => this.deleteWithinTransaction(rec));
+      return;
+    }
+    this.deleteWithinTransaction(rec);
+  }
+
+  private deleteWithinTransaction(rec: Record): void {
     const table = rec.table;
     if (rec.id === null) throw new ValidationError(`${table.name}: cannot delete unsaved record`);
     this.assertAllowed(table.name, 'delete');
+    const deleteKey = `${table.name}:${rec.id}`;
+    if (this.deleting.has(deleteKey)) return;
+    this.deleting.add(deleteKey);
+    try {
+      for (const childTable of this.registry.allTables()) {
+        for (const field of childTable.fields) {
+          if (field.type !== 'reference' || field.reference?.table !== table.name) continue;
+          // Relation discovery is an internal integrity check and must not require read
+          // permission on every possible child table. Any resulting update/delete still
+          // passes through that table's normal write policy below.
+          const childRows = this.db.prepare(`SELECT * FROM "${childTable.name}" WHERE "${field.name}" = ?`).all(rec.id) as { [column: string]: unknown }[];
+          const children = childRows.map((row) => new Record(this, childTable)._hydrate(row));
+          if (children.length === 0) continue;
+          const behavior = field.reference.onDelete ?? 'restrict';
+          if (behavior === 'restrict') {
+            throw new ValidationError(`Cannot delete ${table.name} ${rec.id}: ${children.length} record(s) in ${childTable.name}.${field.name} still reference it`);
+          }
+          if (behavior === 'setNull') {
+            if (field.mandatory) throw new ValidationError(`${childTable.name}.${field.name}: mandatory references cannot use onDelete 'setNull'`);
+            for (const child of children) child.set(field.name, null).update();
+          } else {
+            for (const child of children) child.delete();
+          }
+        }
+      }
     for (const hooks of this.hooks.for(table.name)) {
       if (hooks.validateDelete?.(rec, this) === false) {
         throw new ValidationError(`${table.name}: validateDelete failed`);
@@ -154,6 +197,9 @@ export class DataContext {
     this.events.emit(table.name, 'onDeleting', rec, this);
     this.db.prepare(`DELETE FROM "${table.name}" WHERE id = ?`).run(rec.id);
     this.events.emit(table.name, 'onDeleted', rec, this);
+    } finally {
+      this.deleting.delete(deleteKey);
+    }
   }
 
   // ---- internal read path (called by Query) ----

@@ -15,6 +15,7 @@ import {
   buildRolePolicy,
   type DataContext,
   type FieldValue,
+  type MenuItemMeta,
   type SecurityPolicy,
 } from '@emu/core';
 import { registerSystemApp, registerSystemHooks } from './systemApp.js';
@@ -162,6 +163,38 @@ function convertLegacyArtifact(row: { kind: string; name: string; json: string }
   return { kind: row.kind === 'script' && name.endsWith('_Extension') ? 'scriptExtension' : row.kind, name, json };
 }
 
+/**
+ * Older releases auto-injected a default 'ClientCustom' model into every app
+ * manifest, so designer-created apps were stored without a `models` array.
+ * Now that user apps start with no models, patch stored manifests by
+ * harvesting the model names their own artifacts reference — otherwise those
+ * artifacts fail "unknown model" at boot and get skipped.
+ */
+function migrateManifestModels(kernel: Kernel): void {
+  if (!tableExists(kernel.designerDb, 'FW_WebArtifact')) return;
+  const rows = kernel.designerDb.prepare('SELECT name, json FROM "FW_WebArtifact"').all() as { name: string; json: string }[];
+  const artifacts: { kind: string; name: string; app?: string; model?: string; layer?: string; models?: unknown[] }[] = [];
+  for (const row of rows) {
+    try { artifacts.push(JSON.parse(row.json)); } catch { /* skipped at boot anyway */ }
+  }
+  const update = kernel.designerDb.prepare('UPDATE "FW_WebArtifact" SET json = ?, modifiedAt = CURRENT_TIMESTAMP, modifiedBy = ? WHERE name = ?');
+  for (const manifest of artifacts) {
+    if (manifest.kind !== 'app') continue;
+    if (Array.isArray(manifest.models) && manifest.models.length > 0) continue;
+    const models = new Map<string, string>();
+    for (const art of artifacts) {
+      if (art.kind === 'app' || art.app !== manifest.name || !art.model) continue;
+      if (!models.has(art.model)) models.set(art.model, art.layer ?? 'CUS');
+    }
+    if (models.size === 0) continue;
+    const patched = {
+      ...manifest,
+      models: [...models.entries()].map(([name, layer]) => ({ name, label: name, layer })),
+    };
+    update.run(JSON.stringify(patched), 'migration', manifest.name);
+  }
+}
+
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const kernel = new Kernel(options.dbPath ?? ':memory:', options.designerDbPath);
   registerSystemApp(kernel);
@@ -179,6 +212,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   // First-boot: seed designer.db with all metadata if empty
   seedDesignerDb(kernel);
   migrateLegacyDesignerArtifacts(kernel);
+  migrateManifestModels(kernel);
 
   // merge web-designer artifacts from designer.db into the registry
   bootWebArtifacts(kernel);
@@ -227,6 +261,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   }
 
   app.decorate('kernel', kernel);
+  app.get('/api/health', () => ({ ok: true }));
 
   const systemCtx = () => kernel.context({ user: 'system' });
 
@@ -309,14 +344,19 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   };
 
   /** Writes may only touch metadata-defined, non-readOnly fields — never system columns. */
-  const writableBody = (tableName: string, body: { [field: string]: FieldValue }) => {
-    const allowed = new Set(
-      kernel.registry
-        .getTable(tableName)
-        .fields.filter((f) => !f.readOnly)
-        .map((f) => f.name),
-    );
-    return Object.fromEntries(Object.entries(body ?? {}).filter(([k]) => allowed.has(k)));
+  const writableBody = (tableName: string, body: { [field: string]: FieldValue }, operation: 'create' | 'update' = 'create') => {
+    const table = kernel.registry.getTable(tableName);
+    const fields = new Map(table.fields.map((f) => [f.name, f]));
+    const output: { [field: string]: FieldValue } = {};
+    for (const [name, value] of Object.entries(body ?? {})) {
+      if (['id', 'createdAt', 'createdBy', 'modifiedAt', 'modifiedBy'].includes(name)) continue;
+      const field = fields.get(name);
+      if (!field) throw new ValidationError(`${tableName}: unknown field '${name}'`);
+      const editable = !field.readOnly && (operation === 'create' ? field.allowEditOnCreate !== false : field.allowEdit !== false);
+      if (!editable) throw new ValidationError(`${tableName}.${name} cannot be edited ${operation === 'create' ? 'during creation' : 'after creation'}`);
+      output[name] = value;
+    }
+    return output;
   };
 
   app.setErrorHandler((err, _req, reply) => {
@@ -362,13 +402,17 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const policy = policyOf(user.username);
     const formAccess = policy.accessibleForms();
     const canOpen = (form: string) => formAccess === 'all' || formAccess.has(form);
+    const canOpenReport = (name: string) => {
+      const report = kernel.registry.allReports().find((entry) => entry.name === name);
+      return Boolean(report && policy.can(report.dataSource, 'read'));
+    };
 
     const forms = kernel.registry.allForms().filter((f) => canOpen(f.name));
     const usedTables = new Set(forms.flatMap((f) => [f.table, ...(f.lines ?? []).map((l) => l.table)]));
 
     // Recursively filter menu items by security
     const filterItems = (
-      items: { label?: string; icon?: import('@emu/core').IconName; form?: string; route?: string; items?: typeof items }[] | undefined,
+      items: MenuItemMeta[] | undefined,
       allowRoutes = false,
     ): typeof items => {
       if (!items) return items;
@@ -377,12 +421,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           if (item.items) {
             const children = filterItems(item.items, allowRoutes);
             // keep container if it has visible children or a visible form
-            if ((children && children.length > 0) || (item.form && canOpen(item.form)) || (allowRoutes && item.route)) {
+            const targetVisible = item.target?.type === 'form' ? canOpen(item.target.name) : item.target?.type === 'report' ? canOpenReport(item.target.name) : item.target?.type === 'function';
+            if ((children && children.length > 0) || (item.form && canOpen(item.form)) || targetVisible || (allowRoutes && item.route)) {
               return { ...item, items: children };
             }
             return null;
           }
           if (allowRoutes && item.route) return item;
+          if (item.target?.type === 'form' && canOpen(item.target.name)) return item;
+          if (item.target?.type === 'report' && canOpenReport(item.target.name)) return item;
+          if (item.target?.type === 'function') return item;
           return item.form && canOpen(item.form) ? item : null;
         })
         .filter(Boolean) as typeof items;
@@ -395,6 +443,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       ADMIN_USERS.has(user.username) ||
       userRoles.includes('FW_FrameworkUser') ||
       userRoles.includes('FW_SystemAdminRole');
+    const isFrameworkAdmin = ADMIN_USERS.has(user.username) || userRoles.includes('FW_SystemAdminRole');
     const access = appAccessOf(user.username);
     const frameworkMenus: typeof allMenus = [];
     const appMap = new Map<string, { name: string; label: string; icon?: import('@emu/core').IconName; modules: string[]; menus: typeof allMenus }>();
@@ -412,7 +461,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const appName = kernel.appForArtifact(menu.name);
       if (appName === 'system') {
         if (isFrameworkUser) {
-          const filtered = { ...menu, items: filterItems(menu.items, true) ?? [] };
+          const systemItems = menu.items.filter((item) => {
+            if (item.route === '/system/tables' || item.route === '/system/maintenance') return isFrameworkAdmin;
+            return true;
+          });
+          const filtered = { ...menu, items: filterItems(systemItems, true) ?? [] };
           if (filtered.items.length > 0) frameworkMenus.push(filtered);
         }
       } else if (appName && appMap.has(appName)) {
@@ -431,6 +484,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
     return {
       branding: { title: options.appTitle ?? 'EmuFramework' },
+      capabilities: {
+        designer: isFrameworkUser || access.customizeApps.size > 0,
+        maintenance: isFrameworkAdmin,
+        tableBrowser: isFrameworkAdmin,
+      },
       tables: kernel.registry
         .allTables()
         .filter((t) => !PROTECTED_TABLES.has(t.name))
@@ -441,6 +499,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       privileges: kernel.registry.allPrivileges(),
       duties: kernel.registry.allDuties(),
       roles: kernel.registry.allRoles(),
+      actions: [...kernel.actions.keys()].sort(),
       frameworkMenus,
       apps: [...appMap.values()].filter((a) => {
         if (a.menus.length === 0) return false;
@@ -448,7 +507,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         if (ADMIN_USERS.has(user.username)) return true;
         // App access is explicit: no FW_AppAccess row with canOpen = the app is invisible.
         // (Framework admins keep full visibility so they can manage everything.)
-        if (isFrameworkUser) return !access.hasRows || access.openApps.has(a.name);
+        if (isFrameworkUser) return true;
         return access.openApps.has(a.name);
       }),
     };
@@ -497,7 +556,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     (req) => {
       const handler = kernel.actions.get(req.params.name);
       if (!handler) throw Object.assign(new Error(`Unknown action '${req.params.name}'`), { statusCode: 404 });
-      return handler(userCtx(req), req.body ?? {}) ?? { ok: true };
+      const ctx = userCtx(req);
+      return ctx.tts(() => handler(ctx, req.body ?? {}) ?? { ok: true });
     },
   );
 
@@ -534,7 +594,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     (req, reply) => {
       const table = dataTable(req.params.table, req);
       const rec = userCtx(req).newRecord(table.name);
-      rec.setMany(writableBody(table.name, req.body));
+      rec.setMany(writableBody(table.name, req.body, 'create'));
       rec.insert();
       reply.status(201);
       return rec.toObject();
@@ -548,7 +608,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const ctx = userCtx(req);
       const rec = ctx.find(table.name, Number(req.params.id));
       if (!rec) throw Object.assign(new Error('Not found'), { statusCode: 404 });
-      rec.setMany(writableBody(table.name, req.body));
+      rec.setMany(writableBody(table.name, req.body, 'update'));
       rec.update();
       return rec.toObject();
     },

@@ -8,6 +8,7 @@ import type {
   EnumExtensionMeta,
   FormExtensionMeta,
   FormMeta,
+  FunctionMeta,
   MenuExtensionMeta,
   MenuItemMeta,
   MenuMeta,
@@ -50,6 +51,7 @@ const META_DIRS: { dir: string; kind: AnyMeta['kind'] }[] = [
   { dir: 'roleExtensions', kind: 'roleExtension' },
   { dir: 'scripts', kind: 'script' },
   { dir: 'scriptExtensions', kind: 'scriptExtension' },
+  { dir: 'functions', kind: 'function' },
   { dir: 'reports', kind: 'report' },
 ];
 
@@ -69,6 +71,7 @@ export class MetadataRegistry {
   private duties = new Map<string, DutyMeta>();
   private roles = new Map<string, RoleMeta>();
   private scripts = new Map<string, ScriptMeta>();
+  private functions = new Map<string, FunctionMeta>();
   private reports = new Map<string, ReportMeta>();
   private extensionNames = new Set<string>();
   /** Maps artifact name → app name for grouping in metadata API */
@@ -224,6 +227,8 @@ export class MetadataRegistry {
         return this.duties as Map<string, AnyMeta>;
       case 'role':
         return this.roles as Map<string, AnyMeta>;
+      case 'function':
+        return this.functions as Map<string, AnyMeta>;
       case 'report':
         return this.reports as Map<string, AnyMeta>;
       default:
@@ -286,6 +291,7 @@ export class MetadataRegistry {
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown form '${e.form}'`);
       if (e.listFields) base.listFields = [...(base.listFields ?? []), ...e.listFields];
       if (e.groups) base.groups = [...(base.groups ?? []), ...e.groups];
+      if (e.actions) base.actions = [...(base.actions ?? []), ...e.actions];
     } else if (e.kind === 'menuExtension') {
       const base = this.menus.get(e.menu);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown menu '${e.menu}'`);
@@ -362,6 +368,22 @@ export class MetadataRegistry {
             );
           }
         }
+        if (f.reference) {
+          const refTable = this.tables.get(f.reference.table)!;
+          for (const display of f.reference.displayFields ?? (f.reference.displayField ? [f.reference.displayField] : [])) {
+            if (display !== 'id' && !refTable.fields.some((x) => x.name === display)) {
+              throw new MetadataError(`${table.name}.${f.name}: unknown lookup display field '${display}' on '${refTable.name}'`);
+            }
+          }
+          for (const filter of f.reference.filters ?? []) {
+            if (filter.field !== 'id' && !refTable.fields.some((x) => x.name === filter.field)) {
+              throw new MetadataError(`${table.name}.${f.name}: lookup filter uses unknown field '${filter.field}' on '${refTable.name}'`);
+            }
+          }
+          if (f.mandatory && f.reference.onDelete === 'setNull') {
+            throw new MetadataError(`${table.name}.${f.name}: mandatory references cannot use onDelete 'setNull'`);
+          }
+        }
       }
     }
     for (const form of this.forms.values()) {
@@ -380,6 +402,7 @@ export class MetadataRegistry {
       };
       checkFields(form.listFields, 'listFields');
       for (const g of form.groups ?? []) checkFields(g.fields, 'group');
+      for (const action of form.actions ?? []) this.validateFormAction(action, table, undefined, `Form '${form.name}'`);
       for (const line of form.lines ?? []) {
         const lineTable = this.tables.get(line.table);
         if (!lineTable) {
@@ -395,6 +418,7 @@ export class MetadataRegistry {
             `Form '${form.name}': line '${line.table}' cannot display its own refField '${line.refField}' as an editable column`,
           );
         }
+        for (const action of line.actions ?? []) this.validateFormAction(action, table, lineTable, `Form '${form.name}' line '${line.table}'`);
         for (const agg of line.aggregates ?? []) {
           if (agg.fn !== 'count') {
             if (!agg.field) {
@@ -456,6 +480,9 @@ export class MetadataRegistry {
       if (!table) throw new MetadataError(`Report '${report.name}': unknown dataSource table '${report.dataSource}'`);
       const mainFieldNames = new Set([...table.fields.map((f) => f.name), ...(SYSTEM_FIELDS as readonly string[])]);
       this.validateReportBands(report.bands, mainFieldNames, `Report '${report.name}'`);
+      for (const parameter of report.parameters ?? []) {
+        if (!mainFieldNames.has(parameter.field)) throw new MetadataError(`Report '${report.name}': parameter uses unknown field '${parameter.field}'`);
+      }
       for (const line of report.lineSources ?? []) {
         const lineTable = this.tables.get(line.table);
         if (!lineTable) {
@@ -493,8 +520,41 @@ export class MetadataRegistry {
       if (item.form && !this.forms.has(item.form)) {
         throw new MetadataError(`${context}: unknown form '${item.form}'`);
       }
+      if (item.target?.type === 'form' && !this.forms.has(item.target.name)) {
+        throw new MetadataError(`${context}: unknown target form '${item.target.name}'`);
+      }
+      if (item.target?.type === 'report' && !this.reports.has(item.target.name)) {
+        throw new MetadataError(`${context}: unknown target report '${item.target.name}'`);
+      }
       if (item.items) {
         this.validateMenuItems(item.items, context);
+      }
+    }
+  }
+
+  private validateFormAction(action: NonNullable<FormMeta['actions']>[number], recordTable: TableMeta, lineTable: TableMeta | undefined, context: string): void {
+    const type = action.type ?? 'function';
+    const target = action.target ?? action.action;
+    if (!target) throw new MetadataError(`${context}: action '${action.label}' requires a target`);
+    if (type === 'report' && !this.reports.has(target)) throw new MetadataError(`${context}: action '${action.label}' uses unknown report '${target}'`);
+    if (type !== 'picker') return;
+    if (!action.picker) throw new MetadataError(`${context}: picker action '${action.label}' requires picker settings`);
+    const source = this.tables.get(action.picker.table);
+    if (!source) throw new MetadataError(`${context}: picker action '${action.label}' uses unknown table '${action.picker.table}'`);
+    const sourceFields = new Set(['id', ...source.fields.map((field) => field.name)]);
+    for (const field of [...action.picker.columns, ...(action.picker.searchFields ?? []), ...(action.picker.filters ?? []).map((filter) => filter.field)]) {
+      if (!sourceFields.has(field)) throw new MetadataError(`${context}: picker action '${action.label}' uses unknown source field '${field}'`);
+    }
+    if (action.picker.allocation && !sourceFields.has(action.picker.allocation.availableField)) {
+      throw new MetadataError(`${context}: picker action '${action.label}' uses unknown available field '${action.picker.allocation.availableField}'`);
+    }
+    for (const filter of action.picker.filters ?? []) {
+      if (typeof filter.value !== 'object' || filter.value === null || !('source' in filter.value)) continue;
+      const dynamicValue = filter.value;
+      const contextTable = dynamicValue.source === 'line' ? lineTable : recordTable;
+      if (!contextTable) throw new MetadataError(`${context}: picker filter cannot use line context outside a line action`);
+      if (dynamicValue.field !== 'id' && !contextTable.fields.some((field) => field.name === dynamicValue.field)) {
+        throw new MetadataError(`${context}: picker filter uses unknown ${dynamicValue.source} field '${dynamicValue.field}'`);
       }
     }
   }
@@ -569,6 +629,14 @@ export class MetadataRegistry {
     return [...this.scripts.values()];
   }
 
+  getFunction(name: string): FunctionMeta | undefined {
+    return this.functions.get(name);
+  }
+
+  allFunctions(): FunctionMeta[] {
+    return [...this.functions.values()];
+  }
+
   getReport(name: string): ReportMeta {
     const r = this.reports.get(name);
     if (!r) throw new MetadataError(`Unknown report '${name}'`);
@@ -635,8 +703,13 @@ function normalizeManifest(manifest: AppManifest): AppManifest {
       models: [{ name: 'MiniERPCredit', label: 'Mini ERP Credit', layer: 'DEV' }],
     };
   }
-  return {
-    ...manifest,
-    models: [{ name: 'ClientCustom', label: 'Client Custom', layer: 'CUS' }],
-  };
+  if (manifest.name === 'web') {
+    // implicit pseudo-app holding legacy app-less designer artifacts
+    return {
+      ...manifest,
+      models: [{ name: 'ClientCustom', label: 'Client Custom', layer: 'CUS' }],
+    };
+  }
+  // user apps start with no models — the user creates them in the Designer
+  return manifest;
 }

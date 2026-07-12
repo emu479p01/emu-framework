@@ -18,6 +18,8 @@ import { useMeta } from '../stores/meta';
 import FieldControl from '../components/FieldControl.vue';
 import LineGrid from '../components/LineGrid.vue';
 import { applyIfBlank } from '../utils/applyDefaults';
+import ActionDialog from '../components/ActionDialog.vue';
+import type { FormAction } from '@emu/core';
 
 const props = defineProps<{ formName: string; id: string; appName?: string }>();
 const router = useRouter();
@@ -29,6 +31,8 @@ const record = ref<Record<string, unknown>>({});
 const original = ref('');
 const busy = ref(false);
 const validationErrors = ref<string[]>([]);
+const selectedAction = ref<FormAction | null>(null);
+const actionDialogOpen = ref(false);
 
 const isNew = computed(() => props.id === 'new');
 const appPrefix = computed(() => props.appName ? `/app/${props.appName}` : '');
@@ -89,25 +93,13 @@ async function save() {
   }
 }
 
-function goBack() { router.push(`${appPrefix.value}/form/${props.formName}`); }
+function goBack() { window.history.length > 1 ? router.back() : router.push(`${appPrefix.value}/form/${props.formName}`); }
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty.value) event.preventDefault(); }
 onMounted(() => window.addEventListener('beforeunload', beforeUnload));
 onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload));
 onBeforeRouteLeave(() => !dirty.value || window.confirm('You have unsaved changes. Leave without saving?'));
 
-async function runAction(action: string) {
-  busy.value = true;
-  try {
-    await api.post(`/api/action/${action}`, { id: Number(props.id) });
-    message.success(`${action} completed`);
-    await load();
-  } catch (err) {
-    if (err instanceof ApiError) message.error(err.message);
-    else throw err;
-  } finally {
-    busy.value = false;
-  }
-}
+function runAction(action: FormAction) { selectedAction.value = action; actionDialogOpen.value = true; }
 
 function applyRelated(patch: Record<string, unknown>) {
   applyIfBlank(record.value, patch);
@@ -134,7 +126,7 @@ function remove() {
 </script>
 
 <template>
-  <div v-if="form && table">
+  <div v-if="form && table" class="form-page">
     <div class="form-actionbar">
       <div><h1>
         {{ form.label ?? form.name }} — {{ isNew ? 'New' : `#${id}` }}
@@ -142,17 +134,17 @@ function remove() {
       <n-space>
         <n-button
           v-for="act in isNew ? [] : (form.actions ?? [])"
-          :key="act.action"
+          :key="act.target ?? act.action"
           :loading="busy"
-          :data-testid="`action-${act.action}`"
-          @click="runAction(act.action)"
+          :data-testid="`action-${act.target ?? act.action}`"
+          @click="runAction(act)"
         >
           {{ act.label }}
         </n-button>
         <n-button v-if="!isNew" quaternary type="error" data-testid="delete-record" @click="remove">
           Delete
         </n-button>
-        <n-button @click="goBack">Cancel</n-button>
+        <n-button @click="goBack">Back</n-button>
         <n-button type="primary" :loading="busy" data-testid="save-record" @click="save">
           Save
         </n-button>
@@ -171,6 +163,7 @@ function remove() {
               <n-form-item :label="field.label ?? field.name" :required="field.mandatory">
                 <FieldControl
                   :field="field"
+                  :create-mode="isNew"
                   :model-value="record[field.name]"
                   @update:model-value="(v) => (record[field.name] = v)"
                   @update:related="applyRelated"
@@ -186,13 +179,15 @@ function remove() {
             :key="line.table"
             :line="line"
             :header-id="Number(id)"
+            :header-record="record"
           />
         </template>
       </n-space>
     </n-form>
+    <ActionDialog v-model:show="actionDialogOpen" :action="selectedAction" :record-id="isNew ? undefined : Number(id)" :record="record" @completed="load" />
   </div>
 </template>
 
 <style scoped>
-.form-actionbar{position:sticky;top:0;z-index:4;display:flex;justify-content:space-between;align-items:center;gap:16px;margin:-12px -12px 18px;padding:12px;background:color-mix(in srgb,#fff 94%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--emu-border)}.form-actionbar h1{font-size:25px;margin:0}.form-actionbar p{margin:3px 0 0;color:var(--emu-muted);font-size:12px}.error-list{margin:4px 0;padding-left:20px}@media(max-width:700px){.form-actionbar{position:static;display:block;margin:0 0 16px;padding:0 0 12px}.form-actionbar>.n-space{margin-top:12px;flex-wrap:wrap!important}}
+.form-page{max-width:1440px;margin:0 auto}.form-actionbar{position:sticky;top:12px;z-index:4;display:flex;justify-content:space-between;align-items:center;gap:20px;margin:0 0 24px;padding:18px 20px;background:rgba(255,255,255,.96);backdrop-filter:blur(8px);border:1px solid var(--emu-border);border-radius:12px;box-shadow:var(--emu-shadow-sm)}.form-actionbar h1{font-size:25px;margin:0}.form-actionbar p{margin:5px 0 0;color:var(--emu-muted);font-size:12px}.form-page :deep(.n-card__content){padding:20px}.form-page :deep(.n-form-item){margin-bottom:18px}.error-list{margin:4px 0;padding-left:20px}@media(max-width:700px){.form-actionbar{position:static;display:block;margin:0 0 16px;padding:16px}.form-actionbar>.n-space{margin-top:14px;flex-wrap:wrap!important}.form-page :deep(.n-card__content){padding:16px}}
 </style>

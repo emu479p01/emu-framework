@@ -4,9 +4,15 @@ import {
   MetadataRegistry,
   DataContext,
   syncSchema,
+  type AppManifest,
   type TableMeta,
   type EnumMeta,
 } from '../src/index.js';
+
+/** App manifest with a single default model — user apps no longer get one injected. */
+export function testManifest(name: string, layer: 'SYS' | 'ISV' | 'LOC' | 'DEV' | 'CUS' = 'CUS'): AppManifest {
+  return { name, models: [{ name: 'ClientCustom', label: 'Client Custom', layer }] };
+}
 
 export const salesStatusEnum: EnumMeta = {
   kind: 'enum',
@@ -42,7 +48,7 @@ export const TESTAPP_SalesTable: TableMeta = {
 
 export function testRegistry(): MetadataRegistry {
   const registry = new MetadataRegistry();
-  registry.registerApp({ name: 'testapp' }, [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable]);
+  registry.registerApp(testManifest('testapp'), [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable]);
   return registry;
 }
 

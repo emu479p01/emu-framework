@@ -68,11 +68,11 @@ export function previewMetadataChangeSet(
     if (artifact.kind !== operation.kind || artifact.name !== operation.name) {
       diagnostics.push({ path: `/operations/${operation.name}`, code: 'identity_mismatch', message: 'Operation kind/name must match the artifact' });
     }
-    if (!options.allowScripts && (artifact.kind === 'script' || artifact.kind === 'scriptExtension')) {
+    if (!options.allowScripts && (artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function')) {
       diagnostics.push({ path: `/operations/${operation.name}`, code: 'high_risk_script', message: 'AI and automated change sets cannot create executable scripts' });
     }
     byName.set(operation.name, structuredClone(artifact));
-    diff.push({ op: existing ? 'update' : 'create', kind: operation.kind, name: operation.name, highRisk: artifact.kind === 'script' || artifact.kind === 'scriptExtension' });
+    diff.push({ op: existing ? 'update' : 'create', kind: operation.kind, name: operation.name, highRisk: artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function' });
     if (artifact.kind === 'table') {
       schemaEffects.push({ type: existing ? 'metadata-only' : 'create-table', target: artifact.name });
       const oldFields = new Set(existing?.kind === 'table' ? existing.fields.map((field) => field.name) : []);

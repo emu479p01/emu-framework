@@ -37,6 +37,8 @@ const menuOptions = computed<NavMenuOption[]>(() => {
     onNavigate: () => (drawerOpen.value = false),
   });
 });
+const appMenuOptions = computed(() => menuOptions.value.filter((option) => option.key !== 'framework-settings'));
+const frameworkMenuOptions = computed(() => menuOptions.value.filter((option) => option.key === 'framework-settings'));
 const activeKey = computed(() => findActiveKey(menuOptions.value, String(route.params.formName ?? ''), route.path) ?? '');
 const breadcrumb = computed(() => {
   if (route.path === '/') return t('home.title');
@@ -48,8 +50,12 @@ const breadcrumb = computed(() => {
 const userOptions = [{ key: 'logout', label: t('auth.logout') }];
 async function onUserAction(key: string) { if (key === 'logout') { await session.logout(); router.push('/login'); } }
 function updateViewport() { mobile.value = window.innerWidth < 900; if (!mobile.value) drawerOpen.value = false; }
-onMounted(() => { updateViewport(); window.addEventListener('resize', updateViewport); });
-onBeforeUnmount(() => window.removeEventListener('resize', updateViewport));
+function addOverflowTitle(event: Event) {
+  const target = (event.target as HTMLElement | null)?.closest<HTMLElement>('.n-menu-item-content-header,.n-base-select-option__content');
+  if (target && !target.title) target.title = target.textContent?.trim() ?? '';
+}
+onMounted(() => { updateViewport(); window.addEventListener('resize', updateViewport); document.addEventListener('mouseover', addOverflowTitle); });
+onBeforeUnmount(() => { window.removeEventListener('resize', updateViewport); document.removeEventListener('mouseover', addOverflowTitle); });
 </script>
 
 <template>
@@ -62,7 +68,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateViewport));
               <img src="/logo.svg" alt="" width="28" height="28" />
               <span v-if="!siderCollapsed">{{ meta.meta?.branding.title ?? 'EmuFramework' }}</span>
             </div>
-            <n-menu class="app-menu" :options="menuOptions" :value="activeKey" :collapsed="siderCollapsed" :collapsed-width="72" :default-expanded-keys="menuOptions.map((item) => item.key as string)" inverted />
+            <div class="sider-navigation">
+              <n-menu class="app-menu" :options="appMenuOptions" :value="activeKey" :collapsed="siderCollapsed" :collapsed-width="72" :default-expanded-keys="appMenuOptions.map((item) => item.key as string)" inverted />
+              <n-menu v-if="frameworkMenuOptions.length" class="framework-menu" :options="frameworkMenuOptions" :value="activeKey" :collapsed="siderCollapsed" :collapsed-width="72" :default-expanded-keys="frameworkMenuOptions.map((item) => item.key as string)" inverted />
+            </div>
           </n-layout-sider>
           <n-drawer v-model:show="drawerOpen" placement="left" :width="280">
             <n-drawer-content :title="meta.meta?.branding.title ?? 'EmuFramework'" closable body-content-style="padding:0">
@@ -93,7 +102,7 @@ body { margin:0; color:var(--emu-text); background:var(--emu-bg); font-family:In
 .app-shell { min-height:100vh; }
 .app-sider { background:linear-gradient(180deg,#111827 0%,#172033 100%)!important; }
 .brand { height:68px; display:flex; align-items:center; gap:11px; padding:0 20px; font-weight:750; font-size:16px; overflow:hidden; white-space:nowrap; color:#fff;letter-spacing:-.02em;border-bottom:1px solid rgba(255,255,255,.08) }
-.brand img{filter:drop-shadow(0 4px 10px rgba(99,102,241,.35))}.app-menu{padding:12px 8px}.app-menu .n-menu-item-content{border-radius:8px}.nav-icon{width:24px;height:24px;display:inline-grid;place-items:center;flex:0 0 24px}.nav-monogram{border-radius:7px;background:rgba(99,102,241,.24);color:#c7d2fe;font-size:12px;font-weight:800}.n-menu--collapsed .nav-icon{width:32px;height:32px}.n-menu--collapsed .nav-monogram{border-radius:9px}
+.brand img{filter:drop-shadow(0 4px 10px rgba(99,102,241,.35))}.sider-navigation{height:calc(100vh - 68px);display:flex;flex-direction:column;min-height:0}.app-menu{padding:12px 8px;overflow:auto;flex:1;min-height:0}.framework-menu{padding:12px 8px 16px;border-top:1px solid rgba(255,255,255,.14);flex:0 0 auto}.app-menu .n-menu-item-content,.framework-menu .n-menu-item-content{border-radius:8px;padding-left:10px!important}.app-menu .n-menu-item-content-header,.framework-menu .n-menu-item-content-header{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nav-icon{width:24px;height:24px;display:inline-grid;place-items:center;flex:0 0 24px}.nav-monogram{border-radius:7px;background:rgba(99,102,241,.24);color:#c7d2fe;font-size:12px;font-weight:800}.n-menu--collapsed .nav-icon{width:32px;height:32px}.n-menu--collapsed .nav-monogram{border-radius:9px}
 .brand.compact { justify-content:center; padding:0; }
 .topbar { height:68px; padding:0 28px; display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.92);backdrop-filter:blur(12px);box-shadow:0 1px 0 rgba(15,23,42,.06); }
 .page-context { flex:1; min-width:0; }

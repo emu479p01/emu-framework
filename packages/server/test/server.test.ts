@@ -124,7 +124,8 @@ describe('server', () => {
       method: 'POST',
       url: '/api/data/ERP_SalesTable',
       headers: auth(),
-      payload: { salesId: 'SO-1', custId: 1, status: 0 },
+      // status is read-only and receives its numeric default (0) on create
+      payload: { salesId: 'SO-1', custId: 1 },
     });
     const res = await app.inject({
       method: 'GET',
@@ -202,6 +203,18 @@ describe('server', () => {
       payload: { username: 'admin', password: 'admin' },
     });
     expect(res.statusCode).toBe(200);
+  });
+
+  it('runs server actions atomically and rolls back on failure', async () => {
+    const kernel = (app as unknown as { kernel: Kernel }).kernel;
+    const before = kernel.context().select('ERP_CustTable').count();
+    kernel.actions.set('FailingAllocation', (ctx) => {
+      ctx.newRecord('ERP_CustTable').setMany({ accountNum: 'ROLLBACK', name: 'Rollback test' }).insert();
+      throw new Error('allocation failed');
+    });
+    const response = await app.inject({ method: 'POST', url: '/api/action/FailingAllocation', headers: auth(), payload: { recordId: 1, selections: [{ id: 1, quantity: 1 }] } });
+    expect(response.statusCode).toBe(500);
+    expect(kernel.context().select('ERP_CustTable').count()).toBe(before);
   });
 
   it('logs out and invalidates the session', async () => {

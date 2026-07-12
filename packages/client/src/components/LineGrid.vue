@@ -5,10 +5,13 @@ import { api, ApiError, type Row } from '../api';
 import { useMeta } from '../stores/meta';
 import FieldControl from './FieldControl.vue';
 import { applyIfBlank } from '../utils/applyDefaults';
+import ActionDialog from './ActionDialog.vue';
+import type { FormAction } from '@emu/core';
 
 const props = defineProps<{
-  line: { table: string; refField: string; fields: string[]; aggregates?: { fn: 'count' | 'sum' | 'avg'; field?: string; label?: string }[] };
+  line: { table: string; refField: string; fields: string[]; aggregates?: { fn: 'count' | 'sum' | 'avg'; field?: string; label?: string }[]; actions?: FormAction[] };
   headerId: number;
+  headerRecord?: Record<string, unknown>;
 }>();
 
 const meta = useMeta();
@@ -19,6 +22,8 @@ const rows = ref<Row[]>([]);
 const editingId = ref<number | null>(null);
 const draft = ref<Record<string, unknown>>({});
 const lookups = ref<Record<string, Record<number, string>>>({});
+const selectedAction = ref<FormAction | null>(null); const selectedLine = ref<Row | null>(null); const actionDialogOpen = ref(false);
+function launchAction(action: FormAction, row: Row) { selectedAction.value = action; selectedLine.value = row; actionDialogOpen.value = true; }
 
 const table = computed(() => meta.table(props.line.table));
 const fields = computed(() =>
@@ -116,6 +121,7 @@ const columns = computed<DataTableColumns<Row>>(() => [
         ]);
       }
       return h(NSpace, {}, () => [
+        ...(props.line.actions ?? []).map((action) => h(NButton, { size: 'small', onClick: () => launchAction(action, row) }, () => action.label)),
         h(NButton, { size: 'small', onClick: () => startEdit(row) }, () => 'Edit'),
         h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => removeRow(row) }, () => 'Del'),
       ]);
@@ -150,5 +156,6 @@ const aggregateResults = computed(() =>
       </n-space>
     </template>
     <n-data-table :columns="columns" :data="displayRows" :row-key="(r: Row) => r.id" size="small" />
+    <ActionDialog v-model:show="actionDialogOpen" :action="selectedAction" :record-id="headerId" :record="headerRecord" :line-id="selectedLine?.id" :line-record="selectedLine ?? undefined" @completed="load" />
   </n-card>
 </template>

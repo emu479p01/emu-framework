@@ -42,8 +42,8 @@ onMounted(async () => {
   loading.value = false;
 });
 
-const selectedApp = ref('');
-const selectedModel = ref('');
+const selectedApp = ref(String(route.params.appName ?? route.query.app ?? ''));
+const selectedModel = ref(String(route.params.modelName ?? route.query.model ?? ''));
 const searchQuery = ref('');
 const reloading = ref(false);
 
@@ -52,10 +52,16 @@ const selectedModelEntry = computed(() =>
   selectedAppEntry.value?.models?.find((m) => m.name === selectedModel.value),
 );
 
-function goToApps() { selectedApp.value = ''; selectedModel.value = ''; searchQuery.value = ''; }
-function goToModels() { selectedModel.value = ''; searchQuery.value = ''; }
-function selectApp(name: string) { selectedApp.value = name; selectedModel.value = ''; searchQuery.value = ''; }
-function selectModel(name: string) { selectedModel.value = name; searchQuery.value = ''; }
+function contextPath() {
+  if (selectedApp.value && selectedModel.value) return `/designer/app/${encodeURIComponent(selectedApp.value)}/model/${encodeURIComponent(selectedModel.value)}`;
+  if (selectedApp.value) return `/designer/app/${encodeURIComponent(selectedApp.value)}`;
+  return '/designer';
+}
+function syncContext() { router.replace({ path: contextPath(), query: { mode: workspaceMode.value } }); }
+function goToApps() { selectedApp.value = ''; selectedModel.value = ''; searchQuery.value = ''; syncContext(); }
+function goToModels() { selectedModel.value = ''; searchQuery.value = ''; syncContext(); }
+function selectApp(name: string) { selectedApp.value = name; selectedModel.value = ''; searchQuery.value = ''; syncContext(); }
+function selectModel(name: string) { selectedModel.value = name; searchQuery.value = ''; syncContext(); }
 
 // ---- stats ----
 const totalApps = computed(() => designer.apps.length);
@@ -175,6 +181,7 @@ const KIND_META: Record<string, { icon: string; label: string }> = {
   duty: { icon: '◆', label: 'Duty' },
   role: { icon: '◉', label: 'Role' },
   script: { icon: '⚡', label: 'Script' },
+  function: { icon: 'ƒ', label: 'Function' },
   app: { icon: '⬡', label: 'App' },
   tableExtension: { icon: '+⊞', label: 'Table Ext' },
   formExtension: { icon: '+⊟', label: 'Form Ext' },
@@ -250,7 +257,6 @@ const NEW_KINDS = [
   { key: 'privilege', label: 'Privilege' },
   { key: 'duty', label: 'Duty' },
   { key: 'role', label: 'Role' },
-  { key: 'script', label: 'Script' },
   { key: 'report', label: 'Report' },
   { type: 'divider' as const, key: 'd1' },
   { key: 'tableExtension', label: 'Table Extension' },
@@ -263,12 +269,13 @@ const NEW_KINDS = [
   { type: 'divider' as const, key: 'd2' },
   { key: 'script', label: 'Script' },
   { key: 'scriptExtension', label: 'Script Extension' },
+  { key: 'function', label: 'Function' },
   { type: 'divider' as const, key: 'd3' },
   { key: 'app', label: 'App' },
 ];
 
 const KIND_ORDER = [
-  'table', 'enum', 'form', 'menu', 'privilege', 'duty', 'role', 'script', 'report',
+  'table', 'enum', 'form', 'menu', 'privilege', 'duty', 'role', 'script', 'function', 'report',
   'tableExtension', 'enumExtension', 'formExtension', 'menuExtension',
   'privilegeExtension', 'dutyExtension', 'roleExtension', 'scriptExtension',
 ];
@@ -321,21 +328,17 @@ const customizableTables = computed(() =>
 
 // ---- actions ----
 function onNew(kind: string) {
-  const query: Record<string, string> = {};
-  if (selectedApp.value) query.app = selectedApp.value;
-  if (selectedModel.value) query.model = selectedModel.value;
-  router.push({ path: `/designer/new/${kind}`, query });
+  if (selectedApp.value && selectedModel.value) router.push(`${contextPath()}/new/${kind}`);
+  else router.push({ path: `/designer/new/${kind}`, query: { ...(selectedApp.value ? { app: selectedApp.value } : {}) } });
 }
 
 function editArtifact(kind: string, name: string) {
-  router.push(`/designer/${kind}/${encodeURIComponent(name)}`);
+  router.push(selectedApp.value && selectedModel.value ? `${contextPath()}/${kind}/${encodeURIComponent(name)}` : `/designer/${kind}/${encodeURIComponent(name)}`);
 }
 
 function customizeTable(tableName: string) {
   router.push(
-    `/designer/new/tableExtension?target=${encodeURIComponent(tableName)}` +
-    (selectedApp.value ? `&app=${selectedApp.value}` : '') +
-    (selectedModel.value ? `&model=${selectedModel.value}` : ''),
+    `${selectedApp.value && selectedModel.value ? contextPath() : '/designer'}/new/tableExtension?target=${encodeURIComponent(tableName)}`,
   );
 }
 

@@ -3,7 +3,7 @@
 FROM node:24.18.0-slim AS build
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@11.10.0 --activate
+RUN corepack enable && corepack prepare pnpm@11.12.0 --activate
 
 # Fallback build toolchain in case a native module (better-sqlite3) has no
 # prebuilt binary for this image's platform/arch (e.g. building for linux/arm64).
@@ -37,5 +37,8 @@ RUN mkdir -p /data
 
 EXPOSE 3399
 VOLUME ["/data"]
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=6 \
+  CMD node -e "fetch('http://127.0.0.1:3399/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
 CMD ["node", "packages/server/dist/main.js"]

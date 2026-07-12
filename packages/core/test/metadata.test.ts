@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import DatabaseCtor from 'better-sqlite3';
 import { MetadataRegistry, MetadataError, syncSchema, validateMetadataArtifact, type TableMeta, type FormMeta, type ReportMeta } from '../src/index.js';
-import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable, testRegistry } from './helpers.js';
+import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable, testRegistry, testManifest } from './helpers.js';
 
 describe('MetadataRegistry', () => {
   it('accepts optional safe icons and rejects unknown icon tokens', () => {
@@ -10,7 +10,7 @@ describe('MetadataRegistry', () => {
     expect(validateMetadataArtifact({ kind: 'app', name: 'unsafe', icon: '<svg>' }).some((item) => item.path.includes('icon'))).toBe(true);
 
     const registry = new MetadataRegistry();
-    expect(() => registry.registerApp({ name: 'a' }, [{
+    expect(() => registry.registerApp(testManifest('a'),[{
       kind: 'menu', name: 'A_Menu', items: [{ label: 'Nested', items: [{ label: 'Bad', icon: 'unknown' as any }] }],
     }])).toThrow(/unknown icon/);
   });
@@ -23,7 +23,7 @@ describe('MetadataRegistry', () => {
 
   it('rejects duplicate artifact names across apps', () => {
     const registry = testRegistry();
-    expect(() => registry.registerApp({ name: 'testapp.ext' }, [TESTAPP_CustTable])).toThrow(MetadataError);
+    expect(() => registry.registerApp(testManifest('testapp.ext'), [TESTAPP_CustTable])).toThrow(MetadataError);
   });
 
   it('rejects unknown enum references', () => {
@@ -33,7 +33,7 @@ describe('MetadataRegistry', () => {
       name: 'A_Bad',
       fields: [{ name: 'x', type: 'enum', enumName: 'Nope' }],
     };
-    expect(() => registry.registerApp({ name: 'a' }, [bad])).toThrow(/unknown enum/);
+    expect(() => registry.registerApp(testManifest('a'),[bad])).toThrow(/unknown enum/);
   });
 
   it('rejects unknown reference tables', () => {
@@ -43,7 +43,7 @@ describe('MetadataRegistry', () => {
       name: 'A_Bad',
       fields: [{ name: 'x', type: 'reference', reference: { table: 'Nope' } }],
     };
-    expect(() => registry.registerApp({ name: 'a' }, [bad])).toThrow(/unknown reference/);
+    expect(() => registry.registerApp(testManifest('a'),[bad])).toThrow(/unknown reference/);
   });
 
   it('rejects reserved system field names', () => {
@@ -53,12 +53,12 @@ describe('MetadataRegistry', () => {
       name: 'A_Bad',
       fields: [{ name: 'id', type: 'int' }],
     };
-    expect(() => registry.registerApp({ name: 'a' }, [bad])).toThrow(/reserved system field/);
+    expect(() => registry.registerApp(testManifest('a'),[bad])).toThrow(/reserved system field/);
   });
 
   it('rejects missing app dependencies', () => {
     const registry = new MetadataRegistry();
-    expect(() => registry.registerApp({ name: 'ext', dependsOn: ['base'] }, [])).toThrow(
+    expect(() => registry.registerApp({ ...testManifest('ext'), dependsOn: ['base'] }, [])).toThrow(
       /depends on 'base'/,
     );
   });
@@ -87,7 +87,7 @@ describe('MetadataRegistry', () => {
         },
       ],
     };
-    registry.registerApp({ name: 'a' }, [header, line, form]);
+    registry.registerApp(testManifest('a'),[header, line, form]);
     expect(registry.getForm('A_HeaderForm').lines?.[0].aggregates).toHaveLength(2);
   });
 
@@ -108,7 +108,7 @@ describe('MetadataRegistry', () => {
       table: 'A_Header',
       lines: [{ table: 'A_Line', refField: 'headerId', fields: ['headerId', 'qty'] }],
     };
-    expect(() => registry.registerApp({ name: 'a' }, [header, line, form])).toThrow(
+    expect(() => registry.registerApp(testManifest('a'),[header, line, form])).toThrow(
       /cannot display its own refField/,
     );
   });
@@ -127,7 +127,7 @@ describe('MetadataRegistry', () => {
       table: 'A_Header',
       lines: [{ table: 'A_Line', refField: 'headerId', fields: [], aggregates: [{ fn: 'sum' }] }],
     };
-    expect(() => registry.registerApp({ name: 'a' }, [header, line, form])).toThrow(/requires 'field'/);
+    expect(() => registry.registerApp(testManifest('a'),[header, line, form])).toThrow(/requires 'field'/);
   });
 
   it('rejects an aggregate on an unknown or non-numeric field', () => {
@@ -147,7 +147,7 @@ describe('MetadataRegistry', () => {
       table: 'A_Header',
       lines: [{ table: 'A_Line', refField: 'headerId', fields: [], aggregates: [{ fn: 'sum', field: 'nope' }] }],
     };
-    expect(() => registry.registerApp({ name: 'a' }, [header, line, formUnknown])).toThrow(/aggregate field 'nope' not found/);
+    expect(() => registry.registerApp(testManifest('a'),[header, line, formUnknown])).toThrow(/aggregate field 'nope' not found/);
 
     const registry2 = new MetadataRegistry();
     const formNonNumeric: FormMeta = {
@@ -156,7 +156,7 @@ describe('MetadataRegistry', () => {
       table: 'A_Header',
       lines: [{ table: 'A_Line', refField: 'headerId', fields: [], aggregates: [{ fn: 'sum', field: 'label' }] }],
     };
-    expect(() => registry2.registerApp({ name: 'a' }, [header, line, formNonNumeric])).toThrow(/must be numeric/);
+    expect(() => registry2.registerApp(testManifest('a'),[header, line, formNonNumeric])).toThrow(/must be numeric/);
   });
 
   it('accepts a reference field with valid copyFields', () => {
@@ -170,7 +170,7 @@ describe('MetadataRegistry', () => {
         { name: 'price', type: 'real' },
       ],
     };
-    registry.registerApp({ name: 'a' }, [ref, main]);
+    registry.registerApp(testManifest('a'),[ref, main]);
     expect(registry.getTable('A_Line').fields[0].reference?.copyFields).toEqual([{ from: 'price', to: 'price' }]);
   });
 
@@ -185,7 +185,7 @@ describe('MetadataRegistry', () => {
         { name: 'price', type: 'real' },
       ],
     };
-    expect(() => registry.registerApp({ name: 'a' }, [ref, badFrom])).toThrow(/copyFields 'from' unknown field/);
+    expect(() => registry.registerApp(testManifest('a'),[ref, badFrom])).toThrow(/copyFields 'from' unknown field/);
 
     const registry2 = new MetadataRegistry();
     const badTo: TableMeta = {
@@ -193,7 +193,7 @@ describe('MetadataRegistry', () => {
       name: 'A_Line',
       fields: [{ name: 'item', type: 'reference', reference: { table: 'A_Item', copyFields: [{ from: 'price', to: 'nope' }] } }],
     };
-    expect(() => registry2.registerApp({ name: 'a' }, [ref, badTo])).toThrow(/copyFields 'to' unknown\/invalid field/);
+    expect(() => registry2.registerApp(testManifest('a'),[ref, badTo])).toThrow(/copyFields 'to' unknown\/invalid field/);
   });
 });
 
@@ -224,7 +224,7 @@ describe('syncSchema', () => {
       ...TESTAPP_CustTable,
       fields: [...TESTAPP_CustTable.fields, { name: 'phone', type: 'string' }],
     };
-    registry2.registerApp({ name: 'testapp' }, [salesStatusEnum, custV2, TESTAPP_SalesTable]);
+    registry2.registerApp(testManifest('testapp'), [salesStatusEnum, custV2, TESTAPP_SalesTable]);
     const result = syncSchema(db, registry2);
 
     expect(result.createdTables).toHaveLength(0);
@@ -289,5 +289,28 @@ describe('MetadataRegistry — reports', () => {
       lineSources: [{ table: 'TESTAPP_CustTable', refField: 'nope', bands: [{ kind: 'detail', height: 20, elements: [] }] }],
     };
     expect(() => registry.registerWebArtifacts('testapp', [bad])).toThrow(/has no refField 'nope'/);
+  });
+
+  it('validates reusable picker actions and dynamic record filters', () => {
+    const registry = testRegistry();
+    registry.registerWebArtifacts('testapp', [goodReport(), {
+      kind: 'form', name: 'TESTAPP_AllocationForm', app: 'testapp', model: 'ClientCustom', table: 'TESTAPP_CustTable', actions: [{
+        label: 'Allocate', type: 'picker', target: 'AllocateStock', picker: {
+          table: 'TESTAPP_SalesTable', columns: ['salesId', 'totalAmount'], searchFields: ['salesId'], multiple: true,
+          allocation: { availableField: 'totalAmount' },
+          filters: [{ field: 'salesId', operator: 'eq', value: { source: 'record', field: 'accountNum' } }],
+        },
+      }],
+    } as any]);
+    expect(registry.getForm('TESTAPP_AllocationForm').actions?.[0].type).toBe('picker');
+  });
+
+  it('rejects picker fields that do not exist on the source table', () => {
+    const registry = testRegistry();
+    expect(() => registry.registerWebArtifacts('testapp', [{
+      kind: 'form', name: 'TESTAPP_BadPickerForm', app: 'testapp', model: 'ClientCustom', table: 'TESTAPP_CustTable', actions: [{
+        label: 'Bad', type: 'picker', target: 'BadAction', picker: { table: 'TESTAPP_SalesTable', columns: ['missing'] },
+      }],
+    } as any])).toThrow(/unknown source field 'missing'/);
   });
 });

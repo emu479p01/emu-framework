@@ -1,6 +1,7 @@
 services:
   app:
-    build: .
+    image: ghcr.io/emu479p01/emu-framework:${EMU_VERSION:-latest}
+    container_name: emuframework-app
     ports:
       - "${PORT:-3399}:3399"
     environment:
@@ -9,7 +10,27 @@ services:
       EMU_DB_PATH: /data/data.db
       EMU_DESIGNER_DB_PATH: /data/designer.db
       EMU_SECURE_COOKIES: ${EMU_SECURE_COOKIES:-}
+      EMU_DEPLOYMENT_MODE: docker
+      EMU_UPDATER_URL: http://updater:3400
+      EMU_UPDATER_TOKEN: ${EMU_UPDATER_TOKEN:?Set EMU_UPDATER_TOKEN in .env}
     volumes:
+      - emu-data:/data
+    labels:
+      com.emuframework.role: app
+    restart: unless-stopped
+    depends_on:
+      - updater
+
+  updater:
+    image: ghcr.io/emu479p01/emu-framework-updater:${EMU_VERSION:-latest}
+    container_name: emuframework-updater
+    environment:
+      EMU_UPDATER_TOKEN: ${EMU_UPDATER_TOKEN:?Set EMU_UPDATER_TOKEN in .env}
+      EMU_APP_CONTAINER: emuframework-app
+      EMU_IMAGE_REPOSITORY: ghcr.io/emu479p01/emu-framework
+      EMU_UPDATE_STATE_PATH: /data/update-status.json
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
       - emu-data:/data
     restart: unless-stopped
 

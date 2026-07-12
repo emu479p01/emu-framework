@@ -12,8 +12,10 @@ export interface ModelEntry { name: string; label?: string; layer: string }
 export interface AppEntry { name: string; label: string; icon?: import('@emu/core').IconName; models?: ModelEntry[]; modules: string[]; menus: MenuMeta[] }
 export interface Metadata {
   branding: { title: string };
+  capabilities: { designer: boolean; maintenance: boolean; tableBrowser: boolean };
   tables: TableMeta[]; enums: EnumMeta[]; forms: FormMeta[]; reports: ReportMeta[];
   privileges: SecurityMeta[]; duties: SecurityMeta[]; roles: SecurityMeta[];
+  actions: string[];
   frameworkMenus: MenuMeta[]; apps: AppEntry[];
 }
 

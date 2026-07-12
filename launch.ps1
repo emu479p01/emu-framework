@@ -23,7 +23,7 @@ $clientTitle = "Emu-Client"
 # Pinned, known-good toolchain — downloaded portably into .tools\ so a completely
 # bare Windows machine (no Node/pnpm preinstalled, no admin rights) can still run this.
 $nodeVersion = "24.18.0"
-$pnpmVersion = "11.10.0"
+$pnpmVersion = "11.12.0"
 $toolsDir = Join-Path $root ".tools"
 $localNodeDir = Join-Path $toolsDir "node-v$nodeVersion-win-x64"
 $nodeExe = Join-Path $localNodeDir "node.exe"
@@ -125,7 +125,7 @@ function Stop-All {
 function Start-App {
   Write-Host ""
   Write-Host "======================================" -ForegroundColor Cyan
-  Write-Host "  EmuFramework v0.0.0.9 Launcher" -ForegroundColor Cyan
+  Write-Host "  EmuFramework v0.0.1.0 Launcher" -ForegroundColor Cyan
   Write-Host "======================================" -ForegroundColor Cyan
   Write-Host ""
 

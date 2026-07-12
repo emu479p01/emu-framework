@@ -32,7 +32,7 @@ const PATHS: Record<IconName, string> = {
 export function iconForItem(item: MenuItemMeta): IconName {
   if (item.icon) return item.icon;
   if (item.items?.length) return 'grid';
-  const target = `${item.route ?? ''} ${item.form ?? ''}`.toLowerCase();
+  const target = `${item.route ?? ''} ${item.form ?? ''} ${item.target && 'name' in item.target ? item.target.name : ''}`.toLowerCase();
   if (target.includes('maintenance')) return 'database';
   if (target.includes('designer')) return 'wrench';
   if (target.includes('user')) return 'users';
@@ -54,15 +54,19 @@ export function renderAppIcon(app: NavigationApp): () => VNodeChild {
 }
 
 export function itemToOption(item: MenuItemMeta, parentKey: string, appName: string, onNavigate: () => void): NavMenuOption {
-  const key = `${parentKey}:${item.route || item.form || item.label || 'sub'}`;
+  const typedName = item.target && 'name' in item.target ? item.target.name : '';
+  const key = `${parentKey}:${item.route || item.form || item.action || typedName || item.label || 'sub'}`;
   const icon = renderIcon(iconForItem(item), item.label);
   if (item.items?.length) {
-    return { label: item.label ?? '', key, icon, children: item.items.map((child) => itemToOption(child, key, appName, onNavigate)) };
+    const label = item.label ?? '';
+    return { label: () => h('span', { title: label }, label), key, icon, children: item.items.map((child) => itemToOption(child, key, appName, onNavigate)) };
   }
-  const to = item.route || `/app/${appName}/form/${item.form}`;
+  const targetType = item.target?.type ?? (item.form ? 'form' : item.action ? 'function' : undefined);
+  const targetName = typedName || item.form || item.action || '';
+  const to = item.route || (targetType === 'function' ? `/action/${encodeURIComponent(targetName)}` : targetType === 'report' ? `/report/${encodeURIComponent(targetName)}` : `/app/${appName}/form/${targetName}`);
   return {
-    key, routeTo: item.route, formName: item.form, icon,
-    label: () => h(RouterLink, { to, onClick: onNavigate }, { default: () => item.label ?? item.form ?? to }),
+    key, routeTo: item.route || (targetType === 'report' ? to : undefined), formName: targetType === 'form' ? targetName : undefined, icon,
+    label: () => h(RouterLink, { to, onClick: onNavigate, title: item.label ?? item.form ?? to }, { default: () => item.label ?? item.form ?? to }),
   };
 }
 
@@ -74,16 +78,16 @@ export function buildNavigationOptions(input: {
   onNavigate: () => void;
 }): NavMenuOption[] {
   const options: NavMenuOption[] = [];
+  options.push(...input.apps.map((app) => ({
+    label: () => h('span', { title: app.label }, app.label), key: `app-${app.name}`, icon: renderAppIcon(app),
+    children: app.menus.flatMap((menu) => menu.items.map((item) => itemToOption(item, `app-${app.name}`, app.name, input.onNavigate))),
+  })));
   if (input.isFrameworkUser && input.frameworkMenus.length) {
     options.push({
-      label: input.settingsLabel, key: 'framework-settings', icon: renderIcon('settings', input.settingsLabel),
+      label: () => h('span', { title: input.settingsLabel }, input.settingsLabel), key: 'framework-settings', icon: renderIcon('settings', input.settingsLabel),
       children: input.frameworkMenus.flatMap((menu) => menu.items.map((item) => itemToOption(item, `fw-${menu.name}`, 'system', input.onNavigate))),
     });
   }
-  options.push(...input.apps.map((app) => ({
-    label: app.label, key: `app-${app.name}`, icon: renderAppIcon(app),
-    children: app.menus.flatMap((menu) => menu.items.map((item) => itemToOption(item, `app-${app.name}`, app.name, input.onNavigate))),
-  })));
   return options;
 }
 

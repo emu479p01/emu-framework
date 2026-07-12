@@ -24,11 +24,29 @@ describe('sidebar navigation', () => {
       isFrameworkUser: true, settingsLabel: 'Settings', frameworkMenus: [settings],
       apps: [{ name: 'sales', label: 'Sales', menus: [appMenu] }], onNavigate: vi.fn(),
     });
-    expect(options.map((option) => option.key)).toEqual(['framework-settings', 'app-sales']);
+    expect(options.map((option) => option.key)).toEqual(['app-sales', 'framework-settings']);
     expect(options.every((option) => option.type !== 'group' && typeof option.icon === 'function')).toBe(true);
     expect(allOptions(options).every((option) => typeof option.icon === 'function')).toBe(true);
     expect(findActiveKey(options, 'SALES_OrderForm', '/')).toContain('SALES_OrderForm');
     expect(findActiveKey(options, '', '/system/maintenance')).toContain('/system/maintenance');
+  });
+
+  it('maps an action item to the server-action route', () => {
+    const actionMenu: MenuMeta = { kind: 'menu', name: 'Jobs', items: [{ label: 'Rebuild', action: 'RebuildIndex' }] };
+    const options = buildNavigationOptions({ isFrameworkUser: false, settingsLabel: 'Settings', frameworkMenus: [], apps: [{ name: 'ops', label: 'Ops', menus: [actionMenu] }], onNavigate: vi.fn() });
+    expect(allOptions(options).some((option) => String(option.key).includes('RebuildIndex'))).toBe(true);
+  });
+
+  it('maps typed Form, Function and Report targets', () => {
+    const menu: MenuMeta = { kind: 'menu', name: 'Targets', items: [
+      { label: 'Orders', target: { type: 'form', name: 'SALES_OrderForm' } },
+      { label: 'Recalculate', target: { type: 'function', name: 'Recalculate' } },
+      { label: 'Statement', target: { type: 'report', name: 'CustomerStatement' } },
+    ] };
+    const options = buildNavigationOptions({ isFrameworkUser: false, settingsLabel: 'Settings', frameworkMenus: [], apps: [{ name: 'sales', label: 'Sales', menus: [menu] }], onNavigate: vi.fn() });
+    expect(findActiveKey(options, 'SALES_OrderForm', '/')).toContain('SALES_OrderForm');
+    expect(findActiveKey(options, '', '/report/CustomerStatement')).toContain('CustomerStatement');
+    expect(allOptions(options).some((option) => String(option.key).includes('Recalculate'))).toBe(true);
   });
 
   it('uses deterministic fallbacks when metadata has no icon', () => {

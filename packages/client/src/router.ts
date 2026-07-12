@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useSession } from './stores/session';
-import { useMeta } from './stores/meta';
+import { useMeta, type Metadata } from './stores/meta';
 const LoginPage = () => import('./views/LoginPage.vue');
 const HomePage = () => import('./views/HomePage.vue');
 const ListPage = () => import('./views/ListPage.vue');
@@ -9,6 +9,9 @@ const DesignerPage = () => import('./views/designer/DesignerPage.vue');
 const DesignerEditPage = () => import('./views/designer/DesignerEditPage.vue');
 const ReportEditPage = () => import('./views/report-designer/ReportEditPage.vue');
 const SystemMaintenancePage = () => import('./views/SystemMaintenancePage.vue');
+const ActionPage = () => import('./views/ActionPage.vue');
+const TableBrowserPage = () => import('./views/TableBrowserPage.vue');
+const ReportLaunchPage = () => import('./views/ReportLaunchPage.vue');
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -23,13 +26,22 @@ export const router = createRouter({
     { path: '/form/:formName', component: ListPage, props: true },
     { path: '/form/:formName/:id', component: FormPage, props: true },
     // Designer (framework-level)
-    { path: '/designer', component: DesignerPage },
+    { path: '/designer', component: DesignerPage, meta: { capability: 'designer' } },
+    { path: '/designer/app/:appName', component: DesignerPage, meta: { capability: 'designer' } },
+    { path: '/designer/app/:appName/model/:modelName', component: DesignerPage, meta: { capability: 'designer' } },
+    { path: '/designer/app/:appName/model/:modelName/new/report', component: ReportEditPage, meta: { capability: 'designer' } },
+    { path: '/designer/app/:appName/model/:modelName/report/:name', component: ReportEditPage, props: true, meta: { capability: 'designer' } },
+    { path: '/designer/app/:appName/model/:modelName/new/:kind', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind }), meta: { capability: 'designer' } },
+    { path: '/designer/app/:appName/model/:modelName/:kind/:name', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind, name: r.params.name }), meta: { capability: 'designer' } },
     // Reports use a dedicated drag-and-drop canvas editor instead of the generic structured-form editor.
-    { path: '/designer/new/report', component: ReportEditPage },
-    { path: '/designer/report/:name', component: ReportEditPage, props: true },
-    { path: '/designer/new/:kind', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind }) },
-    { path: '/designer/:kind/:name', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind, name: r.params.name }) },
-    { path: '/system/maintenance', component: SystemMaintenancePage },
+    { path: '/designer/new/report', component: ReportEditPage, meta: { capability: 'designer' } },
+    { path: '/designer/report/:name', component: ReportEditPage, props: true, meta: { capability: 'designer' } },
+    { path: '/designer/new/:kind', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind }), meta: { capability: 'designer' } },
+    { path: '/designer/:kind/:name', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind, name: r.params.name }), meta: { capability: 'designer' } },
+    { path: '/system/maintenance', component: SystemMaintenancePage, meta: { capability: 'maintenance' } },
+    { path: '/system/tables', component: TableBrowserPage, meta: { capability: 'tableBrowser' } },
+    { path: '/action/:name', component: ActionPage, props: true },
+    { path: '/report/:name', component: ReportLaunchPage, props: true },
   ],
 });
 
@@ -40,5 +52,9 @@ router.beforeEach(async (to) => {
   if (!session.user) return '/login';
   const meta = useMeta();
   if (!meta.meta) await meta.load();
+  const capability = to.meta.capability as keyof Metadata['capabilities'] | undefined;
+  if (capability && !meta.meta?.capabilities[capability]) return '/';
+  const formName = String(to.params.formName ?? '');
+  if (formName && !meta.form(formName)) return '/';
   return true;
 });

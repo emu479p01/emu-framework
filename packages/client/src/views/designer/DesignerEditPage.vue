@@ -22,7 +22,10 @@ import { ApiError } from '../../api';
 import FieldsEditor, { type EditableField } from './FieldsEditor.vue';
 import IndexesEditor, { type EditableIndex } from './IndexesEditor.vue';
 import MenuItemsEditor, { type EditableMenuItem } from './MenuItemsEditor.vue';
+import ActionsEditor from './ActionsEditor.vue';
+import type { FormAction } from '@emu/core';
 import { ICON_OPTIONS } from '../../navigation';
+import { appPrefix, deriveExtensionName, EXT_TARGET_FIELD } from './naming';
 
 const props = defineProps<{ kind: string; name?: string }>();
 const route = useRoute();
@@ -32,13 +35,15 @@ const meta = useMeta();
 const message = useMessage();
 
 const isNew = computed(() => props.name === undefined);
+const isExtension = computed(() => props.kind.endsWith('Extension'));
 const busy = ref(false);
+const saveError = ref('');
 const jsonText = ref('');
 const activeTab = ref('design');
 
 /** Kinds with a structured editor; others are edited as raw JSON. */
 const DESIGN_KINDS = new Set([
-  'table', 'enum', 'form', 'menu', 'script', 'app',
+  'table', 'enum', 'form', 'menu', 'script', 'function', 'app',
   'tableExtension', 'formExtension', 'menuExtension', 'enumExtension',
   'privilege', 'duty', 'role',
   'privilegeExtension', 'dutyExtension', 'roleExtension', 'scriptExtension',
@@ -89,6 +94,8 @@ function blank(kind: string): Artifact {
       return { kind, name: '', label: '' };
     case 'script':
       return { kind, name: '', label: '', code: '// register events, hooks, and actions\n// kernel.actions.set("MyAction", (ctx, args) => { ... });\n// kernel.events.on("MyTable", "onInserting", (e) => { ... });\n// kernel.hooks.register("MyTable", { validateWrite(rec) { ... } });\n' };
+    case 'function':
+      return { kind, name: '', label: '', code: '// Function body — invoked as (ctx, args); `kernel` is also in scope.\n// Return a value (it becomes the API response), e.g.:\n// return { ok: true, count: ctx.select("MyTable").count() };\n' };
     default:
       return { kind, name: '' };
   }
@@ -98,15 +105,12 @@ async function load() {
   if (!designer.loaded) await designer.load();
   if (isNew.value) {
     artifact.value = blank(props.kind);
-    if (props.kind === 'tableExtension' && artifact.value.table) {
-      artifact.value.name = `${artifact.value.table}_Extension`;
-    }
   } else {
     const entry = designer.get(props.name!);
     artifact.value = entry ? JSON.parse(JSON.stringify(entry.artifact)) : blank(props.kind);
   }
-  selectedApp.value = (artifact.value.app as string) || (route.query.app as string) || selectedApp.value;
-  selectedModel.value = (artifact.value.model as string) || (route.query.model as string) || selectedModel.value;
+  selectedApp.value = (artifact.value.app as string) || (route.params.appName as string) || (route.query.app as string) || selectedApp.value;
+  selectedModel.value = (artifact.value.model as string) || (route.params.modelName as string) || (route.query.model as string) || selectedModel.value;
   selectedLayer.value = ((artifact.value.layer as string) || selectedLayer.value) as string;
   jsonText.value = JSON.stringify(artifact.value, null, 2);
   activeTab.value = DESIGN_KINDS.has(props.kind) ? 'design' : 'json';
@@ -137,6 +141,24 @@ watch(() => artifact.value.name, (n) => {
     artifact.value.name = (n as string).toLowerCase().replace(/[^a-z0-9-]/g, '');
   }
 });
+
+// Extensions never get a user-chosen name: it is derived from the selected
+// base object as <AppPrefix>_<BaseName>_Extension. If that extension already
+// exists, open it instead of silently overwriting on save.
+watch(
+  [selectedApp, () => (EXT_TARGET_FIELD[props.kind] ? artifact.value[EXT_TARGET_FIELD[props.kind]] : undefined)],
+  ([app, target]) => {
+    if (!isNew.value || !isExtension.value) return;
+    if (!app || !target) { artifact.value.name = ''; return; }
+    const derived = deriveExtensionName(app as string, target as string);
+    artifact.value.name = derived;
+    if (designer.get(derived)) {
+      message.info('An extension for this object already exists — opening it');
+      router.replace(`/designer/${props.kind}/${encodeURIComponent(derived)}`);
+    }
+  },
+  { immediate: true },
+);
 
 const LAYERS = [
   { value: 'SYS', label: 'SYS — System (base)' },
@@ -212,6 +234,7 @@ function displayFieldOptionsFor(line: EditableLine) {
 function onLineRefFieldChange(line: EditableLine) {
   line.fields = line.fields.filter((f) => f !== line.refField);
 }
+function actionsForLine(line: EditableLine): FormAction[] { if (!line.actions) line.actions = []; return line.actions; }
 const formOptions = computed(() =>
   (meta.meta?.forms ?? []).map((f) => ({ label: f.name, value: f.name })),
 );
@@ -230,16 +253,24 @@ const roleOptions = computed(() =>
 const scriptOptions = computed(() =>
   designer.artifacts.filter((a) => a.kind === 'script').map((s) => ({ label: s.name, value: s.name })),
 );
+const reportOptions = computed(() => (meta.meta?.reports ?? []).map((report) => ({ label: report.label ?? report.name, value: report.name })));
+const functionOptions = computed(() => (meta.meta?.actions ?? []).map((name) => ({ label: name, value: name })));
 
 async function save() {
   busy.value = true;
+  saveError.value = '';
   try {
     let art = artifact.value;
     if (activeTab.value === 'json') {
       art = JSON.parse(jsonText.value);
       art.kind = props.kind;
     }
-    if (!art.name) { message.error('Name is required'); return; }
+    if (isExtension.value && isNew.value) {
+      const target = art[EXT_TARGET_FIELD[props.kind]] as string | undefined;
+      if (!target) { message.error('Select the object to extend'); return; }
+      art.name = deriveExtensionName(selectedApp.value, target);
+    }
+    if (!art.name) { message.error(isExtension.value ? 'Select the object to extend' : 'Name is required'); return; }
 
     // Attach app/layer/model properties
     if (props.kind !== 'app') {
@@ -250,20 +281,12 @@ async function save() {
       (art as any).model = selectedModel.value;
     }
 
-    // Auto-prefix artifact name with app prefix
-    if (props.kind !== 'app' && isNew.value && selectedApp.value) {
-      const prefix =
-        selectedApp.value === 'system'
-          ? 'FW'
-          : selectedApp.value.startsWith('erp')
-            ? 'ERP'
-            : selectedApp.value.replace(/[^a-z0-9]/gi, '').toUpperCase();
+    // Auto-prefix artifact name with app prefix (extension names are fully derived above)
+    if (props.kind !== 'app' && !isExtension.value && isNew.value && selectedApp.value) {
+      const prefix = appPrefix(selectedApp.value);
       if (!art.name.startsWith(`${prefix}_`)) {
         art.name = `${prefix}_${art.name}`;
       }
-    }
-    if (props.kind.endsWith('Extension') && !art.name.endsWith('_Extension')) {
-      art.name = `${art.name}_Extension`;
     }
 
     // App kind validation
@@ -292,8 +315,7 @@ async function save() {
       if (autoForm.value && selectedMenu.value) {
         if (selectedMenu.value === '!new') {
           // Create a new menu for this app
-          const menuPrefix = selectedApp.value === 'system' ? 'FW' : selectedApp.value.startsWith('erp') ? 'ERP' : selectedApp.value.replace(/[^a-z0-9]/gi, '').toUpperCase();
-          const menuName = `${menuPrefix}_MainMenu`;
+          const menuName = `${appPrefix(selectedApp.value)}_MainMenu`;
           const existingMenu = designer.get(menuName);
           const items = existingMenu
             ? [...(existingMenu.artifact.items as { label?: string; form: string }[])]
@@ -308,7 +330,7 @@ async function save() {
           await designer.save(menuArt);
         } else {
           // Append to existing menu via menuExtension
-          const extName = `${selectedMenu.value}_Extension`;
+          const extName = deriveExtensionName(selectedApp.value, selectedMenu.value);
           const existingExt = designer.get(extName);
           const items = existingExt
             ? [...(existingExt.artifact.items as { label?: string; form: string }[])]
@@ -318,7 +340,7 @@ async function save() {
           }
           await designer.save({
             kind: 'menuExtension',
-            name: extName.endsWith('_Extension') ? extName : `${extName}_Extension`,
+            name: extName,
             app: selectedApp.value,
             model: selectedModel.value,
             layer: selectedLayer.value,
@@ -337,25 +359,28 @@ async function save() {
           (f) => f.table === art.table && (f.groups?.length ?? 0) > 0,
         );
         for (const f of targetForms) {
+          const extName = deriveExtensionName(selectedApp.value, f.name);
+          const existingExt = designer.get(extName)?.artifact as { listFields?: string[]; groups?: { label?: string; fields: string[] }[] } | undefined;
+          const listFields = [...new Set([...(existingExt?.listFields ?? []), ...fieldNames])];
           await designer.save({
             kind: 'formExtension',
-            name: `${f.name}_Extension`,
+            name: extName,
             app: selectedApp.value,
             model: selectedModel.value,
             layer: selectedLayer.value,
             form: f.name,
-            listFields: fieldNames,
-            groups: [{ label: 'Custom fields', fields: fieldNames }],
+            listFields,
+            groups: [{ label: 'Custom fields', fields: listFields }],
           });
         }
       }
     }
 
     message.success('Saved — changes are live');
-    router.push('/designer');
+    router.push(selectedApp.value && selectedModel.value ? `/designer/app/${encodeURIComponent(selectedApp.value)}/model/${encodeURIComponent(selectedModel.value)}?mode=advanced` : '/designer?mode=advanced');
   } catch (err) {
-    if (err instanceof ApiError) message.error(err.message);
-    else if (err instanceof SyntaxError) message.error(`Invalid JSON: ${err.message}`);
+    if (err instanceof ApiError) { saveError.value = err.message; message.error('Object could not be saved. Review the details shown on the page.'); }
+    else if (err instanceof SyntaxError) { saveError.value = `Invalid JSON: ${err.message}`; message.error(saveError.value); }
     else throw err;
   } finally {
     busy.value = false;
@@ -371,10 +396,14 @@ const menuItems = computed(() => {
 });
 const tableFields = computed(() => (artifact.value.fields ?? []) as EditableField[]);
 interface EditableAggregate { fn: 'count' | 'sum' | 'avg'; field?: string; label?: string }
-interface EditableLine { table: string; refField: string; fields: string[]; aggregates?: EditableAggregate[] }
+interface EditableLine { table: string; refField: string; fields: string[]; aggregates?: EditableAggregate[]; actions?: FormAction[] }
 const formLines = computed(() => {
   if (!artifact.value.lines) artifact.value.lines = [];
   return artifact.value.lines as EditableLine[];
+});
+const formActions = computed(() => {
+  if (!artifact.value.actions) artifact.value.actions = [];
+  return artifact.value.actions as FormAction[];
 });
 const AGGREGATE_FN_OPTIONS = [
   { label: 'count', value: 'count' },
@@ -422,6 +451,7 @@ function addTablePermission() {
   (artifact.value.tablePermissions as unknown[]).push({ table: '', read: true });
 }
 function removeTablePermission(i: number) { (artifact.value.tablePermissions as unknown[]).splice(i, 1); }
+function back() { window.history.length > 1 ? router.back() : router.push({ path: '/designer', query: { mode: 'advanced', app: selectedApp.value, model: selectedModel.value } }); }
 </script>
 
 <template>
@@ -429,11 +459,12 @@ function removeTablePermission(i: number) { (artifact.value.tablePermissions as 
     <n-space justify="space-between" style="margin-bottom: 16px">
       <h2 style="margin: 0">{{ isNew ? `New ${kind}` : `${kind}: ${name}` }}</h2>
       <n-space>
-        <n-button @click="router.push('/designer')">Back</n-button>
+        <n-button @click="back">Back</n-button>
         <n-button type="primary" :loading="busy" data-testid="designer-save" @click="save">Save</n-button>
       </n-space>
     </n-space>
 
+    <n-alert v-if="saveError" type="error" title="Object could not be saved" closable style="margin-bottom:16px;white-space:pre-line" @close="saveError=''">{{ saveError }}</n-alert>
     <n-tabs v-model:value="activeTab" type="line">
       <n-tab-pane v-if="DESIGN_KINDS.has(kind)" name="design" tab="Design">
         <n-form label-placement="top" style="max-width: 960px">
@@ -441,10 +472,13 @@ function removeTablePermission(i: number) { (artifact.value.tablePermissions as 
             <!-- Header: name, label, app selector -->
             <n-card size="small">
               <n-space :size="24" align="start">
-                <n-form-item label="Name" required style="min-width: 240px">
+                <n-form-item v-if="!isExtension" label="Name" required style="min-width: 240px">
                   <n-input v-model:value="(artifact.name as string)" :disabled="kind === 'app' ? !isNew : !isNew" placeholder="PascalCase" data-testid="artifact-name" />
                 </n-form-item>
-                <n-form-item label="Label" style="min-width: 240px">
+                <n-form-item v-else label="Name (automatic)" style="min-width: 240px">
+                  <n-input :value="(artifact.name as string)" disabled placeholder="Select the object to extend" data-testid="artifact-name" />
+                </n-form-item>
+                <n-form-item v-if="!isExtension" label="Label" style="min-width: 240px">
                   <n-input v-model:value="(artifact.label as string)" data-testid="artifact-label" />
                 </n-form-item>
                 <n-form-item v-if="kind === 'table'" label="Title field (lookup)">
@@ -539,6 +573,31 @@ function removeTablePermission(i: number) { (artifact.value.tablePermissions as 
               </n-space>
             </n-card>
 
+            <!-- Function editor -->
+            <n-card v-if="kind === 'function'" size="small" title="Function">
+              <n-space vertical>
+                <n-alert type="warning" title="High-risk executable code">
+                  Functions run on the server. AI and MCP change sets cannot create or update functions.
+                </n-alert>
+                <n-form-item>
+                  <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0">
+                    Write the function body. It is invoked as <b>(ctx, args)</b> with <b>kernel</b> also in scope,
+                    registered as an action under this artifact's name, and callable from form/menu
+                    Function targets or <b>POST /api/action/&lt;name&gt;</b>. The return value becomes the response.
+                  </p>
+                </n-form-item>
+                <n-form-item label="Code">
+                  <n-input
+                    v-model:value="(artifact.code as string)"
+                    type="textarea"
+                    :autosize="{ minRows: 16, maxRows: 40 }"
+                    style="font-family: monospace; font-size: 13px"
+                    data-testid="artifact-code"
+                  />
+                </n-form-item>
+              </n-space>
+            </n-card>
+
             <!-- App specific editor (simple form) -->
             <n-card v-if="kind === 'app'" size="small" title="App settings">
               <n-space vertical>
@@ -599,6 +658,11 @@ function removeTablePermission(i: number) { (artifact.value.tablePermissions as 
                 <n-button size="small" style="margin-top: 8px" @click="addGroup">+ Add group</n-button>
               </n-card>
 
+              <n-card size="small" title="Form header actions">
+                <p style="color:var(--n-text-color-3);font-size:13px;margin-top:0">Reusable Function, Report, or Record Picker buttons shown at the top of the form.</p>
+                <ActionsEditor :actions="formActions" :record-table="formTableName" />
+              </n-card>
+
               <!-- Line grids (master-detail) -->
               <n-card v-if="kind === 'form'" size="small" title="Line grids">
                 <n-space vertical :size="16">
@@ -638,6 +702,10 @@ function removeTablePermission(i: number) { (artifact.value.tablePermissions as 
                       <n-button size="tiny" quaternary type="error" @click="removeAggregate(line, ai)">✕</n-button>
                     </n-space>
                     <n-button size="small" style="margin-top: 4px" @click="addAggregate(line)">+ Add aggregate</n-button>
+                    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--emu-border)">
+                      <h4 style="margin:0 0 8px">Line actions</h4>
+                      <ActionsEditor :actions="actionsForLine(line)" :record-table="formTableName" :line-table="line.table" />
+                    </div>
                   </n-card>
                 </n-space>
                 <n-button size="small" style="margin-top: 8px" @click="addLine">+ Add line grid</n-button>
@@ -647,9 +715,9 @@ function removeTablePermission(i: number) { (artifact.value.tablePermissions as 
             <!-- Menu items -->
             <n-card v-if="kind === 'menu' || kind === 'menuExtension'" size="small" title="Menu items">
               <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0 0 8px">
-                Add a form to make an item navigable, or leave it blank to use as a submenu group. Use "+ Sub-item" to nest items.
+                Choose Group, Form, Function, or Report for each item. Use "+ Sub-item" to build nested menus.
               </p>
-              <MenuItemsEditor :items="menuItems" :form-options="formOptions" />
+              <MenuItemsEditor :items="menuItems" :form-options="formOptions" :report-options="reportOptions" :function-options="functionOptions" />
             </n-card>
 
             <!-- Security objects -->

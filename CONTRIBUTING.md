@@ -1,32 +1,34 @@
-# Contributing
+# Contributing to EmuFramework
 
-## Setup
+This file is for people who want to propose code or documentation changes through a GitHub Pull Request. It is not an application user manual; users should start at the [Documentation Index](docs/README.md).
 
-```sh
-pnpm install
-pnpm dev   # runs API (3399) + client (5199) together
-```
+## Prepare a change
 
-Or run them in separate terminals if you prefer:
+1. Fork the repository on GitHub and clone your fork.
+2. Create a short-lived branch from the current default branch.
+3. Run `pnpm install` with Node.js 24.18.0 and pnpm 11.12.0.
+4. Make one focused change and add or update tests.
+5. Do not commit databases, `.env` files, `.tools`, build output, or credentials.
 
-```sh
-pnpm --filter @emu/server dev
-pnpm --filter @emu/client dev
-```
+Run the app with `pnpm dev`. Development accounts are documented in [Developer setup](docs/developer/setup.md) and must never be used in production.
 
-Logins: `admin/admin`, `manager/manager`, `clerk/clerk`.
+## Verify the change
 
-## Before opening a PR
+Run these commands before opening a Pull Request:
 
 ```sh
 pnpm check:versions
-pnpm -r typecheck
-pnpm -r test
-pnpm -r build
+pnpm typecheck
+pnpm test
+pnpm build
 ```
 
-## Project layout
+## Open a Pull Request
 
-See [README.md](README.md#project-structure) for the package layout and
-[docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md) for the full developer guide,
-including how to scaffold apps/modules/objects with `pnpm emu`.
+1. Push the branch to your fork.
+2. Describe the problem, the chosen solution, and how it was tested.
+3. Include screenshots for visible UI changes.
+4. Mention migrations, compatibility risks, or documentation changes.
+5. Respond to review comments with additional commits; do not rewrite unrelated code.
+
+See [Testing](docs/developer/testing.md) and [Architecture](docs/developer/architecture.md) for more detail.

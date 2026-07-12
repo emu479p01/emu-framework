@@ -37,10 +37,10 @@ async function submit() {
       <h1>Welcome back</h1><p class="login-copy">Sign in to continue to your workspace.</p>
       <n-form @keyup.enter="submit">
         <n-form-item label="Username">
-          <n-input v-model:value="username" placeholder="admin" data-testid="username" />
+          <n-input v-model:value="username" autocomplete="username" data-testid="username" />
         </n-form-item>
         <n-form-item label="Password">
-          <n-input v-model:value="password" type="password" placeholder="••••" data-testid="password" />
+          <n-input v-model:value="password" type="password" show-password-on="click" autocomplete="current-password" placeholder="••••" data-testid="password" />
         </n-form-item>
         <n-alert v-if="error" type="error" style="margin-bottom: 12px">{{ error }}</n-alert>
         <n-button type="primary" block :loading="busy" data-testid="login" @click="submit">

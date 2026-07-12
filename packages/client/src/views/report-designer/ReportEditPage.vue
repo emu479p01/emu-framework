@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   NButton,
+  NAlert,
   NCard,
   NCheckbox,
   NColorPicker,
@@ -13,9 +14,12 @@ import {
   NSelect,
   NSpace,
   NSwitch,
+  NTabPane,
+  NTabs,
+  useDialog,
   useMessage,
 } from 'naive-ui';
-import { ApiError } from '../../api';
+import { api, ApiError } from '../../api';
 import { useDesigner } from '../../stores/designer';
 import { useMeta, type FieldMeta } from '../../stores/meta';
 import { useDraggableElement } from './useDraggableElement';
@@ -52,6 +56,7 @@ interface ReportArtifact {
   dataSource: string;
   bands: ReportBand[];
   lineSources?: ReportLineSource[];
+  parameters?: { field: string; operator?: 'eq' | 'from' | 'to'; label?: string; required?: boolean }[];
 }
 
 const props = defineProps<{ name?: string }>();
@@ -60,9 +65,13 @@ const router = useRouter();
 const designer = useDesigner();
 const meta = useMeta();
 const message = useMessage();
+const dialog = useDialog();
 
 const isNew = computed(() => props.name === undefined);
 const busy = ref(false);
+const activeTab = ref<'design' | 'json'>('design');
+const jsonText = ref('');
+const jsonResult = ref<{ valid: boolean; diagnostics: { path: string; code: string; message: string }[]; summary?: { bands: number; elements: number; lineSources: number; parameters: number } } | null>(null);
 
 const BAND_KINDS: { kind: ReportBandKind; label: string }[] = [
   { kind: 'pageHeader', label: 'Page header' },
@@ -80,6 +89,7 @@ function blank(): ReportArtifact {
     dataSource: '',
     bands: [{ kind: 'header', height: 30, elements: [] }, { kind: 'detail', height: 20, elements: [] }],
     lineSources: [],
+    parameters: [],
   };
 }
 
@@ -98,8 +108,8 @@ async function load() {
   if (!designer.loaded) await designer.load();
   if (isNew.value) {
     Object.assign(report, blank());
-    selectedApp.value = (route.query.app as string) ?? selectedApp.value;
-    selectedModel.value = (route.query.model as string) ?? selectedModel.value;
+    selectedApp.value = (route.params.appName as string) ?? (route.query.app as string) ?? selectedApp.value;
+    selectedModel.value = (route.params.modelName as string) ?? (route.query.model as string) ?? selectedModel.value;
     const defaultApp = designer.apps.find((a) => a.name !== 'system');
     if (!selectedApp.value && defaultApp) selectedApp.value = defaultApp.name;
     const app = designer.apps.find((a) => a.name === selectedApp.value);
@@ -114,6 +124,8 @@ async function load() {
     selectedLayer.value = report.layer ?? 'CUS';
   }
   selected.value = null;
+  jsonText.value = JSON.stringify(report, null, 2);
+  jsonResult.value = null;
 }
 watch(() => props.name, load, { immediate: true });
 
@@ -185,6 +197,9 @@ function lineFieldOptions(table: string) {
 function refFieldOptions(table: string) {
   return (meta.table(table)?.fields ?? []).filter((f) => f.type === 'reference').map((f) => ({ label: f.label ?? f.name, value: f.name }));
 }
+function addParameter() { report.parameters = report.parameters ?? []; report.parameters.push({ field: '', operator: 'eq' }); }
+function removeParameter(index: number) { report.parameters?.splice(index, 1); }
+const parameterOperators = [{ label: 'Equals', value: 'eq' }, { label: 'From (>=)', value: 'from' }, { label: 'To (<=)', value: 'to' }];
 
 // ---- save / preview ----
 async function save() {
@@ -193,6 +208,12 @@ async function save() {
   if (!selectedApp.value || !selectedModel.value) { message.error('App and model are required'); return; }
   busy.value = true;
   try {
+    for (const band of [...report.bands, ...(report.lineSources ?? []).flatMap((line) => line.bands)]) {
+      for (const element of band.elements) {
+        element.y = Math.max(0, Math.min(element.y, Math.max(0, band.height - element.height)));
+        element.height = Math.min(element.height, band.height);
+      }
+    }
     let name = report.name;
     if (isNew.value) {
       const prefix = selectedApp.value === 'system' ? 'FW' : selectedApp.value.replace(/[^a-z0-9]/gi, '').toUpperCase();
@@ -201,7 +222,7 @@ async function save() {
     const artifact = { ...report, name, app: selectedApp.value, model: selectedModel.value, layer: selectedLayer.value };
     await designer.save(artifact as unknown as { kind: string; name: string; [k: string]: unknown });
     message.success('Report saved');
-    if (isNew.value) router.replace(`/designer/report/${encodeURIComponent(name)}`);
+    if (isNew.value) router.replace(selectedApp.value && selectedModel.value ? `/designer/app/${encodeURIComponent(selectedApp.value)}/model/${encodeURIComponent(selectedModel.value)}/report/${encodeURIComponent(name)}` : `/designer/report/${encodeURIComponent(name)}`);
   } catch (err) {
     if (err instanceof ApiError) message.error(err.message);
     else throw err;
@@ -218,8 +239,36 @@ function preview() {
 }
 
 function back() {
-  router.push('/designer');
+  if (window.history.length > 1) router.back();
+  else router.push({ path: '/designer', query: { mode: 'advanced', app: selectedApp.value, model: selectedModel.value } });
 }
+function formatJson() {
+  try { jsonText.value = JSON.stringify(JSON.parse(jsonText.value), null, 2); jsonResult.value = null; }
+  catch (error) { message.error(`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`); }
+}
+async function validateJson() {
+  jsonResult.value = null;
+  let parsed: ReportArtifact;
+  try { parsed = JSON.parse(jsonText.value) as ReportArtifact; }
+  catch (error) { jsonResult.value = { valid: false, diagnostics: [{ path: '/', code: 'json', message: error instanceof Error ? error.message : String(error) }] }; return; }
+  try { jsonResult.value = await api.post<NonNullable<typeof jsonResult.value>>('/api/designer/reports/validate', { artifact: parsed }); }
+  catch (error) { message.error(error instanceof ApiError ? error.message : String(error)); }
+}
+function applyJson() {
+  if (!jsonResult.value?.valid) return;
+  const parsed = JSON.parse(jsonText.value) as ReportArtifact;
+  dialog.warning({
+    title: 'Replace report design?', content: 'This replaces the current report bands, elements, line sources, and parameters with the validated JSON.',
+    positiveText: 'Replace design', negativeText: 'Cancel',
+    onPositiveClick: () => {
+      Object.assign(report, blank(), parsed);
+      selectedApp.value = (route.params.appName as string) || parsed.app || selectedApp.value;
+      selectedModel.value = (route.params.modelName as string) || parsed.model || selectedModel.value;
+      selected.value = null; activeTab.value = 'design'; message.success('JSON applied to the designer');
+    },
+  });
+}
+function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, app: selectedApp.value, model: selectedModel.value, layer: selectedLayer.value }, null, 2); jsonResult.value = null; }
 </script>
 
 <template>
@@ -233,6 +282,8 @@ function back() {
       </n-space>
     </n-space>
 
+    <n-tabs v-model:value="activeTab" type="line">
+      <n-tab-pane name="design" tab="Design">
     <n-card size="small" style="margin-bottom: 16px">
       <n-space vertical>
         <n-space align="center">
@@ -240,6 +291,16 @@ function back() {
           <n-input v-model:value="report.name" :disabled="!isNew" placeholder="CustListReport" style="width: 240px" />
           <span style="width: 90px">Label</span>
           <n-input v-model:value="report.label" placeholder="Customer list" style="width: 240px" />
+        </n-space>
+        <n-space align="start">
+          <span style="width:110px">Parameters</span>
+          <div><n-space v-for="(parameter, pi) in report.parameters ?? []" :key="pi" style="margin-bottom:6px">
+            <n-select v-model:value="parameter.field" :options="mainFieldOptions" placeholder="Field" style="width:180px" />
+            <n-select v-model:value="parameter.operator" :options="parameterOperators" style="width:120px" />
+            <n-input v-model:value="parameter.label" placeholder="Label" style="width:160px" />
+            <n-checkbox v-model:checked="parameter.required">Required</n-checkbox>
+            <n-button size="tiny" quaternary type="error" @click="removeParameter(pi)">✕</n-button>
+          </n-space><n-button size="tiny" @click="addParameter">+ Parameter</n-button></div>
         </n-space>
         <n-space align="center">
           <span style="width: 110px">App</span>
@@ -303,6 +364,7 @@ function back() {
               <n-button size="tiny" @click="addElement(line.bands[0].elements, 'text', lineFieldOptions(line.table))">+ Text</n-button>
               <n-button size="tiny" @click="addElement(line.bands[0].elements, 'field', lineFieldOptions(line.table))">+ Field</n-button>
               <n-button size="tiny" type="error" quaternary @click="removeLineSource(li)">Remove</n-button>
+              <span>Height</span><n-input-number v-model:value="line.bands[0].height" :min="8" size="small" style="width:90px" />
             </n-space>
             <div class="report-band" :style="{ height: line.bands[0].height + 'px' }">
               <div
@@ -382,6 +444,18 @@ function back() {
         </n-space>
       </n-card>
     </div>
+      </n-tab-pane>
+      <n-tab-pane name="json" tab="JSON">
+        <n-card size="small" title="Paste full report JSON">
+          <p style="color:var(--emu-muted);margin-top:0">Validate the complete report artifact without saving. Apply is enabled only when schema and metadata references are valid.</p>
+          <n-space style="margin-bottom:10px"><n-button size="small" @click="refreshJsonFromDesign">Refresh from Design</n-button><n-button size="small" @click="formatJson">Format JSON</n-button><n-button size="small" type="primary" @click="validateJson">Validate</n-button></n-space>
+          <n-input v-model:value="jsonText" type="textarea" :autosize="{ minRows: 20, maxRows: 38 }" class="json-editor" @update:value="jsonResult = null" />
+          <n-alert v-if="jsonResult?.valid" type="success" title="Report JSON is valid" style="margin-top:12px">{{ jsonResult.summary?.bands }} bands · {{ jsonResult.summary?.elements }} elements · {{ jsonResult.summary?.lineSources }} line sources · {{ jsonResult.summary?.parameters }} parameters</n-alert>
+          <n-alert v-else-if="jsonResult" type="error" title="Report JSON has errors" style="margin-top:12px"><ul><li v-for="diagnostic in jsonResult.diagnostics" :key="`${diagnostic.path}:${diagnostic.message}`"><code>{{ diagnostic.path }}</code> — {{ diagnostic.message }}</li></ul></n-alert>
+          <n-space justify="end" style="margin-top:12px"><n-button type="primary" :disabled="!jsonResult?.valid" @click="applyJson">Apply to Design</n-button></n-space>
+        </n-card>
+      </n-tab-pane>
+    </n-tabs>
   </div>
 </template>
 
@@ -392,6 +466,7 @@ function back() {
   background: #fafafa;
   overflow: hidden;
 }
+.json-editor :deep(textarea){font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.55}
 .report-element {
   position: absolute;
   cursor: move;

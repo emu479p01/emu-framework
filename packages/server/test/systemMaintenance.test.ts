@@ -1,7 +1,8 @@
-import { describe, expect, it, beforeAll } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { unzipSync } from 'fflate';
 import { buildServer } from '../src/server.js';
+import { hashPassword } from '../src/auth.js';
 
 function multipart(file: Buffer) {
   const boundary = `----EmuBackup${Date.now()}`;
@@ -18,12 +19,18 @@ function multipart(file: Buffer) {
 describe('system maintenance', () => {
   let app: FastifyInstance;
   let auth: { cookie: string };
+  let clerkAuth: { cookie: string };
   beforeAll(async () => {
     app = buildServer();
     await app.ready();
     const login = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'admin', password: 'admin' } });
     auth = { cookie: (login.headers['set-cookie'] as string).split(';')[0] };
+    const ctx = (app as FastifyInstance & { kernel: any }).kernel.context();
+    ctx.newRecord('FW_User').setMany({ username: 'clerk', displayName: 'Clerk', passwordHash: hashPassword('clerk'), enabled: true }).insert();
+    const clerkLogin = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'clerk', password: 'clerk' } });
+    clerkAuth = { cookie: (clerkLogin.headers['set-cookie'] as string).split(';')[0] };
   });
+  afterAll(async () => { vi.restoreAllMocks(); await app.close(); });
 
   it('exports and validates a complete two-database backup', async () => {
     const exported = await app.inject({ method: 'GET', url: '/api/system/backup/export', headers: auth });
@@ -41,5 +48,21 @@ describe('system maintenance', () => {
 
   it('requires a framework administrator', async () => {
     expect((await app.inject({ method: 'GET', url: '/api/system/info' })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'GET', url: '/api/system/update/latest', headers: clerkAuth })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/system/update', headers: clerkAuth })).statusCode).toBe(403);
+  });
+
+  it('reports the latest stable release without accepting a client-selected version', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      tag_name: '0.0.1.1', name: 'Stable', body: 'Release notes', html_url: 'https://example.test/release',
+      published_at: '2026-07-12T00:00:00Z', draft: false, prerelease: false,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    const response = await app.inject({ method: 'GET', url: '/api/system/update/latest', headers: auth });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ currentVersion: '0.0.1.0', latestVersion: '0.0.1.1', updateAvailable: true });
+  });
+
+  it('exposes an unauthenticated health check for container supervision', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/health' })).json()).toEqual({ ok: true });
   });
 });

@@ -11,7 +11,7 @@ export interface ImportExportDeps {
   userCtx: (req: FastifyRequest) => DataContext;
   dataTable: (name: string, req?: FastifyRequest) => TableMeta;
   coerce: (tableName: string, field: string, value: string) => FieldValue;
-  writableBody: (tableName: string, body: { [field: string]: FieldValue }) => { [field: string]: FieldValue };
+  writableBody: (tableName: string, body: { [field: string]: FieldValue }, operation?: 'create' | 'update') => { [field: string]: FieldValue };
 }
 
 /** Shared by the generic list route and export — builds a Query from filter.<field> and sort query params. */
@@ -25,8 +25,10 @@ export function buildFilteredQuery(
   const q = ctx.select(tableName);
   for (const [key, value] of Object.entries(query)) {
     if (key.startsWith('filter.') && value !== undefined) {
-      const field = key.slice('filter.'.length);
-      q.where(field, '=', coerce(tableName, field, value));
+      const [field, operator = 'eq'] = key.slice('filter.'.length).split('.');
+      const sqlOp = ({ eq: '=', ne: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=', contains: 'LIKE' } as const)[operator];
+      if (!sqlOp) throw new Error(`Unsupported filter operator '${operator}'`);
+      q.where(field, sqlOp, operator === 'contains' ? `%${value}%` : coerce(tableName, field, value));
     }
   }
   if (query.search) q.search(searchableFields, query.search);
@@ -240,8 +242,6 @@ export function registerImportExportRoutes(app: FastifyInstance, kernel: Kernel,
           if (!field) continue;
           mapped[field] = coerceImportValue(table, field, row[column]);
         }
-        const writable = writableBody(table.name, mapped);
-
         if (mode === 'upsert') {
           const keyValue = mapped[keyField];
           const existing =
@@ -249,14 +249,14 @@ export function registerImportExportRoutes(app: FastifyInstance, kernel: Kernel,
               ? ctx.select(table.name).whereEq({ [keyField]: keyValue }).firstOnly()
               : null;
           if (existing) {
-            existing.setMany(writable).update();
+            existing.setMany(writableBody(table.name, mapped, 'update')).update();
             updated++;
           } else {
-            ctx.newRecord(table.name).setMany(writable).insert();
+            ctx.newRecord(table.name).setMany(writableBody(table.name, mapped, 'create')).insert();
             inserted++;
           }
         } else {
-          ctx.newRecord(table.name).setMany(writable).insert();
+          ctx.newRecord(table.name).setMany(writableBody(table.name, mapped, 'create')).insert();
           inserted++;
         }
       } catch (e) {
