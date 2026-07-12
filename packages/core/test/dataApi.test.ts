@@ -52,6 +52,32 @@ describe('DataContext CRUD', () => {
     expect(ctx.select('TESTAPP_CustTable').count()).toBe(0);
   });
 
+  it('restricts deletion while referenced by default', () => {
+    const { ctx } = testContext();
+    const cust = ctx.newRecord('TESTAPP_CustTable').setMany({ accountNum: 'C1', name: 'Parent' }).insert();
+    ctx.newRecord('TESTAPP_SalesTable').setMany({ salesId: 'SO1', custId: cust.id }).insert();
+    expect(() => cust.delete()).toThrow(/1 record.*TESTAPP_SalesTable\.custId/);
+    expect(ctx.find('TESTAPP_CustTable', cust.id!)).not.toBeNull();
+  });
+
+  it('supports cascade and setNull on reference deletion', () => {
+    for (const behavior of ['cascade', 'setNull'] as const) {
+      const { ctx, registry } = testContext();
+      registry.getTable('TESTAPP_SalesTable').fields.find((f) => f.name === 'custId')!.reference!.onDelete = behavior;
+      const cust = ctx.newRecord('TESTAPP_CustTable').setMany({ accountNum: behavior, name: 'Parent' }).insert();
+      const sale = ctx.newRecord('TESTAPP_SalesTable').setMany({ salesId: behavior, custId: cust.id }).insert();
+      cust.delete();
+      if (behavior === 'cascade') expect(ctx.find('TESTAPP_SalesTable', sale.id!)).toBeNull();
+      else expect(ctx.find('TESTAPP_SalesTable', sale.id!)?.f.custId).toBeNull();
+    }
+  });
+
+  it('preserves prefixed number sequences as strings', () => {
+    const { ctx } = testContext();
+    const cust = ctx.newRecord('TESTAPP_CustTable').setMany({ accountNum: 'CUST-0001', name: 'Sequence' }).insert();
+    expect(ctx.find('TESTAPP_CustTable', cust.id!)?.f.accountNum).toBe('CUST-0001');
+  });
+
   it('supports iteration, ordering, whereEq and count', () => {
     const { ctx } = testContext();
     for (const [num, name] of [['C2', 'Beta'], ['C1', 'Alpha'], ['C3', 'Gamma']]) {

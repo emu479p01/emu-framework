@@ -19,7 +19,10 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   if (!res.ok) {
     let message = res.statusText;
     try {
-      message = ((await res.json()) as { error?: string }).error ?? message;
+      const payload = (await res.json()) as { error?: string; diagnostics?: { path?: string; message?: string }[]; errors?: { name?: string; error?: string }[] };
+      message = payload.error ?? message;
+      const details = payload.diagnostics?.map((d) => `${d.path ?? '/'}: ${d.message ?? 'Invalid value'}`) ?? payload.errors?.map((d) => `${d.name ?? 'artifact'}: ${d.error ?? 'Invalid'}`);
+      if (details?.length) message += `\n${details.join('\n')}`;
     } catch {
       /* non-JSON error body */
     }

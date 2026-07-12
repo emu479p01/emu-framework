@@ -1,6 +1,6 @@
 # Web Designer Guide — Customize EmuFramework from Your Browser
 
-**Version: v0.0.0.9**
+**Version: v0.0.1.0**
 
 ## Simple Builder (recommended)
 
@@ -89,6 +89,11 @@ that, everything else (tables, forms, menus) gets added under it.
 Your new app immediately appears in the sidebar as its own submenu — currently empty, ready
 for tables. Older or CLI-created apps without an icon use a circular initial automatically.
 
+A new app starts **without any Model**. Before you can create tables or other artifacts under
+it, open the app in the Designer and click **+ Add Model** — you choose the model's name and
+its layer (usually `CUS`). This is deliberate: the model defines which layer your
+customizations live in, so it's yours to decide, not auto-created.
+
 ---
 
 ## 4. Creating a Table (with a Form and Menu)
@@ -130,6 +135,12 @@ never modifies the original.
 Behind the scenes the Designer records this as an extension, so the original table definition
 is untouched — if that table ever gets updated by a developer, your added field stays intact.
 
+**Extension names are automatic.** You never type a name or label for an extension — you only
+pick the object to extend, and the Designer derives the name as
+`<AppPrefix>_<ObjectName>_Extension` (e.g. app `abc` extending `ERP_CustTable` →
+`ABC_ERP_CustTable_Extension`). If an extension for that object already exists in your app,
+the Designer opens the existing one so your changes merge instead of overwriting.
+
 ---
 
 ## 6. Creating a Standalone Form, Menu, or Enum
@@ -144,6 +155,15 @@ bundle from Section 4:
   optional icon; routes/forms without one receive a safe automatic fallback.
 - **New… → Enum** — define a fixed list of choices (e.g. `Draft / Approved / Rejected`) that a
   field can use as a dropdown.
+- **New… → Function** — write a named server operation entirely in the Designer, no server
+  code needed. You give it a name and a code body (invoked as `(ctx, args)`); it becomes
+  available as a **Function** target on Form and Menu actions, and via
+  `POST /api/action/<name>`. Use a Function when you need one callable operation; use a
+  **Script** when you need to register events or hooks on tables.
+
+**Script and event order:** scripts run ordered by layer (`SYS → ISV → LOC → DEV → CUS`), and
+each base script runs immediately before its script extensions. Event handlers fire in the
+order their scripts ran, so base-app logic always executes before customer-layer logic.
 
 ---
 

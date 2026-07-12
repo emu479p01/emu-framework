@@ -125,7 +125,7 @@ function Stop-All {
 function Start-App {
   Write-Host ""
   Write-Host "======================================" -ForegroundColor Cyan
-  Write-Host "  EmuFramework v0.0.0.9 Launcher" -ForegroundColor Cyan
+  Write-Host "  EmuFramework v0.0.1.0 Launcher" -ForegroundColor Cyan
   Write-Host "======================================" -ForegroundColor Cyan
   Write-Host ""
 

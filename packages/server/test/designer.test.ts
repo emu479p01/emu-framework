@@ -227,4 +227,52 @@ describe('web designer API', () => {
     expect(names).toContain('ERP_CustTable_Extension');
     expect(names).not.toContain('WEB_WebProjectForm');
   });
+
+  it('creates a function artifact and invokes it as an action', async () => {
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/api/designer/artifacts/function/ERP_CustCount',
+      headers: admin,
+      payload: {
+        kind: 'function',
+        name: 'ERP_CustCount',
+        app: 'erp',
+        model: 'ClientCustom',
+        label: 'Customer count',
+        code: 'return { count: ctx.select("ERP_CustTable").count() };',
+      },
+    });
+    expect(put.statusCode).toBe(200);
+
+    const meta = await app.inject({ method: 'GET', url: '/api/metadata', headers: admin });
+    expect(meta.json().actions).toContain('ERP_CustCount');
+
+    const run = await app.inject({ method: 'POST', url: '/api/action/ERP_CustCount', headers: admin, payload: {} });
+    expect(run.statusCode).toBe(200);
+    expect(run.json()).toMatchObject({ count: expect.any(Number) });
+  });
+
+  it('blocks functions in AI change sets as high-risk executable code', async () => {
+    const snapshot = await app.inject({ method: 'GET', url: '/api/designer/snapshot', headers: admin });
+    const artifact = { kind: 'function', name: 'ERP_Sneaky', app: 'erp', model: 'ClientCustom', code: 'return 1;' };
+    const validate = await app.inject({
+      method: 'POST', url: '/api/designer/change-sets/validate', headers: admin,
+      payload: { version: 1, baseRevision: snapshot.json().revision, source: 'ai', operations: [{ op: 'upsert', kind: artifact.kind, name: artifact.name, artifact }] },
+    });
+    expect(validate.statusCode).toBe(422);
+    expect(JSON.stringify(validate.json())).toMatch(/high_risk_script/);
+  });
+
+  it('validates report JSON without saving it', async () => {
+    const valid = await app.inject({ method: 'POST', url: '/api/designer/reports/validate', headers: admin, payload: { artifact: {
+      kind: 'report', name: 'ERP_JsonPreview', app: 'erp', model: 'MiniERPApplication', dataSource: 'ERP_CustTable',
+      bands: [{ kind: 'detail', height: 20, elements: [{ id: 'name', type: 'field', x: 0, y: 0, width: 100, height: 16, field: 'name' }] }],
+    } } });
+    expect(valid.statusCode).toBe(200); expect(valid.json()).toMatchObject({ valid: true, summary: { bands: 1, elements: 1 } });
+    const bad = await app.inject({ method: 'POST', url: '/api/designer/reports/validate', headers: admin, payload: { artifact: {
+      kind: 'report', name: 'ERP_BadJsonPreview', app: 'erp', model: 'MiniERPApplication', dataSource: 'ERP_CustTable',
+      bands: [{ kind: 'detail', height: 20, elements: [{ id: 'bad', type: 'field', x: 0, y: 0, width: 100, height: 16, field: 'missing' }] }],
+    } } });
+    expect(bad.statusCode).toBe(200); expect(bad.json().valid).toBe(false); expect(bad.json().diagnostics[0].message).toMatch(/missing/);
+  });
 });

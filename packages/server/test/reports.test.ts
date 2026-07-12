@@ -11,6 +11,7 @@ const custListReport: AnyMeta = {
   model: 'MiniERPApplication',
   label: 'Customer list',
   dataSource: 'ERP_CustTable',
+  parameters: [{ field: 'accountNum', operator: 'eq', label: 'Account' }],
   bands: [
     {
       kind: 'header',
@@ -75,6 +76,14 @@ describe('report PDF rendering', () => {
   it('rejects unauthenticated report requests', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/report/ERP_CustListReport/pdf' });
     expect(res.statusCode).toBe(401);
+  });
+
+  it('accepts declared parameters and rejects undeclared parameters', async () => {
+    const ok = await app.inject({ method: 'GET', url: '/api/report/ERP_CustListReport/pdf?param.accountNum.eq=C001', headers: auth() });
+    expect(ok.statusCode).toBe(200);
+    const bad = await app.inject({ method: 'GET', url: '/api/report/ERP_CustListReport/pdf?param.name.eq=Acme', headers: auth() });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error).toMatch(/not declared/);
   });
 
   it('404s for an unknown report name', async () => {

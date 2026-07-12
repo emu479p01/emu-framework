@@ -10,7 +10,7 @@ import {
   type FormExtensionMeta,
   type MenuExtensionMeta,
 } from '../src/index.js';
-import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable } from './helpers.js';
+import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable, testManifest } from './helpers.js';
 
 const baseForm: FormMeta = {
   kind: 'form',
@@ -23,7 +23,7 @@ const baseMenu: MenuMeta = { kind: 'menu', name: 'TESTAPP_Main', items: [{ form:
 
 function baseRegistry(): MetadataRegistry {
   const registry = new MetadataRegistry();
-  registry.registerApp({ name: 'testapp' }, [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable, baseForm, baseMenu]);
+  registry.registerApp(testManifest('testapp'), [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable, baseForm, baseMenu]);
   return registry;
 }
 
@@ -37,14 +37,14 @@ const tableExt: TableExtensionMeta = {
 describe('extensions', () => {
   it('table extension adds fields to the effective table', () => {
     const registry = baseRegistry();
-    registry.registerApp({ name: 'testapp.ext', dependsOn: ['testapp'] }, [tableExt]);
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [tableExt]);
     const fields = registry.getTable('TESTAPP_CustTable').fields.map((f) => f.name);
     expect(fields).toContain('creditLimit');
   });
 
   it('extended fields reach the DB schema', () => {
     const registry = baseRegistry();
-    registry.registerApp({ name: 'testapp.ext', dependsOn: ['testapp'] }, [tableExt]);
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [tableExt]);
     const db = new DatabaseCtor(':memory:');
     syncSchema(db, registry);
     const cols = (db.prepare(`PRAGMA table_info("TESTAPP_CustTable")`).all() as { name: string }[]).map(
@@ -62,7 +62,7 @@ describe('extensions', () => {
       listFields: ['creditLimit'],
       groups: [{ label: 'Credit', fields: ['creditLimit'] }],
     };
-    registry.registerApp({ name: 'testapp.ext', dependsOn: ['testapp'] }, [tableExt, formExt]);
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [tableExt, formExt]);
     const form = registry.getForm('TESTAPP_CustForm');
     expect(form.listFields).toEqual(['accountNum', 'name', 'creditLimit']);
     expect(form.groups).toHaveLength(2);
@@ -76,7 +76,7 @@ describe('extensions', () => {
       menu: 'TESTAPP_Main',
       items: [{ label: 'Again', form: 'TESTAPP_CustForm' }],
     };
-    registry.registerApp({ name: 'testapp.ext', dependsOn: ['testapp'] }, [menuExt]);
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [menuExt]);
     expect(registry.allMenus()[0].items).toHaveLength(2);
   });
 
@@ -88,7 +88,7 @@ describe('extensions', () => {
       menu: 'TESTAPP_Main',
       items: [{ label: 'Group', items: [{ label: 'Nested', form: 'TESTAPP_CustForm' }] }],
     };
-    registry.registerApp({ name: 'testapp.ext', dependsOn: ['testapp'] }, [menuExt]);
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [menuExt]);
     const items = registry.allMenus()[0].items;
     expect(items).toHaveLength(2);
     expect(items[1].items).toEqual([{ label: 'Nested', form: 'TESTAPP_CustForm' }]);
@@ -97,12 +97,12 @@ describe('extensions', () => {
   it('rejects extending unknown tables and duplicate fields', () => {
     const registry = baseRegistry();
     expect(() =>
-      registry.registerApp({ name: 'testapp.ext', dependsOn: ['testapp'] }, [
+      registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [
         { ...tableExt, table: 'Nope' } as TableExtensionMeta,
       ]),
     ).toThrow(MetadataError);
     expect(() =>
-      registry.registerApp({ name: 'testapp.ext2', dependsOn: ['testapp'] }, [
+      registry.registerApp({ ...testManifest('testapp.ext2'), dependsOn: ['testapp'] }, [
         {
           kind: 'tableExtension',
           name: 'TESTAPP_Dup_Extension',
@@ -115,7 +115,7 @@ describe('extensions', () => {
 
   it('does not mutate caller-provided metadata objects', () => {
     const registry = baseRegistry();
-    registry.registerApp({ name: 'testapp.ext', dependsOn: ['testapp'] }, [tableExt]);
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [tableExt]);
     expect(TESTAPP_CustTable.fields.some((f) => f.name === 'creditLimit')).toBe(false);
   });
 });

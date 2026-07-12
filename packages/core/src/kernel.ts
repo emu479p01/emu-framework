@@ -24,8 +24,40 @@ export interface WebArtifactError {
   error: string;
 }
 
+type OrderableScript = AnyMeta & { name: string; layer?: string; script?: string };
+
+/**
+ * Deterministic script execution order: base scripts sorted by (layer, name) with
+ * each base immediately followed by its scriptExtensions sorted by (layer, name).
+ * Extensions whose base script is not in the web set (file/TS-based base) are
+ * appended last by (layer, name) — native base logic registers before web scripts
+ * run, so base-before-extension still holds at runtime.
+ */
+export function orderScriptsForExecution<T extends OrderableScript>(scripts: T[]): T[] {
+  const byLayerName = (a: T, b: T) => {
+    const al = LAYER_ORDER.indexOf((a.layer as never) ?? 'SYS');
+    const bl = LAYER_ORDER.indexOf((b.layer as never) ?? 'SYS');
+    if (al !== bl) return al - bl;
+    return a.name.localeCompare(b.name);
+  };
+  const bases = scripts.filter((s) => s.kind === 'script').sort(byLayerName);
+  const extensions = scripts.filter((s) => s.kind === 'scriptExtension').sort(byLayerName);
+  const ordered: T[] = [];
+  const placed = new Set<T>();
+  for (const base of bases) {
+    ordered.push(base);
+    for (const ext of extensions) {
+      if (ext.script === base.name) { ordered.push(ext); placed.add(ext); }
+    }
+  }
+  for (const ext of extensions) {
+    if (!placed.has(ext)) ordered.push(ext);
+  }
+  return ordered;
+}
+
 const WEB_KIND_ORDER = [
-  'app', 'enum', 'table', 'privilege', 'duty', 'role', 'script',
+  'app', 'enum', 'table', 'privilege', 'duty', 'role', 'script', 'function',
   'tableExtension', 'enumExtension', 'form', 'formExtension',
   'menu', 'menuExtension', 'privilegeExtension', 'dutyExtension',
   'roleExtension', 'scriptExtension',
@@ -285,7 +317,19 @@ export class Kernel {
     // native (TypeScript) logic must survive web-script rebuilds — e.g. the
     // FW_User password-hashing hook; without this any Designer save wipes it
     for (const fn of this.nativeLogic) fn(this);
-    this.executeWebScripts(scriptsFor(accepted), errors);
+    // layer lives on the app manifest's model, not on the raw artifact — resolve it
+    // before ordering so execution follows SYS→ISV→LOC→DEV→CUS deterministically
+    const manifests = final.loadedApps();
+    const withLayer = (scriptsFor(accepted) as OrderableScript[]).map((s) => {
+      if (s.layer) return s;
+      const manifest = manifests.find((m) => m.name === ((s as { app?: string }).app ?? 'web'));
+      const model = manifest?.models?.find((m) => m.name === (s as { model?: string }).model);
+      return { ...s, layer: model?.layer ?? manifest?.models?.[0]?.layer ?? 'SYS' };
+    });
+    this.executeWebScripts(orderScriptsForExecution(withLayer), errors);
+    // function artifacts register last, so a function overrides a
+    // script-registered action of the same name
+    this.registerFunctionArtifacts(errors);
 
     return errors;
   }
@@ -300,7 +344,7 @@ export class Kernel {
     // Never execute user-provided scripts during a preview. Metadata registration does not
     // depend on script bodies, so blanking them preserves structural validation safely.
     const safe = artifacts.map((artifact) =>
-      artifact.kind === 'script' || artifact.kind === 'scriptExtension'
+      artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function'
         ? ({ ...artifact, code: '' } as AnyMeta)
         : artifact,
     );
@@ -327,6 +371,29 @@ export class Kernel {
           kind: 'script',
           name: a.name ?? 'unnamed',
           error: `Script '${a.name}': ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+  }
+
+  /** Compile `function` artifacts into kernel actions, ordered by (layer, name). */
+  private registerFunctionArtifacts(errors: WebArtifactError[]): void {
+    const functions = [...this._registry.allFunctions()].sort((a, b) => {
+      const al = LAYER_ORDER.indexOf(a.layer ?? 'SYS');
+      const bl = LAYER_ORDER.indexOf(b.layer ?? 'SYS');
+      if (al !== bl) return al - bl;
+      return a.name.localeCompare(b.name);
+    });
+    for (const f of functions) {
+      if (!f.code) continue;
+      try {
+        const fn = new Function('ctx', 'args', 'kernel', f.code);
+        this.actions.set(f.name, (ctx, args) => fn(ctx, args, this));
+      } catch (err) {
+        errors.push({
+          kind: 'function',
+          name: f.name ?? 'unnamed',
+          error: `Function '${f.name}': ${err instanceof Error ? err.message : String(err)}`,
         });
       }
     }

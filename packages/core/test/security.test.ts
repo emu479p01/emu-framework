@@ -7,7 +7,7 @@ import {
   type DutyMeta,
   type RoleMeta,
 } from '../src/index.js';
-import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable } from './helpers.js';
+import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable, testManifest } from './helpers.js';
 
 const TESTAPP_CustView: PrivilegeMeta = {
   kind: 'privilege',
@@ -25,7 +25,7 @@ const managerRole: RoleMeta = { kind: 'role', name: 'TESTAPP_Manager', duties: [
 
 function securedKernel(): Kernel {
   const kernel = new Kernel();
-  kernel.registerApp({ name: 'testapp' }, [
+  kernel.registerApp(testManifest('testapp'), [
     salesStatusEnum,
     TESTAPP_CustTable,
     TESTAPP_SalesTable,
@@ -77,7 +77,7 @@ describe('security policy', () => {
   it('validates security metadata references', () => {
     const kernel = new Kernel();
     expect(() =>
-      kernel.registerApp({ name: 'bad' }, [
+      kernel.registerApp(testManifest('bad'), [
         { kind: 'role', name: 'BAD_R', duties: ['Nope'] } as RoleMeta,
       ]),
     ).toThrow(/unknown duty/);

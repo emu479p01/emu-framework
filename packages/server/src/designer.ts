@@ -43,6 +43,7 @@ const DESIGNER_KINDS = new Set([
   'role',
   'roleExtension',
   'scriptExtension',
+  'function',
   'report',
 ]);
 
@@ -61,7 +62,6 @@ function loadStored(kernel: Kernel): MetadataArtifact[] {
 /** Load stored web artifacts and merge them into the registry (boot). */
 export function bootWebArtifacts(kernel: Kernel): WebArtifactError[] {
   const stored = loadStored(kernel);
-  if (stored.length === 0) return [];
   const errors = kernel.applyWebArtifacts(stored as unknown as AnyMeta[]);
   for (const e of errors) {
     console.warn(`Web artifact ${e.kind} '${e.name}' skipped: ${e.error}`);
@@ -161,6 +161,28 @@ export function registerDesignerRoutes(
       changeSets: { version: 1, previewTtlSeconds: 600, humanConfirmationRequired: true },
       ai: { inspect: true, validate: true, apply: false, businessData: false, scripts: false },
       schemas: { artifact: metadataArtifactSchema, changeSet: metadataChangeSetSchema },
+    };
+  });
+
+  app.post<{ Body: { artifact?: AnyMeta } }>('/api/designer/reports/validate', (req, reply) => {
+    requireDesigner(req);
+    const artifact = req.body?.artifact;
+    if (!artifact || artifact.kind !== 'report') return reply.status(400).send({ error: 'A full report artifact is required' });
+    assertScope(req, artifact);
+    const diagnostics = validateMetadataArtifact(artifact);
+    if (diagnostics.length) return { valid: false, diagnostics };
+    const candidates = loadStored(kernel).filter((candidate) => candidate.name !== artifact.name);
+    candidates.push(artifact as MetadataArtifact);
+    const error = kernel.previewWebArtifacts(candidates as unknown as AnyMeta[]).find((entry) => entry.name === artifact.name);
+    return {
+      valid: !error,
+      diagnostics: error ? [{ path: '/', code: 'metadata', message: error.error }] : [],
+      summary: {
+        bands: artifact.bands.length,
+        elements: artifact.bands.reduce((sum, band) => sum + band.elements.length, 0),
+        lineSources: artifact.lineSources?.length ?? 0,
+        parameters: artifact.parameters?.length ?? 0,
+      },
     };
   });
 

@@ -59,6 +59,7 @@ export function seedDesignerDb(kernel: Kernel): void {
       { label: 'App Access', icon: 'shield', form: 'FW_AppAccessForm' },
       { label: 'Designer', icon: 'wrench', route: '/designer' },
       { label: 'System Maintenance', icon: 'database', route: '/system/maintenance' },
+      { label: 'Table Browser', icon: 'table', route: '/system/tables' },
     ] } as any,
     // Example report — a working recipe for the Report Designer, printable from the Users list ("Print" button).
     { kind: 'report', name: 'FW_UserListReport', label: 'User list', ...fw, dataSource: 'FW_User',

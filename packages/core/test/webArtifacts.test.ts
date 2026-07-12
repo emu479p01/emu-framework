@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { Kernel, type AnyMeta } from '../src/index.js';
-import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable } from './helpers.js';
+import { Kernel, orderScriptsForExecution, type AnyMeta } from '../src/index.js';
+import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable, testManifest } from './helpers.js';
 
 function bootKernel(): Kernel {
   const kernel = new Kernel();
-  kernel.registerApp({ name: 'testapp' }, [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable]);
+  kernel.registerApp(testManifest('testapp'), [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable]);
   kernel.sync();
   return kernel;
 }
@@ -20,6 +20,23 @@ const webTable: AnyMeta = {
 };
 
 const webForm: AnyMeta = { kind: 'form', name: 'WEB_WebNoteForm', table: 'WEB_WebNote' };
+
+describe('orderScriptsForExecution', () => {
+  it('orders base scripts by layer/name and slots extensions after their base', () => {
+    const s = (kind: string, name: string, layer: string, script?: string) =>
+      ({ kind, name, layer, script } as never);
+    const ordered = orderScriptsForExecution([
+      s('script', 'B_Cus', 'CUS'),
+      s('scriptExtension', 'A_Sys_Extension', 'CUS', 'A_Sys'),
+      s('script', 'A_Sys', 'SYS'),
+      s('scriptExtension', 'Orphan_Extension', 'DEV', 'FileBased'),
+      s('script', 'C_Dev', 'DEV'),
+    ]);
+    expect(ordered.map((a: { name: string }) => a.name)).toEqual([
+      'A_Sys', 'A_Sys_Extension', 'C_Dev', 'B_Cus', 'Orphan_Extension',
+    ]);
+  });
+});
 
 describe('Kernel.applyWebArtifacts', () => {
   it('adds new runtime artifacts and syncs schema — usable immediately', () => {
@@ -122,6 +139,120 @@ describe('Kernel.applyWebArtifacts', () => {
     const rec = kernel.context().newRecord('TESTAPP_CustTable');
     expect(rec.f.name).toBe('from-native-hook');
     expect(calls).toBeGreaterThan(0);
+  });
+
+  it('executes scripts ordered by layer, base before its extensions', () => {
+    (globalThis as any).__scriptOrder = [];
+    const kernel = bootKernel();
+    const manifest = {
+      kind: 'app',
+      name: 'layered',
+      label: 'Layered',
+      models: [
+        { name: 'Sys', layer: 'SYS' },
+        { name: 'Dev', layer: 'DEV' },
+        { name: 'Cus', layer: 'CUS' },
+      ],
+    } as unknown as AnyMeta;
+    const script = (name: string, model: string, marker: string): AnyMeta =>
+      ({
+        kind: 'script',
+        name,
+        app: 'layered',
+        model,
+        code: `(globalThis.__scriptOrder ??= []).push('${marker}')`,
+      } as unknown as AnyMeta);
+    // deliberately out of order
+    const errors = kernel.applyWebArtifacts([
+      script('LAYERED_Cus', 'Cus', 'cus'),
+      script('LAYERED_Dev', 'Dev', 'dev'),
+      manifest,
+      {
+        kind: 'scriptExtension',
+        name: 'LAYERED_Sys_Extension',
+        app: 'layered',
+        model: 'Cus',
+        script: 'LAYERED_Sys',
+        code: `(globalThis.__scriptOrder ??= []).push('sysExt')`,
+      } as unknown as AnyMeta,
+      script('LAYERED_Sys', 'Sys', 'sys'),
+    ]);
+    expect(errors).toEqual([]);
+    expect((globalThis as any).__scriptOrder).toEqual(['sys', 'sysExt', 'dev', 'cus']);
+    delete (globalThis as any).__scriptOrder;
+  });
+
+  it('registers function artifacts as kernel actions', () => {
+    const kernel = bootKernel();
+    const errors = kernel.applyWebArtifacts([
+      {
+        kind: 'app',
+        name: 'fnapp',
+        models: [{ name: 'Sys', layer: 'SYS' }, { name: 'Cus', layer: 'CUS' }],
+      } as unknown as AnyMeta,
+      {
+        kind: 'function',
+        name: 'FNAPP_CountCustomers',
+        app: 'fnapp',
+        model: 'Cus',
+        code: 'return { count: ctx.select("TESTAPP_CustTable").count(), got: args.x };',
+      } as unknown as AnyMeta,
+    ]);
+    expect(errors).toEqual([]);
+    expect(kernel.actions.has('FNAPP_CountCustomers')).toBe(true);
+    const result = kernel.actions.get('FNAPP_CountCustomers')!(kernel.context(), { x: 42 });
+    expect(result).toEqual({ count: 0, got: 42 });
+  });
+
+  it('function in a higher layer overrides the same name in a lower layer', () => {
+    const kernel = bootKernel();
+    const errors = kernel.applyWebArtifacts([
+      {
+        kind: 'app',
+        name: 'fnapp',
+        models: [{ name: 'Sys', layer: 'SYS' }, { name: 'Cus', layer: 'CUS' }],
+      } as unknown as AnyMeta,
+      { kind: 'function', name: 'FNAPP_Answer', app: 'fnapp', model: 'Sys', code: 'return "sys";' } as unknown as AnyMeta,
+      { kind: 'function', name: 'FNAPP_Answer', app: 'fnapp', model: 'Cus', code: 'return "cus";' } as unknown as AnyMeta,
+    ]);
+    expect(errors).toEqual([]);
+    expect(kernel.actions.get('FNAPP_Answer')!(kernel.context(), {})).toBe('cus');
+  });
+
+  it('function compile errors are reported, and previews never execute function code', () => {
+    const kernel = bootKernel();
+    const manifest = { kind: 'app', name: 'fnapp', models: [{ name: 'Cus', layer: 'CUS' }] } as unknown as AnyMeta;
+    const bad = {
+      kind: 'function',
+      name: 'FNAPP_Broken',
+      app: 'fnapp',
+      model: 'Cus',
+      code: 'this is not javascript ((',
+    } as unknown as AnyMeta;
+    const previewErrors = kernel.previewWebArtifacts([manifest, bad]);
+    expect(previewErrors).toEqual([]); // structural preview only — code blanked
+    const errors = kernel.applyWebArtifacts([manifest, bad]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ kind: 'function', name: 'FNAPP_Broken' });
+  });
+
+  it('a new user app has no models until the user creates one', () => {
+    const kernel = bootKernel();
+    const errors = kernel.applyWebArtifacts([
+      { kind: 'app', name: 'fresh', label: 'Fresh' } as unknown as AnyMeta,
+    ]);
+    expect(errors).toEqual([]);
+    const fresh = kernel.registry.loadedApps().find((a) => a.name === 'fresh');
+    expect(fresh).toBeDefined();
+    expect(fresh?.models ?? []).toEqual([]);
+
+    // an artifact under a model-less app is rejected until a model exists
+    const errors2 = kernel.applyWebArtifacts([
+      { kind: 'app', name: 'fresh', label: 'Fresh' } as unknown as AnyMeta,
+      { kind: 'table', name: 'FRESH_Item', app: 'fresh', fields: [{ name: 'x', type: 'string' }] } as unknown as AnyMeta,
+    ]);
+    expect(errors2).toHaveLength(1);
+    expect(errors2[0].error).toMatch(/model/i);
   });
 
   it('cannot redefine an existing file-based artifact', () => {

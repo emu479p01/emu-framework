@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
-import { NInput, NInputNumber, NSwitch, NSelect, NDatePicker, type SelectOption } from 'naive-ui';
+import { computed, h, onMounted, ref } from 'vue';
+import { NInput, NInputNumber, NSwitch, NSelect, NDatePicker, NTooltip, type SelectOption } from 'naive-ui';
 import { api, type Row } from '../api';
 import { useMeta, type FieldMeta } from '../stores/meta';
 
@@ -8,13 +8,14 @@ const props = defineProps<{
   field: FieldMeta;
   modelValue: unknown;
   disabled?: boolean;
+  createMode?: boolean;
 }>();
 const emit = defineEmits<{ 'update:modelValue': [value: unknown]; 'update:related': [patch: Record<string, unknown>] }>();
 
 const meta = useMeta();
 const refOptions = ref<SelectOption[]>([]);
 
-const isDisabled = computed(() => props.disabled || props.field.readOnly);
+const isDisabled = computed(() => props.disabled || props.field.readOnly || (props.createMode ? props.field.allowEditOnCreate === false : props.field.allowEdit === false));
 
 const enumOptions = computed<SelectOption[]>(() => {
   if (props.field.type !== 'enum' || !props.field.enumName) return [];
@@ -25,10 +26,12 @@ const enumOptions = computed<SelectOption[]>(() => {
 onMounted(async () => {
   if (props.field.type === 'reference' && props.field.reference) {
     const refTable = meta.table(props.field.reference.table);
-    const display = props.field.reference.displayField ?? refTable?.titleField ?? 'id';
-    const { data } = await api.list(props.field.reference.table, { limit: 500 });
+    const displays = props.field.reference.displayFields ?? [props.field.reference.displayField ?? refTable?.titleField ?? 'id'];
+    const params: Record<string, string | number> = { limit: 500 };
+    for (const filter of props.field.reference.filters ?? []) params[`filter.${filter.field}.${filter.operator}`] = String(filter.value ?? '');
+    const { data } = await api.list(props.field.reference.table, params);
     refOptions.value = data.map((row) => ({
-      label: String(row[display] ?? row.id),
+      label: displays.map((field) => String(row[field] ?? '')).join(' | '),
       value: row.id,
     }));
   }
@@ -48,11 +51,18 @@ async function onReferenceChange(value: unknown) {
     emit('update:related', patch);
   }
 }
+
+function renderLookupLabel(option: SelectOption) {
+  const label = String(option.label ?? '');
+  return h(NTooltip, null, { trigger: () => h('span', { class: 'lookup-label' }, label), default: () => label });
+}
 </script>
 
 <template>
   <n-input
     v-if="field.type === 'string'"
+    :type="field.name.toLowerCase().includes('password') ? 'password' : 'text'"
+    :show-password-on="field.name.toLowerCase().includes('password') ? 'click' : undefined"
     :value="(modelValue as string | null)"
     :disabled="isDisabled"
     :maxlength="field.maxLength"
@@ -83,6 +93,7 @@ async function onReferenceChange(value: unknown) {
     v-else-if="field.type === 'reference'"
     :value="(modelValue as number | null)"
     :options="refOptions"
+    :render-label="renderLookupLabel"
     filterable
     :disabled="isDisabled"
     @update:value="onReferenceChange"
@@ -109,3 +120,5 @@ async function onReferenceChange(value: unknown) {
   />
   <n-input v-else :value="String(modelValue ?? '')" :disabled="isDisabled" @update:value="update" />
 </template>
+
+<style scoped>.lookup-label{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}</style>

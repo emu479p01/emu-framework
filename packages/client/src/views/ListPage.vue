@@ -8,6 +8,8 @@ import {
 import { api, ApiError, type Row } from '../api';
 import { useMeta } from '../stores/meta';
 import ImportDialog from './ImportDialog.vue';
+import ActionDialog from '../components/ActionDialog.vue';
+import type { FormAction, ReportMeta } from '@emu/core';
 
 const props = defineProps<{ formName: string; appName?: string }>();
 const router = useRouter();
@@ -26,6 +28,8 @@ const sortDir = ref<'asc' | 'desc'>('desc');
 const visibleFields = ref<string[]>([]);
 const lookups = ref<Record<string, Record<number, string>>>({});
 const showImport = ref(false);
+const selectedReport = ref<ReportMeta | null>(null);
+const reportAction = computed<FormAction | null>(() => selectedReport.value ? { label: selectedReport.value.label ?? selectedReport.value.name, type: 'report', target: selectedReport.value.name } : null);
 
 const form = computed(() => meta.form(props.formName));
 const table = computed(() => (form.value ? meta.table(form.value.table) : undefined));
@@ -87,11 +91,15 @@ function onSorterChange(sorter: DataTableSortState | DataTableSortState[] | null
 const rowProps = (row: Row) => ({ style: 'cursor:pointer', onClick: () => router.push(`${formPath.value}/form/${props.formName}/${row.id}`) });
 const exportOptions = [{ label: 'Export CSV', key: 'csv' }, { label: 'Export Excel', key: 'xlsx' }];
 const reportOptions = computed(() => (table.value ? meta.reportsFor(table.value.name) : []).map((report) => ({ label: report.label ?? report.name, key: report.name })));
-function printReport(name: string) { window.open(`/api/report/${encodeURIComponent(name)}/pdf`, '_blank', 'noopener'); }
+function printReport(name: string) {
+  const report = meta.reportsFor(table.value!.name).find((item) => item.name === name);
+  if (report) selectedReport.value = report;
+}
 function exportData(format: string) {
   if (!table.value) return;
   const link = document.createElement('a'); link.href = api.exportUrl(table.value.name, format as 'csv' | 'xlsx'); link.rel = 'noopener'; document.body.appendChild(link); link.click(); link.remove();
 }
+function back() { window.history.length > 1 ? router.back() : router.push(formPath.value || '/'); }
 </script>
 
 <template>
@@ -99,6 +107,7 @@ function exportData(format: string) {
     <div class="list-heading">
       <div><h1>{{ form.label ?? form.name }}</h1><p>{{ total }} records</p></div>
       <n-space>
+        <n-button @click="back">Back</n-button>
         <n-dropdown v-if="reportOptions.length" trigger="click" :options="reportOptions" @select="printReport"><n-button data-testid="print-report">Print</n-button></n-dropdown>
         <n-dropdown trigger="click" :options="exportOptions" @select="exportData"><n-button data-testid="export-data">Export</n-button></n-dropdown>
         <n-button data-testid="import-data" @click="showImport=true">Import</n-button>
@@ -116,6 +125,7 @@ function exportData(format: string) {
     </div>
     <n-data-table v-show="rows.length" class="desktop-table" :columns="columns" :data="rows" :loading="loading" :row-props="rowProps" :pagination="{ page, pageSize, itemCount: total, 'onUpdate:page': (value: number) => (page = value) }" remote @update:sorter="onSorterChange" />
     <ImportDialog v-model:show="showImport" :table-name="table.name" @imported="load" />
+    <ActionDialog :show="selectedReport !== null" :action="reportAction" @update:show="(value) => { if (!value) selectedReport = null }" />
   </div>
 </template>
 

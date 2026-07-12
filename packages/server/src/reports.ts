@@ -134,13 +134,27 @@ export function registerReportRoutes(app: FastifyInstance, kernel: Kernel, deps:
       const report = kernel.registry.getReport(req.params.name);
       const ctx = userCtx(req);
 
+      const declared = new Map((report.parameters ?? []).map((p) => [`param.${p.field}.${p.operator ?? 'eq'}`, p]));
+      for (const key of Object.keys(req.query)) {
+        if (key.startsWith('param.') && !declared.has(key)) return reply.status(400).send({ error: `Report parameter '${key}' is not declared` });
+      }
+      const filters: { [key: string]: string | undefined } = {};
+      for (const [key, parameter] of declared) {
+        const value = req.query[key];
+        if (parameter.required && (value === undefined || value === '')) return reply.status(400).send({ error: `Report parameter '${parameter.label ?? parameter.field}' is required` });
+        if (value !== undefined && value !== '') {
+          const op = parameter.operator === 'from' ? 'gte' : parameter.operator === 'to' ? 'lte' : 'eq';
+          filters[`filter.${parameter.field}.${op}`] = value;
+        }
+      }
+
       let mainRows: ReportRow[];
       if (req.query.id) {
         const rec = ctx.find(report.dataSource, Number(req.query.id));
         if (!rec) return reply.status(404).send({ error: 'Not found' });
         mainRows = [rec.toObject()];
       } else {
-        const q = buildFilteredQuery(ctx, report.dataSource, req.query, coerce);
+        const q = buildFilteredQuery(ctx, report.dataSource, { ...filters, sort: req.query.sort }, coerce);
         q.limit(1000);
         mainRows = q.toArray().map((r) => r.toObject());
       }

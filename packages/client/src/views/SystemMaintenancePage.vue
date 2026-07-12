@@ -2,8 +2,10 @@
 import { onMounted, ref } from 'vue';
 import { NAlert, NButton, NCard, NDescriptions, NDescriptionsItem, NSpace, NSpin, NTag, useMessage } from 'naive-ui';
 import { api, ApiError } from '../api';
+import { useRouter } from 'vue-router';
 
 const message = useMessage();
+const router = useRouter();
 const loading = ref(true);
 const validating = ref(false);
 const info = ref<{ version: string; backupSchemaVersion: number; updateChannel: string } | null>(null);
@@ -39,13 +41,14 @@ function chooseBackup() {
 }
 
 function mb(bytes: number) { return `${(bytes / 1024 / 1024).toFixed(2)} MB`; }
+function back() { window.history.length > 1 ? router.back() : router.push('/'); }
 </script>
 
 <template>
   <div class="maintenance-page">
     <div class="page-hero">
       <div><div class="eyebrow">FRAMEWORK ADMINISTRATION</div><h1>System Maintenance</h1><p>Manage versions and create verified recovery points for the complete system.</p></div>
-      <n-tag v-if="info" type="success" round>v{{ info.version }} · {{ info.updateChannel }}</n-tag>
+      <n-space><n-button @click="back">Back</n-button><n-tag v-if="info" type="success" round>v{{ info.version }} · {{ info.updateChannel }}</n-tag></n-space>
     </div>
     <n-spin :show="loading">
       <div class="maintenance-grid">

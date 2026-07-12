@@ -1,6 +1,6 @@
 # AI Developer Guide
 
-**Version: v0.0.0.9**
+**Version: v0.0.1.0**
 
 EmuFramework exposes metadata context and validation without granting an AI permission to
 apply changes, delete artifacts, execute scripts, run SQL, or read business records.
@@ -41,8 +41,9 @@ Public App and menu metadata may include the optional safe `icon` field. Valid v
 }
 ```
 
-Stale revisions are rejected. AI-sourced script and script-extension operations are always
-rejected. Deleting table metadata preserves the physical SQLite table as an orphan; data purge
+Stale revisions are rejected. AI-sourced script, script-extension, and function operations are
+always rejected (all three carry executable code and are high-risk; only an interactive
+Designer user may create or update them). Deleting table metadata preserves the physical SQLite table as an orphan; data purge
 is intentionally outside the AI workflow.
 
 Framework administrators can permanently purge an orphan only through

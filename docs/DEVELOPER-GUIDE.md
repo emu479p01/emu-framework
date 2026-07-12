@@ -1,6 +1,6 @@
 # EmuFramework Developer Guide
 
-**Version: v0.0.0.9**
+**Version: v0.0.1.0**
 
 > Upgrade existing Git clones or downloaded copies with `Update.cmd`. The updater consumes
 > checksummed stable GitHub Release assets and preserves application code and both SQLite files.
@@ -351,10 +351,12 @@ Every object has a name that's unique across the whole registry (a global namesp
 |----------|----------|
 | `mandatory` | Cannot be empty |
 | `readOnly` | Read-only (the API rejects writes, the UI shows it but disables editing) |
+| `allowEdit` | Whether an existing record may change the field (defaults to `true`) |
+| `allowEditOnCreate` | Whether a user may enter the field while creating a record (defaults to `true`) |
 | `default` | Default value |
 | `maxLength` | Maximum length (`string` only) |
 | `enumName` | Enum name (`enum` only) |
-| `reference` | `{ table: "TargetTable", displayField?: "fieldName" }` (`reference` only) |
+| `reference` | Lookup configuration: target table, display fields, filters, copy fields, and OnDelete behavior |
 
 ### Auto-Generated Columns
 
@@ -389,8 +391,15 @@ What the framework handles automatically:
 You can choose which field to display:
 
 ```json
-"reference": { "table": "Member", "displayField": "memberNo" }
+"reference": {
+  "table": "Member",
+  "displayFields": ["memberNo", "name"],
+  "filters": [{ "field": "active", "operator": "eq", "value": true }],
+  "onDelete": "restrict"
+}
 ```
+
+`onDelete` accepts `restrict` (default), `cascade`, or `setNull`; `setNull` is invalid for mandatory fields.
 
 **Header–Line (1:N)** — the line table has a reference back to the header, and the header's form declares a grid via `lines[].refField` (see [Line Grid](#line-grid)):
 
@@ -450,7 +459,7 @@ The framework generates a **List Page** + **Detail Form** automatically from For
     { "label": "Details", "fields": ["loanDate", "totalFee"] }
   ],
   "actions": [
-    { "label": "Check out", "action": "BookLoanCheckout" }
+    { "label": "Check out", "type": "function", "target": "BookLoanCheckout" }
   ],
   "lines": [
     {
@@ -469,7 +478,7 @@ The framework generates a **List Page** + **Detail Form** automatically from For
 | `table` | The table this form is backed by |
 | `listFields` | Columns on the List Page (default: every field) |
 | `groups` | Tabs/groups on the Detail Form |
-| `actions` | Action buttons (call a server-side action) |
+| `actions` | Function, Report, or configurable Record Picker buttons |
 | `lines` | Line grid (child table) — inline editable |
 
 ### Line Grid
@@ -478,7 +487,11 @@ The framework generates a **List Page** + **Detail Form** automatically from For
 {
   "table": "BookLoanLine",
   "refField": "loanId",
-  "fields": ["bookId", "qty", "unitFee", "lineFee"]
+  "fields": ["bookId", "qty", "unitFee", "lineFee"],
+  "actions": [{ "label": "Allocate", "type": "picker", "target": "AllocateBooks", "picker": {
+    "table": "BookStock", "columns": ["bookId", "batch", "available"],
+    "allocation": { "availableField": "available" }
+  }}]
 }
 ```
 
@@ -602,12 +615,12 @@ kernel.events.on('BookLoan', 'onUpdating', (e) => {
 
 ### 10.3 Actions (Server-Side Operations)
 
-Actions are **named server operations** — called from a Form or the API
+Actions are **named server operations** — called from a Menu, Form, Line Grid, Picker, or the API. The action endpoint wraps the handler in a transaction automatically.
 
 ```ts
 kernel.actions.set('BookLoanCheckout', (ctx, args) => {
   const id = Number(args.id);
-  return ctx.tts(() => {        // tts = transaction
+  return ctx.tts(() => {        // nested tts is supported; the endpoint already owns the outer transaction
     const loan = ctx.find('BookLoan', id);
     if (!loan) throw new ValidationError('Loan not found');
 
@@ -628,13 +641,13 @@ kernel.actions.set('BookLoanCheckout', (ctx, args) => {
 
 Called from a Form:
 ```json
-{ "actions": [{ "label": "Check out", "action": "BookLoanCheckout" }] }
+{ "actions": [{ "label": "Check out", "type": "function", "target": "BookLoanCheckout" }] }
 ```
 
 Called from the API:
 ```
 POST /api/action/BookLoanCheckout
-{ "id": 123 }
+{ "recordId": 123, "id": 123, "lineId": 456, "selections": [{ "id": 10, "quantity": 2 }] }
 ```
 
 ### 10.4 DataContext API
@@ -683,6 +696,64 @@ kernel.events.on('BookLoan', 'onUpdating', (e) => {
   if (finesTooHigh) e.cancel('Outstanding fines too high');
 });
 ```
+
+### 10.6 Record Lifecycle & Execution Order
+
+Every write goes through `DataContext`, which fires hooks and events in a fixed order:
+
+```
+newRecord:  field defaults → initValue hooks
+
+insert:     create permission
+            → validateWrite  (field type/mandatory checks → onValidating events → validateWrite hooks)
+            → onInserting    (cancellable)
+            → audit fields (createdAt/createdBy/...)
+            → SQL INSERT
+            → onInserted     (notification only)
+
+update:     same shape with onUpdating (cancellable) / onUpdated
+
+delete:     delete permission
+            → FK handling (cascade / restrict / setNull)
+            → validateDelete hooks
+            → onDeleting     (cancellable)
+            → SQL DELETE
+            → onDeleted      (notification only)
+```
+
+Cancellation semantics:
+- **Pre-events** (`onValidating`, `onInserting`, `onUpdating`, `onDeleting`) can call `e.cancel(reason)` — this throws `DataEventCancelled` and aborts the operation. Post-events (`*ed`) cannot cancel.
+- **Hooks** block an operation by throwing `ValidationError` (or returning `false` from `validate*`).
+
+**How layers affect what runs:**
+
+| Concept | Layer behavior |
+|---|---|
+| Base artifacts (table, form, script, function, ...) | **Override** — the highest layer (SYS < ISV < LOC < DEV < CUS) wins; lower layers are replaced |
+| Extensions (`*Extension`) | **Accumulate** — every layer's extension merges into the base (table fields append, form groups/listFields append, menu items append, enum values append) |
+| Script execution | Deterministic: scripts run ordered **SYS → ISV → LOC → DEV → CUS**; each base script runs **immediately before its `scriptExtension`s** (extensions of the same base also ordered by layer, then name) |
+| Event/hook firing | Registration order — because scripts execute in layer order, handlers registered by a SYS script fire before handlers registered by a CUS script |
+| Function artifacts | Register **after** all scripts, ordered by (layer, name) — a `function` with the same name as a script-registered action replaces it |
+
+Native TypeScript logic (`kernel.registerNativeLogic`) is re-applied before web scripts on every rebuild, so file-based base logic always registers ahead of Designer-created scripts.
+
+### 10.7 Function Artifacts (Designer-created actions)
+
+A `function` artifact is a structured, Designer-friendly way to create a named server action without writing a full script:
+
+```json
+{
+  "kind": "function",
+  "name": "ERP_CustCount",
+  "label": "Customer count",
+  "code": "return { count: ctx.select('ERP_CustTable').count() };"
+}
+```
+
+- `code` is the **function body**, invoked as `(ctx, args)` with `kernel` also in scope.
+- It is registered into `kernel.actions` under the artifact name, so it can be targeted from Form/Menu actions (`type: "function"`) and invoked via `POST /api/action/<name>` (transaction-wrapped; the return value becomes the response).
+- Functions are **base artifacts**: a higher layer overrides a lower layer of the same name. `functionExtension` does not exist (yet) — extend behavior with a new function name or a script.
+- Like scripts, functions are high-risk executable code: AI/MCP change sets cannot create or update them.
 
 ---
 

@@ -17,8 +17,17 @@ export type FieldType =
 export interface FieldReferenceMeta {
   table: string;
   displayField?: string;
+  displayFields?: string[];
+  filters?: ReferenceFilterMeta[];
+  onDelete?: 'restrict' | 'cascade' | 'setNull';
   /** Fields to copy from the referenced record onto this record when the reference is selected. */
   copyFields?: { from: string; to: string }[];
+}
+
+export interface ReferenceFilterMeta {
+  field: string;
+  operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains';
+  value: string | number | boolean | null;
 }
 
 export interface FieldMeta {
@@ -27,6 +36,8 @@ export interface FieldMeta {
   label?: string;
   mandatory?: boolean;
   readOnly?: boolean;
+  allowEdit?: boolean;
+  allowEditOnCreate?: boolean;
   maxLength?: number;
   enumName?: string;
   reference?: FieldReferenceMeta;
@@ -93,6 +104,7 @@ export interface FormLineGridMeta {
   refField: string;
   fields: string[];
   aggregates?: AggregateMeta[];
+  actions?: FormAction[];
 }
 
 export interface FormGroupMeta {
@@ -102,7 +114,33 @@ export interface FormGroupMeta {
 
 export interface FormAction {
   label: string;
-  action: string;
+  /** Legacy function target. New metadata should use type + target. */
+  action?: string;
+  type?: 'function' | 'report' | 'picker';
+  target?: string;
+  picker?: PickerActionMeta;
+}
+
+export type PickerValueSource =
+  | string | number | boolean | null
+  | { source: 'record' | 'line'; field: string };
+
+export interface PickerFilterMeta {
+  field: string;
+  operator: ReferenceFilterMeta['operator'];
+  value: PickerValueSource;
+}
+
+export interface PickerActionMeta {
+  table: string;
+  columns: string[];
+  searchFields?: string[];
+  filters?: PickerFilterMeta[];
+  multiple?: boolean;
+  allocation?: {
+    availableField: string;
+    quantityLabel?: string;
+  };
 }
 
 export interface FormMeta {
@@ -124,6 +162,10 @@ export interface MenuItemMeta {
   icon?: IconName;
   form?: string;
   route?: string;
+  action?: string;
+  target?:
+    | { type: 'group' }
+    | { type: 'form' | 'function' | 'report'; name: string };
   items?: MenuItemMeta[];
 }
 
@@ -199,6 +241,7 @@ export interface FormExtensionMeta {
   form: string;
   listFields?: string[];
   groups?: FormGroupMeta[];
+  actions?: FormAction[];
   layer?: LayerType;
   model?: string;
 }
@@ -275,6 +318,17 @@ export interface ScriptExtensionMeta {
   model?: string;
 }
 
+export interface FunctionMeta {
+  kind: 'function';
+  name: string;
+  app?: string;
+  label?: string;
+  /** Function body compiled as (ctx, args) with `kernel` also in scope; registered as a kernel action. */
+  code: string;
+  layer?: LayerType;
+  model?: string;
+}
+
 // ---- PDF report designer ----
 
 export type ReportElementType = 'text' | 'field' | 'image' | 'line' | 'rect';
@@ -340,8 +394,16 @@ export interface ReportMeta {
   page?: ReportPageMeta;
   bands: ReportBandMeta[];
   lineSources?: ReportLineSourceMeta[];
+  parameters?: ReportParameterMeta[];
   layer?: LayerType;
   model?: string;
+}
+
+export interface ReportParameterMeta {
+  field: string;
+  operator?: 'eq' | 'from' | 'to';
+  label?: string;
+  required?: boolean;
 }
 
 export interface AppManifest {
@@ -370,6 +432,7 @@ export type AnyMeta =
   | RoleExtensionMeta
   | ScriptExtensionMeta
   | ScriptMeta
+  | FunctionMeta
   | ReportMeta;
 
 /** All extension kinds (accumulate into base, never override). */
@@ -394,6 +457,7 @@ export const BASE_KINDS = new Set([
   'duty',
   'role',
   'script',
+  'function',
   'report',
 ]);
 
