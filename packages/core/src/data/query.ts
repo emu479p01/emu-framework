@@ -27,7 +27,10 @@ export class Query implements Iterable<Record> {
   constructor(
     private readonly ctx: DataContext,
     private readonly table: TableMeta,
-  ) {}
+  ) {
+    const scope = ctx.policy.rowScope?.(table.name);
+    if (scope) this.conditions.push({ field: scope.field, op: '=', value: scope.value });
+  }
 
   private assertField(name: string): void {
     const ok =

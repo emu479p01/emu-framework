@@ -1,4 +1,4 @@
-export const CORE_VERSION = '0.0.1.0';
+export const CORE_VERSION = '0.0.1.1';
 
 export { Kernel, orderScriptsForExecution, type ActionHandler, type WebArtifactError } from './kernel.js';
 export {

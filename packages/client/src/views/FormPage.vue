@@ -136,6 +136,7 @@ function remove() {
           v-for="act in isNew ? [] : (form.actions ?? [])"
           :key="act.target ?? act.action"
           :loading="busy"
+          :disabled="act.disabled"
           :data-testid="`action-${act.target ?? act.action}`"
           @click="runAction(act)"
         >

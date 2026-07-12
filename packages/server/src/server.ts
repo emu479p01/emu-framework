@@ -306,8 +306,24 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return { openApps, customizeApps, hasRows: rows.length > 0 };
   };
 
-  const policyOf = (username: string): SecurityPolicy =>
-    ADMIN_USERS.has(username) ? allowAll : buildRolePolicy(kernel.registry, rolesOf(username));
+  const policyOf = (username: string): SecurityPolicy => {
+    const roles = rolesOf(username);
+    if (ADMIN_USERS.has(username) || roles.includes('FW_SystemAdminRole')) return allowAll;
+    const base = buildRolePolicy(kernel.registry, roles);
+    // Framework users may maintain only their own account and password.
+    if (roles.includes('FW_FrameworkUser')) {
+      return {
+        ...base,
+        can: (table, op) => table === 'FW_User' && (op === 'read' || op === 'update'),
+        accessibleForms: () => new Set(['FW_UserForm']),
+        canFunction: () => false,
+        canReport: () => false,
+        canPrivilege: () => false,
+        rowScope: (table) => table === 'FW_User' ? { field: 'username', value: username } : undefined,
+      };
+    }
+    return base;
+  };
 
   const userCtx = (req: FastifyRequest): DataContext => {
     const { username } = requireUser(req);
@@ -404,11 +420,32 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const canOpen = (form: string) => formAccess === 'all' || formAccess.has(form);
     const canOpenReport = (name: string) => {
       const report = kernel.registry.allReports().find((entry) => entry.name === name);
-      return Boolean(report && policy.can(report.dataSource, 'read'));
+      return Boolean(report && policy.canReport(name) && policy.can(report.dataSource, 'read'));
     };
+    const canOpenFunction = (name: string) => policy.canFunction(name);
+    const userRoles = rolesOf(user.username);
+    const isSystemAdmin = ADMIN_USERS.has(user.username) || userRoles.includes('FW_SystemAdminRole');
 
-    const forms = kernel.registry.allForms().filter((f) => canOpen(f.name));
+    const isSelfService = userRoles.includes('FW_FrameworkUser') && !isSystemAdmin;
+    const forms = kernel.registry.allForms().filter((f) => canOpen(f.name)).map((f) => {
+      const secureAction = (action: NonNullable<typeof f.actions>[number]) => {
+        const target = action.target ?? action.action;
+        const type = action.type ?? 'function';
+        const allowed = action.privilege ? policy.canPrivilege(action.privilege) : type === 'report' ? policy.canReport(target ?? '') : policy.canFunction(target ?? '');
+        return { ...action, disabled: !allowed };
+      };
+      const secured = { ...f, actions: f.actions?.map(secureAction), lines: f.lines?.map((line) => ({ ...line, actions: line.actions?.map(secureAction) })) };
+      if (!isSelfService || f.name !== 'FW_UserForm') return secured;
+      return { ...secured, groups: [{ label: 'Password', fields: ['password'] }], lines: [] };
+    });
     const usedTables = new Set(forms.flatMap((f) => [f.table, ...(f.lines ?? []).map((l) => l.table)]));
+    const visibleTables = kernel.registry
+      .allTables()
+      .filter((t) => !PROTECTED_TABLES.has(t.name))
+      .filter((t) => policy.can(t.name, 'read') || usedTables.has(t.name))
+      .map((t) => isSelfService && t.name === 'FW_User'
+        ? { ...t, fields: t.fields.map((f) => f.name === 'password' ? { ...f, allowEdit: true, allowEditOnCreate: false } : { ...f, allowEdit: false, allowEditOnCreate: false }) }
+        : t);
 
     // Recursively filter menu items by security
     const filterItems = (
@@ -421,7 +458,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           if (item.items) {
             const children = filterItems(item.items, allowRoutes);
             // keep container if it has visible children or a visible form
-            const targetVisible = item.target?.type === 'form' ? canOpen(item.target.name) : item.target?.type === 'report' ? canOpenReport(item.target.name) : item.target?.type === 'function';
+            const targetVisible = item.target?.type === 'form' ? canOpen(item.target.name) : item.target?.type === 'report' ? canOpenReport(item.target.name) : item.target?.type === 'function' ? canOpenFunction(item.target.name) : false;
             if ((children && children.length > 0) || (item.form && canOpen(item.form)) || targetVisible || (allowRoutes && item.route)) {
               return { ...item, items: children };
             }
@@ -430,7 +467,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
           if (allowRoutes && item.route) return item;
           if (item.target?.type === 'form' && canOpen(item.target.name)) return item;
           if (item.target?.type === 'report' && canOpenReport(item.target.name)) return item;
-          if (item.target?.type === 'function') return item;
+          if (item.target?.type === 'function' && canOpenFunction(item.target.name)) return item;
           return item.form && canOpen(item.form) ? item : null;
         })
         .filter(Boolean) as typeof items;
@@ -438,12 +475,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
     // Build per-app grouping
     const allMenus = kernel.registry.allMenus();
-    const userRoles = rolesOf(user.username);
-    const isFrameworkUser =
-      ADMIN_USERS.has(user.username) ||
-      userRoles.includes('FW_FrameworkUser') ||
-      userRoles.includes('FW_SystemAdminRole');
-    const isFrameworkAdmin = ADMIN_USERS.has(user.username) || userRoles.includes('FW_SystemAdminRole');
+    const isFrameworkUser = isSystemAdmin || userRoles.includes('FW_FrameworkUser');
+    const isFrameworkAdmin = isSystemAdmin;
     const access = appAccessOf(user.username);
     const frameworkMenus: typeof allMenus = [];
     const appMap = new Map<string, { name: string; label: string; icon?: import('@emu/core').IconName; modules: string[]; menus: typeof allMenus }>();
@@ -489,13 +522,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         maintenance: isFrameworkAdmin,
         tableBrowser: isFrameworkAdmin,
       },
-      tables: kernel.registry
-        .allTables()
-        .filter((t) => !PROTECTED_TABLES.has(t.name))
-        .filter((t) => policy.can(t.name, 'read') || usedTables.has(t.name)),
+      tables: visibleTables,
       enums: kernel.registry.allEnums(),
       forms,
-      reports: kernel.registry.allReports().filter((r) => policy.can(r.dataSource, 'read')),
+      reports: kernel.registry.allReports().filter((r) => policy.canReport(r.name) && policy.can(r.dataSource, 'read')),
       privileges: kernel.registry.allPrivileges(),
       duties: kernel.registry.allDuties(),
       roles: kernel.registry.allRoles(),
@@ -507,7 +537,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         if (ADMIN_USERS.has(user.username)) return true;
         // App access is explicit: no FW_AppAccess row with canOpen = the app is invisible.
         // (Framework admins keep full visibility so they can manage everything.)
-        if (isFrameworkUser) return true;
+        if (isSystemAdmin) return true;
         return access.openApps.has(a.name);
       }),
     };
@@ -557,6 +587,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const handler = kernel.actions.get(req.params.name);
       if (!handler) throw Object.assign(new Error(`Unknown action '${req.params.name}'`), { statusCode: 404 });
       const ctx = userCtx(req);
+      if (!ctx.policy.canFunction(req.params.name)) throw new SecurityError(`Access denied: function '${req.params.name}'`);
       return ctx.tts(() => handler(ctx, req.body ?? {}) ?? { ok: true });
     },
   );
@@ -606,6 +637,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     (req) => {
       const table = dataTable(req.params.table, req);
       const ctx = userCtx(req);
+      if (rolesOf(ctx.session.user).includes('FW_FrameworkUser') && !rolesOf(ctx.session.user).includes('FW_SystemAdminRole') && table.name === 'FW_User') {
+        const fields = Object.keys(req.body ?? {});
+        if (fields.some((field) => field !== 'password')) throw new SecurityError('Framework users may change only their password');
+      }
       const rec = ctx.find(table.name, Number(req.params.id));
       if (!rec) throw Object.assign(new Error('Not found'), { statusCode: 404 });
       rec.setMany(writableBody(table.name, req.body, 'update'));

@@ -18,7 +18,7 @@ export interface ReportRouteDeps {
 
 type ReportRow = { [field: string]: unknown };
 
-function formatFieldValue(kernel: Kernel, table: TableMeta, row: ReportRow | null, fieldName: string): string {
+export function formatReportFieldValue(kernel: Kernel, ctx: DataContext, table: TableMeta, row: ReportRow | null, fieldName: string): string {
   if (!row) return '';
   const value = row[fieldName];
   if (value === null || value === undefined) return '';
@@ -34,11 +34,23 @@ function formatFieldValue(kernel: Kernel, table: TableMeta, row: ReportRow | nul
       return String(value);
     }
   }
+  if (field.type === 'reference' && field.reference) {
+    const referencedId = Number(value);
+    if (!Number.isFinite(referencedId)) return String(value);
+    const referencedTable = kernel.registry.getTable(field.reference.table);
+    const referencedRecord = ctx.find(referencedTable.name, referencedId);
+    if (!referencedRecord) return String(value);
+    const referencedRow = referencedRecord.toObject();
+    const displayFields = field.reference.displayFields
+      ?? [field.reference.displayField ?? referencedTable.titleField ?? 'id'];
+    return displayFields.map((displayField) => String(referencedRow[displayField] ?? '')).join(' | ');
+  }
   return String(value);
 }
 
 function renderElement(
   kernel: Kernel,
+  ctx: DataContext,
   table: TableMeta,
   el: ReportElementMeta,
   row: ReportRow | null,
@@ -63,7 +75,7 @@ function renderElement(
     };
   }
 
-  const text = el.type === 'field' && el.field ? formatFieldValue(kernel, table, row, el.field) : (el.text ?? '');
+  const text = el.type === 'field' && el.field ? formatReportFieldValue(kernel, ctx, table, row, el.field) : (el.text ?? '');
   return {
     text,
     absolutePosition: { x, y },
@@ -86,7 +98,7 @@ function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: ReportMeta
 
   const renderBand = (band: ReportBandMeta, row: ReportRow | null, bandTable: TableMeta) => {
     for (const el of band.elements) {
-      content.push(renderElement(kernel, bandTable, el, row, marginLeft, cursorY));
+      content.push(renderElement(kernel, ctx, bandTable, el, row, marginLeft, cursorY));
     }
     cursorY += band.height;
   };
@@ -133,6 +145,7 @@ export function registerReportRoutes(app: FastifyInstance, kernel: Kernel, deps:
     async (req, reply) => {
       const report = kernel.registry.getReport(req.params.name);
       const ctx = userCtx(req);
+      if (!ctx.policy.canReport(report.name)) throw Object.assign(new Error(`Access denied: report '${report.name}'`), { statusCode: 403 });
 
       const declared = new Map((report.parameters ?? []).map((p) => [`param.${p.field}.${p.operator ?? 'eq'}`, p]));
       for (const key of Object.keys(req.query)) {

@@ -44,14 +44,12 @@ export function seedDesignerDb(kernel: Kernel): void {
       { table: 'FW_User', read: true, create: true, update: true, delete: true },
       { table: 'FW_UserRole', read: true, create: true, update: true, delete: true },
       { table: 'FW_AppAccess', read: true, create: true, update: true, delete: true },
-    ], forms: ['FW_UserForm', 'FW_AppAccessForm'] } as any,
+    ], forms: ['FW_UserForm', 'FW_AppAccessForm'], reports: ['FW_UserListReport'] } as any,
     { kind: 'duty', name: 'FW_SystemAdminDuty', label: 'System administration', ...fw, privileges: ['FW_SystemAdmin'] } as any,
     { kind: 'role', name: 'FW_SystemAdminRole', label: 'System administrator', ...fw, duties: ['FW_SystemAdminDuty'] } as any,
     { kind: 'privilege', name: 'FW_FrameworkUserPrivilege', label: 'Framework user', ...fw, tablePermissions: [
-      { table: 'FW_User', read: true, create: true, update: true, delete: true },
-      { table: 'FW_UserRole', read: true, create: true, update: true, delete: true },
-      { table: 'FW_AppAccess', read: true, create: true, update: true, delete: true },
-    ], forms: ['FW_UserForm', 'FW_AppAccessForm'] } as any,
+      { table: 'FW_User', read: true, update: true },
+    ], forms: ['FW_UserForm'] } as any,
     { kind: 'duty', name: 'FW_FrameworkUserDuty', label: 'Framework user', ...fw, privileges: ['FW_FrameworkUserPrivilege'] } as any,
     { kind: 'role', name: 'FW_FrameworkUser', label: 'Framework administrator', ...fw, duties: ['FW_FrameworkUserDuty'] } as any,
     { kind: 'menu', name: 'FW_SettingsMenu', label: 'Settings', ...fw, items: [

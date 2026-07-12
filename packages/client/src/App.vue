@@ -78,7 +78,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', updateViewport); do
               <n-menu :options="menuOptions" :value="activeKey" :default-expanded-keys="menuOptions.map((item) => item.key as string)" />
             </n-drawer-content>
           </n-drawer>
-          <n-layout>
+          <n-layout class="main-layout">
             <n-layout-header bordered class="topbar">
               <n-button quaternary circle :aria-label="mobile ? t('nav.openMenu') : t('nav.collapseMenu')" @click="mobile ? (drawerOpen = true) : (siderCollapsed = !siderCollapsed)">☰</n-button>
               <div class="page-context"><span class="crumb">{{ breadcrumb }}</span></div>
@@ -99,16 +99,19 @@ onBeforeUnmount(() => { window.removeEventListener('resize', updateViewport); do
 :root { color-scheme:light; --emu-bg:#f5f7fb; --emu-surface:#fff; --emu-border:#e2e8f0; --emu-text:#152033; --emu-muted:#64748b; --emu-primary:#4f46e5; --emu-radius-lg:14px; --emu-shadow-sm:0 1px 3px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.04); }
 * { box-sizing:border-box; }
 body { margin:0; color:var(--emu-text); background:var(--emu-bg); font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; }
-.app-shell { min-height:100vh; }
+.app-shell { height:100vh; height:100dvh; min-height:0; overflow:hidden; }
+.app-shell > .n-layout-scroll-container,.main-layout > .n-layout-scroll-container{overflow:hidden}
+.main-layout { height:100%; min-width:0; }
+.main-layout > .n-layout-scroll-container{display:flex;flex-direction:column}
 .app-sider { background:linear-gradient(180deg,#111827 0%,#172033 100%)!important; }
 .brand { height:68px; display:flex; align-items:center; gap:11px; padding:0 20px; font-weight:750; font-size:16px; overflow:hidden; white-space:nowrap; color:#fff;letter-spacing:-.02em;border-bottom:1px solid rgba(255,255,255,.08) }
 .brand img{filter:drop-shadow(0 4px 10px rgba(99,102,241,.35))}.sider-navigation{height:calc(100vh - 68px);display:flex;flex-direction:column;min-height:0}.app-menu{padding:12px 8px;overflow:auto;flex:1;min-height:0}.framework-menu{padding:12px 8px 16px;border-top:1px solid rgba(255,255,255,.14);flex:0 0 auto}.app-menu .n-menu-item-content,.framework-menu .n-menu-item-content{border-radius:8px;padding-left:10px!important}.app-menu .n-menu-item-content-header,.framework-menu .n-menu-item-content-header{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nav-icon{width:24px;height:24px;display:inline-grid;place-items:center;flex:0 0 24px}.nav-monogram{border-radius:7px;background:rgba(99,102,241,.24);color:#c7d2fe;font-size:12px;font-weight:800}.n-menu--collapsed .nav-icon{width:32px;height:32px}.n-menu--collapsed .nav-monogram{border-radius:9px}
 .brand.compact { justify-content:center; padding:0; }
-.topbar { height:68px; padding:0 28px; display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.92);backdrop-filter:blur(12px);box-shadow:0 1px 0 rgba(15,23,42,.06); }
+.topbar { height:68px; flex:0 0 68px; padding:0 28px; display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.92);backdrop-filter:blur(12px);box-shadow:0 1px 0 rgba(15,23,42,.06); }
 .page-context { flex:1; min-width:0; }
 .crumb { font-size:14px; font-weight:700;letter-spacing:-.01em; }
 .user-button { max-width:220px; }
-.page-content { min-height:calc(100vh - 68px); padding:32px; background:radial-gradient(circle at 100% 0,rgba(99,102,241,.055),transparent 28%),var(--emu-bg); }
+.page-content { flex:1 1 auto; min-height:0; overflow-x:hidden; overflow-y:auto; padding:32px; background:radial-gradient(circle at 100% 0,rgba(99,102,241,.055),transparent 28%),var(--emu-bg); }
 :focus-visible { outline:3px solid rgba(79,70,229,.45) !important; outline-offset:2px; }
 @media (max-width:899px) { .topbar{padding:0 14px}.page-content{padding:18px 14px}.user-button{max-width:145px} }
 </style>

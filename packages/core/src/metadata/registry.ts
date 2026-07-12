@@ -305,6 +305,8 @@ export class MetadataRegistry {
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown privilege '${e.privilege}'`);
       if (e.tablePermissions) base.tablePermissions = [...(base.tablePermissions ?? []), ...e.tablePermissions];
       if (e.forms) base.forms = [...(base.forms ?? []), ...e.forms];
+      if (e.functions) base.functions = [...(base.functions ?? []), ...e.functions];
+      if (e.reports) base.reports = [...(base.reports ?? []), ...e.reports];
     } else if (e.kind === 'dutyExtension') {
       const base = this.duties.get(e.duty);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown duty '${e.duty}'`);
@@ -454,6 +456,12 @@ export class MetadataRegistry {
         if (!this.forms.has(form)) {
           throw new MetadataError(`Privilege '${priv.name}': unknown form '${form}'`);
         }
+      }
+      for (const name of priv.functions ?? []) {
+        if (!this.functions.has(name)) throw new MetadataError(`Privilege '${priv.name}': unknown function '${name}'`);
+      }
+      for (const name of priv.reports ?? []) {
+        if (!this.reports.has(name)) throw new MetadataError(`Privilege '${priv.name}': unknown report '${name}'`);
       }
     }
     for (const duty of this.duties.values()) {
