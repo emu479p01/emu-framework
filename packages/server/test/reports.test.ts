@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { AnyMeta, Kernel } from '@emu/core';
 import { buildServer } from '../src/server.js';
+import { formatReportFieldValue } from '../src/reports.js';
 import { applyErpSample } from './fixtures/erpSample.js';
 
 const custListReport: AnyMeta = {
@@ -32,11 +33,13 @@ const custListReport: AnyMeta = {
 describe('report PDF rendering', () => {
   let app: FastifyInstance;
   let cookie: string;
+  let kernel: Kernel;
+  let customerId: number;
 
   beforeAll(async () => {
     app = buildServer();
     await app.ready();
-    const kernel = (app as unknown as { kernel: Kernel }).kernel;
+    kernel = (app as unknown as { kernel: Kernel }).kernel;
     applyErpSample(kernel);
     const errors = kernel.applyWebArtifacts([...loadArtifacts(kernel), custListReport]);
     expect(errors).toEqual([]);
@@ -46,12 +49,13 @@ describe('report PDF rendering', () => {
     const res = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'admin', password: 'admin' } });
     cookie = res.headers['set-cookie'] as string;
 
-    await app.inject({
+    const customer = await app.inject({
       method: 'POST',
       url: '/api/data/ERP_CustTable',
       headers: auth(),
       payload: { accountNum: 'C001', name: 'Acme Co' },
     });
+    customerId = customer.json().id as number;
   });
 
   function loadArtifacts(kernel: Kernel): AnyMeta[] {
@@ -71,6 +75,13 @@ describe('report PDF rendering', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('application/pdf');
     expect(res.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
+  });
+
+  it('formats reference fields using the referenced table title field', () => {
+    const table = kernel.registry.getTable('ERP_SalesTable');
+    const ctx = kernel.context();
+    expect(formatReportFieldValue(kernel, ctx, table, { custId: customerId }, 'custId')).toBe('Acme Co');
+    expect(formatReportFieldValue(kernel, ctx, table, { custId: 999_999 }, 'custId')).toBe('999999');
   });
 
   it('rejects unauthenticated report requests', async () => {

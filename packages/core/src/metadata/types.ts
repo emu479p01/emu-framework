@@ -118,6 +118,9 @@ export interface FormAction {
   action?: string;
   type?: 'function' | 'report' | 'picker';
   target?: string;
+  privilege?: string;
+  /** Server-computed UI state; not normally authored in metadata. */
+  disabled?: boolean;
   picker?: PickerActionMeta;
 }
 
@@ -196,6 +199,8 @@ export interface PrivilegeMeta {
   label?: string;
   tablePermissions?: TablePermission[];
   forms?: string[];
+  functions?: string[];
+  reports?: string[];
   layer?: LayerType;
   model?: string;
 }
@@ -273,6 +278,8 @@ export interface PrivilegeExtensionMeta {
   privilege: string;
   tablePermissions?: TablePermission[];
   forms?: string[];
+  functions?: string[];
+  reports?: string[];
   layer?: LayerType;
   model?: string;
 }
@@ -325,6 +332,7 @@ export interface FunctionMeta {
   label?: string;
   /** Function body compiled as (ctx, args) with `kernel` also in scope; registered as a kernel action. */
   code: string;
+  privileges?: string[];
   layer?: LayerType;
   model?: string;
 }
@@ -391,6 +399,7 @@ export interface ReportMeta {
   label?: string;
   /** Main table this report reads from — a single record (id filter) or a filtered/sorted list. */
   dataSource: string;
+  privileges?: string[];
   page?: ReportPageMeta;
   bands: ReportBandMeta[];
   lineSources?: ReportLineSourceMeta[];

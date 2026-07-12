@@ -11,11 +11,18 @@ export interface SecurityPolicy {
   can(table: string, op: CrudOp): boolean;
   /** forms this session may open (drives menu/metadata filtering) */
   accessibleForms(): Set<string> | 'all';
+  canFunction(name: string): boolean;
+  canReport(name: string): boolean;
+  canPrivilege(name: string): boolean;
+  rowScope?(table: string): { field: string; value: string } | undefined;
 }
 
 export const allowAll: SecurityPolicy = {
   can: () => true,
   accessibleForms: () => 'all',
+  canFunction: () => true,
+  canReport: () => true,
+  canPrivilege: () => true,
 };
 
 /**
@@ -26,10 +33,14 @@ export const allowAll: SecurityPolicy = {
 export function buildRolePolicy(registry: MetadataRegistry, roleNames: string[]): SecurityPolicy {
   const tablePerms = new Map<string, Set<CrudOp>>();
   const forms = new Set<string>();
+  const functions = new Set<string>();
+  const reports = new Set<string>();
+  const privileges = new Set<string>();
 
   const applyPrivilege = (privName: string) => {
     const priv = registry.getPrivilege(privName);
     if (!priv) return;
+    privileges.add(privName);
     for (const perm of priv.tablePermissions ?? []) {
       const ops = tablePerms.get(perm.table) ?? new Set<CrudOp>();
       if (perm.read) ops.add('read');
@@ -39,6 +50,8 @@ export function buildRolePolicy(registry: MetadataRegistry, roleNames: string[])
       tablePerms.set(perm.table, ops);
     }
     for (const form of priv.forms ?? []) forms.add(form);
+    for (const name of priv.functions ?? []) functions.add(name);
+    for (const name of priv.reports ?? []) reports.add(name);
   };
 
   for (const roleName of roleNames) {
@@ -54,5 +67,8 @@ export function buildRolePolicy(registry: MetadataRegistry, roleNames: string[])
   return {
     can: (table, op) => tablePerms.get(table)?.has(op) ?? false,
     accessibleForms: () => forms,
+    canFunction: (name) => functions.has(name),
+    canReport: (name) => reports.has(name),
+    canPrivilege: (name) => privileges.has(name),
   };
 }

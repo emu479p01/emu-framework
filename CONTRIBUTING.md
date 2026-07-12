@@ -1,6 +1,6 @@
 # Contributing to EmuFramework
 
-This file is for people who want to propose code or documentation changes through a GitHub Pull Request. It is not an application user manual; users should start at the [Documentation Index](docs/README.md).
+This file is for people who want to propose code changes through a GitHub Pull Request. Documentation changes belong in the [EmuFramework documentation repository](https://github.com/emu479p01/emu-framework-docs), and users should start at its documentation index.
 
 ## Prepare a change
 
@@ -10,7 +10,7 @@ This file is for people who want to propose code or documentation changes throug
 4. Make one focused change and add or update tests.
 5. Do not commit databases, `.env` files, `.tools`, build output, or credentials.
 
-Run the app with `pnpm dev`. Development accounts are documented in [Developer setup](docs/developer/setup.md) and must never be used in production.
+Run the app with `pnpm dev`. Development accounts are documented in [Developer setup](https://github.com/emu479p01/emu-framework-docs/blob/main/developer/setup.md) and must never be used in production.
 
 ## Verify the change
 
@@ -31,4 +31,4 @@ pnpm build
 4. Mention migrations, compatibility risks, or documentation changes.
 5. Respond to review comments with additional commits; do not rewrite unrelated code.
 
-See [Testing](docs/developer/testing.md) and [Architecture](docs/developer/architecture.md) for more detail.
+See [Testing](https://github.com/emu479p01/emu-framework-docs/blob/main/developer/testing.md) and [Architecture](https://github.com/emu479p01/emu-framework-docs/blob/main/developer/architecture.md) for more detail.

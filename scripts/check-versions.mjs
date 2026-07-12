@@ -18,7 +18,6 @@ for (const file of ['packages/core/package.json', 'packages/server/package.json'
 const requiredText = new Map([
   ['README.md', [expected, `Node.js ${nodeVersion}`, `pnpm ${pnpmVersion}`]],
   ['CONTRIBUTING.md', [`Node.js ${nodeVersion}`, `pnpm ${pnpmVersion}`]],
-  ['docs/developer/setup.md', [`Node.js ${nodeVersion}`, `pnpm ${pnpmVersion}`]],
   ['Dockerfile', [`node:${nodeVersion}`, `pnpm@${pnpmVersion}`]],
   ['Dockerfile.updater', [`node:${nodeVersion}`]],
   ['.github/workflows/ci.yml', [`node-version: ${nodeVersion}`]],
