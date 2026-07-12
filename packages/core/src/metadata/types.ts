@@ -54,6 +54,13 @@ export interface IndexMeta {
 export type LayerType = 'SYS' | 'ISV' | 'LOC' | 'DEV' | 'CUS';
 export const LAYER_ORDER: readonly LayerType[] = ['SYS', 'ISV', 'LOC', 'DEV', 'CUS'] as const;
 export const DEFAULT_LAYER: LayerType = 'SYS';
+export function layerIndex(layer: LayerType): number { return LAYER_ORDER.indexOf(layer); }
+export function canExtendLayer(source: LayerType, target: LayerType): boolean { return layerIndex(source) > layerIndex(target); }
+export function metadataNamePart(value: string): string { return value.replace(/[^a-z0-9]/gi, ''); }
+export function appNamePrefix(app: string): string { return app === 'system' ? 'FW' : metadataNamePart(app.split('.')[0]).toUpperCase(); }
+export function canonicalExtensionName(app: string, model: string, target: string): string {
+  return `${appNamePrefix(app)}_${metadataNamePart(model)}_${target}_Extension`;
+}
 
 /** Safe, code-owned icon catalog used by app manifests and navigation metadata. */
 export const ICON_NAMES = [
@@ -348,6 +355,7 @@ export interface ReportElementStyle {
   align?: 'left' | 'center' | 'right';
   color?: string;
   borderWidth?: number;
+  fontFamily?: string;
 }
 
 export interface ReportElementMeta {
@@ -400,6 +408,7 @@ export interface ReportMeta {
   /** Main table this report reads from — a single record (id filter) or a filtered/sorted list. */
   dataSource: string;
   privileges?: string[];
+  defaultFont?: string;
   page?: ReportPageMeta;
   bands: ReportBandMeta[];
   lineSources?: ReportLineSourceMeta[];

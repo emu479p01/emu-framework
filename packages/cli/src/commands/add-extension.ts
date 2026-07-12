@@ -1,5 +1,5 @@
 import { defineCommand } from 'citty';
-import { readdirSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
@@ -11,6 +11,7 @@ import {
   scaffoldMenuExtension,
 } from '../scaffold/extension.js';
 import type { IndexDef } from '../scaffold/object.js';
+import { canonicalExtensionName, LAYER_ORDER, type LayerType } from '@emu/core';
 
 type ExtKind = 'tableExtension' | 'formExtension' | 'menuExtension';
 const EXTS: ExtKind[] = ['tableExtension', 'formExtension', 'menuExtension'];
@@ -53,12 +54,17 @@ export const addExtensionCommand = defineCommand({
 
     // Discover base objects from this app + its dependsOn chain
     const allTargets = getDependsOnChain(root, args.app);
+    const manifest = JSON.parse(readFileSync(join(appDir, 'app.json'), 'utf8')) as { models?: { name: string; label?: string; layer: LayerType }[] };
+    if (!manifest.models?.length) { console.error(pc.red(`App '${args.app}' has no model`)); process.exit(1); }
+    const model = manifest.models.length === 1 ? manifest.models[0].name : await p.select({ message: 'Source model', options: manifest.models.map((entry) => ({ value: entry.name, label: `${entry.label ?? entry.name} (${entry.layer})` })) }) as string;
+    if (p.isCancel(model)) process.exit(0);
+    const sourceLayer = manifest.models.find((entry) => entry.name === model)!.layer;
     p.log.info(`Discovering objects from: ${allTargets.join(', ')}`);
 
     switch (kind) {
-      case 'tableExtension': await addTableExt(root, appDir, allTargets); break;
-      case 'formExtension': await addFormExt(root, appDir, allTargets); break;
-      case 'menuExtension': await addMenuExt(root, appDir, allTargets); break;
+      case 'tableExtension': await addTableExt(root, appDir, allTargets, args.app, model, sourceLayer); break;
+      case 'formExtension': await addFormExt(root, appDir, allTargets, args.app, model, sourceLayer); break;
+      case 'menuExtension': await addMenuExt(root, appDir, allTargets, args.app, model, sourceLayer); break;
     }
   },
 });
@@ -72,8 +78,8 @@ const EXT_FIELD_TYPES = [
   { value: 'datetime', label: 'datetime' },
 ];
 
-async function addTableExt(root: string, appDir: string, targetApps: string[]) {
-  const allTables = listFromApps(root, targetApps, 'tables');
+async function addTableExt(root: string, appDir: string, targetApps: string[], app: string, model: string, sourceLayer: LayerType) {
+  const allTables = listFromApps(root, targetApps, 'tables', sourceLayer);
 
   const table = await p.select({
     message: 'Base table to extend',
@@ -83,8 +89,8 @@ async function addTableExt(root: string, appDir: string, targetApps: string[]) {
 
   const name = await p.text({
     message: 'Extension name',
-    placeholder: `${table}.MyExt`,
-    defaultValue: `${table}.MyExt`,
+    placeholder: canonicalExtensionName(app, model, table),
+    defaultValue: canonicalExtensionName(app, model, table),
   }) as string;
   if (p.isCancel(name)) process.exit(0);
 
@@ -127,8 +133,8 @@ async function addTableExt(root: string, appDir: string, targetApps: string[]) {
   p.outro(pc.green(`Created ${filepath}`));
 }
 
-async function addFormExt(root: string, appDir: string, targetApps: string[]) {
-  const allForms = listFromApps(root, targetApps, 'forms');
+async function addFormExt(root: string, appDir: string, targetApps: string[], app: string, model: string, sourceLayer: LayerType) {
+  const allForms = listFromApps(root, targetApps, 'forms', sourceLayer);
 
   const form = await p.select({
     message: 'Base form to extend',
@@ -138,8 +144,8 @@ async function addFormExt(root: string, appDir: string, targetApps: string[]) {
 
   const name = await p.text({
     message: 'Extension name',
-    placeholder: `${form}.MyExt`,
-    defaultValue: `${form}.MyExt`,
+    placeholder: canonicalExtensionName(app, model, form),
+    defaultValue: canonicalExtensionName(app, model, form),
   }) as string;
   if (p.isCancel(name)) process.exit(0);
 
@@ -148,9 +154,9 @@ async function addFormExt(root: string, appDir: string, targetApps: string[]) {
   p.log.message(pc.dim('Edit the JSON to add listFields, groups, etc.'));
 }
 
-async function addMenuExt(root: string, appDir: string, targetApps: string[]) {
-  const allMenus = listFromApps(root, targetApps, 'menus');
-  const allForms = listFromApps(root, targetApps, 'forms');
+async function addMenuExt(root: string, appDir: string, targetApps: string[], app: string, model: string, sourceLayer: LayerType) {
+  const allMenus = listFromApps(root, targetApps, 'menus', sourceLayer);
+  const allForms = listFromApps(root, targetApps, 'forms', sourceLayer);
 
   const menu = await p.select({
     message: 'Base menu to extend',
@@ -160,8 +166,8 @@ async function addMenuExt(root: string, appDir: string, targetApps: string[]) {
 
   const name = await p.text({
     message: 'Extension name',
-    placeholder: `${menu}.MyExt`,
-    defaultValue: `${menu}.MyExt`,
+    placeholder: canonicalExtensionName(app, model, menu),
+    defaultValue: canonicalExtensionName(app, model, menu),
   }) as string;
   if (p.isCancel(name)) process.exit(0);
 
@@ -186,24 +192,30 @@ async function addMenuExt(root: string, appDir: string, targetApps: string[]) {
   p.outro(pc.green(`Created ${filepath}`));
 }
 
-function listFromApps(root: string, appNames: string[], kindDir: string): string[] {
+function listFromApps(root: string, appNames: string[], kindDir: string, sourceLayer: LayerType): string[] {
   const results: string[] = [];
   const appsDir = join(root, 'apps');
 
-  const collect = (dir: string) => {
+  const collect = (dir: string, models: Map<string, LayerType>, defaultModel?: string) => {
     if (!existsSync(dir)) return;
     for (const file of readdirSync(dir)) {
-      if (file.endsWith('.json')) results.push(file.replace('.json', ''));
+      if (file.endsWith('.json')) {
+        const artifact = JSON.parse(readFileSync(join(dir, file), 'utf8')) as { name?: string; model?: string; layer?: LayerType };
+        const targetLayer = models.get(artifact.model ?? defaultModel ?? '') ?? artifact.layer ?? 'SYS';
+        if (LAYER_ORDER.indexOf(targetLayer) < LAYER_ORDER.indexOf(sourceLayer)) results.push(artifact.name ?? file.replace('.json', ''));
+      }
     }
   };
 
   for (const appName of appNames) {
     const metaDir = join(appsDir, appName, 'metadata');
     if (!existsSync(metaDir)) continue;
-    collect(join(metaDir, kindDir));
+    const manifest = JSON.parse(readFileSync(join(appsDir, appName, 'app.json'), 'utf8')) as { models?: { name: string; layer: LayerType }[] };
+    const models = new Map((manifest.models ?? []).map((entry) => [entry.name, entry.layer]));
+    collect(join(metaDir, kindDir), models, manifest.models?.[0]?.name);
     // module layout: metadata/<Module>/<kind>/
     for (const sub of readdirSync(metaDir, { withFileTypes: true })) {
-      if (sub.isDirectory()) collect(join(metaDir, sub.name, kindDir));
+      if (sub.isDirectory()) collect(join(metaDir, sub.name, kindDir), models, manifest.models?.[0]?.name);
     }
   }
   return results;

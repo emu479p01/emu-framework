@@ -9,6 +9,7 @@ const DesignerPage = () => import('./views/designer/DesignerPage.vue');
 const DesignerEditPage = () => import('./views/designer/DesignerEditPage.vue');
 const ReportEditPage = () => import('./views/report-designer/ReportEditPage.vue');
 const SystemMaintenancePage = () => import('./views/SystemMaintenancePage.vue');
+const FontManagerPage = () => import('./views/FontManagerPage.vue');
 const ActionPage = () => import('./views/ActionPage.vue');
 const TableBrowserPage = () => import('./views/TableBrowserPage.vue');
 const ReportLaunchPage = () => import('./views/ReportLaunchPage.vue');
@@ -39,6 +40,7 @@ export const router = createRouter({
     { path: '/designer/new/:kind', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind }), meta: { capability: 'designer' } },
     { path: '/designer/:kind/:name', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind, name: r.params.name }), meta: { capability: 'designer' } },
     { path: '/system/maintenance', component: SystemMaintenancePage, meta: { capability: 'maintenance' } },
+    { path: '/system/fonts', component: FontManagerPage, meta: { capability: 'maintenance' } },
     { path: '/system/tables', component: TableBrowserPage, meta: { capability: 'tableBrowser' } },
     { path: '/action/:name', component: ActionPage, props: true },
     { path: '/report/:name', component: ReportLaunchPage, props: true },

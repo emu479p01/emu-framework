@@ -24,6 +24,7 @@ import { bootWebArtifacts, registerDesignerRoutes } from './designer.js';
 import { seedDesignerDb } from './seeder.js';
 import { buildFilteredQuery, registerImportExportRoutes } from './importExport.js';
 import { registerReportRoutes } from './reports.js';
+import { registerFontRoutes } from './fontManager.js';
 import { registerSystemMaintenanceRoutes } from './systemMaintenance.js';
 
 export interface ServerOptions {
@@ -479,12 +480,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const isFrameworkAdmin = isSystemAdmin;
     const access = appAccessOf(user.username);
     const frameworkMenus: typeof allMenus = [];
-    const appMap = new Map<string, { name: string; label: string; icon?: import('@emu/core').IconName; modules: string[]; menus: typeof allMenus }>();
+    const appMap = new Map<string, { name: string; label: string; icon?: import('@emu/core').IconName; dependsOn?: string[]; models?: { name: string; label?: string; layer: import('@emu/core').LayerType }[]; modules: string[]; menus: typeof allMenus }>();
     for (const app of kernel.registry.loadedApps()) {
       appMap.set(app.name, {
         name: app.name,
         label: app.label ?? app.name,
         icon: app.icon,
+        dependsOn: app.dependsOn,
+        models: app.models,
         modules: kernel.modulesForApp(app.name),
         menus: [],
       });
@@ -495,7 +498,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       if (appName === 'system') {
         if (isFrameworkUser) {
           const systemItems = menu.items.filter((item) => {
-            if (item.route === '/system/tables' || item.route === '/system/maintenance') return isFrameworkAdmin;
+            if (item.route === '/system/tables' || item.route === '/system/maintenance' || item.route === '/system/fonts') return isFrameworkAdmin;
             return true;
           });
           const filtered = { ...menu, items: filterItems(systemItems, true) ?? [] };
@@ -578,6 +581,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return user.username;
   };
   registerSystemMaintenanceRoutes(app, kernel, requireFrameworkAdmin);
+  registerFontRoutes(app, kernel, requireFrameworkAdmin, requireUser);
 
   // ---- actions (named server-side operations, e.g. SalesOrderPost) ----
 

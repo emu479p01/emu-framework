@@ -4,7 +4,7 @@ import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable, testManifest } 
 
 function bootKernel(): Kernel {
   const kernel = new Kernel();
-  kernel.registerApp(testManifest('testapp'), [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable]);
+  kernel.registerApp({ name: 'testapp', models: [{ name: 'Base', layer: 'SYS' }, { name: 'ClientCustom', layer: 'CUS' }] }, [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable]);
   kernel.sync();
   return kernel;
 }
@@ -258,7 +258,7 @@ describe('Kernel.applyWebArtifacts', () => {
   it('cannot redefine an existing file-based artifact', () => {
     const kernel = bootKernel();
     const errors = kernel.applyWebArtifacts([
-      { kind: 'table', name: 'TESTAPP_CustTable', app: 'testapp', model: 'ClientCustom', fields: [] } as unknown as AnyMeta,
+      { kind: 'table', name: 'TESTAPP_CustTable', app: 'testapp', model: 'Base', fields: [] } as unknown as AnyMeta,
     ]);
     expect(errors).toHaveLength(1);
     expect(errors[0].error).toMatch(/Duplicate/);

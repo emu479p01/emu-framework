@@ -17,6 +17,7 @@ export interface DesignerApp {
   label?: string;
   icon?: import('@emu/core').IconName;
   models?: { name: string; label?: string; layer: string }[];
+  dependsOn?: string[];
 }
 export interface ChangeSetPreview {
   previewId: string; expiresAt: string; valid: boolean; baseRevision: string; nextRevision: string;
@@ -24,6 +25,7 @@ export interface ChangeSetPreview {
   schemaEffects: { type: string; target: string }[]; destructive: boolean;
   diagnostics: { path: string; code: string; message: string }[];
   registryErrors: { kind: string; name: string; error: string }[];
+  warnings?: { path: string; code: string; message: string }[];
 }
 
 export const useDesigner = defineStore('designer', {

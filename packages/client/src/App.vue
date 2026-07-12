@@ -44,6 +44,7 @@ const breadcrumb = computed(() => {
   if (route.path === '/') return t('home.title');
   if (route.path.startsWith('/designer')) return t('designer.title');
   if (route.path.startsWith('/system/maintenance')) return 'System Maintenance';
+  if (route.path.startsWith('/system/fonts')) return 'Report Fonts';
   const form = meta.form(String(route.params.formName ?? ''));
   return form?.label ?? form?.name ?? t('home.title');
 });

@@ -10,14 +10,11 @@ export function appPrefix(app: string): string {
 }
 
 /**
- * Derived extension name: `<AppPrefix>_<BaseName>_Extension`.
- * When the base object already carries the app's own prefix (extending an
- * object of the same app), the prefix is not repeated.
+ * Derived extension name: `<AppPrefix>_<ModelName>_<BaseName>_Extension`.
  */
-export function deriveExtensionName(app: string, base: string): string {
-  if (!base) return '';
-  const prefix = appPrefix(app);
-  return base.startsWith(`${prefix}_`) ? `${base}_Extension` : `${prefix}_${base}_Extension`;
+export function deriveExtensionName(app: string, model: string, base: string): string {
+  if (!base || !model) return '';
+  return `${appPrefix(app)}_${model.replace(/[^a-z0-9]/gi, '')}_${base}_Extension`;
 }
 
 /** Field on each extension artifact that names its base object. */

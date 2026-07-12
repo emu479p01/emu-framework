@@ -24,10 +24,11 @@ import type {
   TableExtensionMeta,
   TableMeta,
 } from './types.js';
-import { SYSTEM_FIELDS, LAYER_ORDER, DEFAULT_LAYER, EXTENSION_KINDS, isIconName, type LayerType } from './types.js';
+import { SYSTEM_FIELDS, LAYER_ORDER, DEFAULT_LAYER, EXTENSION_KINDS, isIconName, canExtendLayer, canonicalExtensionName, type LayerType } from './types.js';
 import { validateMetadataArtifact } from './schema.js';
 
 export class MetadataError extends Error {}
+const loggedWarnings = new Set<string>();
 
 interface LoadedApp {
   manifest: AppManifest;
@@ -74,6 +75,8 @@ export class MetadataRegistry {
   private functions = new Map<string, FunctionMeta>();
   private reports = new Map<string, ReportMeta>();
   private extensionNames = new Set<string>();
+  private extensionTargets = new Set<string>();
+  private warningMessages: string[] = [];
   /** Maps artifact name → app name for grouping in metadata API */
   private artifactApp = new Map<string, string>();
   /** Maps app name → list of module directory names */
@@ -132,7 +135,7 @@ export class MetadataRegistry {
     }
     const normalizedManifest = normalizeManifest(manifest);
     this.appManifests.set(normalizedManifest.name, normalizedManifest);
-    const normalizedArtifacts = artifacts.map((a) => this.normalizeArtifact(normalizedManifest, a));
+    const normalizedArtifacts = this.orderArtifacts(artifacts.map((a) => this.normalizeArtifact(normalizedManifest, a)));
     for (const meta of normalizedArtifacts) {
       this.addArtifact(normalizedManifest.name, meta);
     }
@@ -145,10 +148,20 @@ export class MetadataRegistry {
     if (!this.apps.some((a) => a.manifest.name === appName)) {
       throw new MetadataError(`Cannot add web artifacts: app '${appName}' is not loaded`);
     }
-    for (const meta of artifacts) {
+    const manifest = this.appManifests.get(appName)!;
+    for (const meta of this.orderArtifacts(artifacts.map((artifact) => this.normalizeArtifact(manifest, artifact)))) {
       this.addArtifact(appName, meta);
     }
     this.validate();
+  }
+
+  private orderArtifacts(artifacts: AnyMeta[]): AnyMeta[] {
+    return [...artifacts].sort((a, b) => {
+      const extensionDelta = Number(EXTENSION_KINDS.has(a.kind)) - Number(EXTENSION_KINDS.has(b.kind));
+      if (extensionDelta) return extensionDelta;
+      const layerDelta = LAYER_ORDER.indexOf((a as any).layer ?? DEFAULT_LAYER) - LAYER_ORDER.indexOf((b as any).layer ?? DEFAULT_LAYER);
+      return layerDelta || `${a.kind}:${a.name}`.localeCompare(`${b.kind}:${b.name}`);
+    });
   }
 
   private addArtifact(appName: string, artifact: AnyMeta): void {
@@ -162,6 +175,7 @@ export class MetadataRegistry {
       if (!meta.name.endsWith('_Extension')) {
         throw new MetadataError(`Extension '${meta.name}' must end with '_Extension'`);
       }
+      this.validateExtension(appName, meta);
       this.extensionNames.add(meta.name);
       this.applyExtension(appName, meta as any);
       this.artifactApp.set(meta.name, appName);
@@ -192,6 +206,41 @@ export class MetadataRegistry {
     map.set(meta.name, meta);
     this.artifactApp.set(meta.name, appName);
   }
+
+  private validateExtension(appName: string, meta: AnyMeta): void {
+    const ext = meta as any;
+    const field = ({ tableExtension: 'table', formExtension: 'form', menuExtension: 'menu', enumExtension: 'enum', privilegeExtension: 'privilege', dutyExtension: 'duty', roleExtension: 'role', scriptExtension: 'script' } as Record<string, string>)[meta.kind];
+    const targetName = ext[field];
+    const target = field === 'table' ? this.tables.get(targetName) : field === 'form' ? this.forms.get(targetName) : field === 'menu' ? this.menus.get(targetName) : field === 'enum' ? this.enums.get(targetName) : field === 'privilege' ? this.privileges.get(targetName) : field === 'duty' ? this.duties.get(targetName) : field === 'role' ? this.roles.get(targetName) : this.scripts.get(targetName);
+    if (!target) throw new MetadataError(`Extension '${meta.name}': unknown ${field} '${targetName}'`);
+    const sourceLayer = ext.layer ?? DEFAULT_LAYER;
+    const targetLayer = (target as any).layer ?? DEFAULT_LAYER;
+    if (!canExtendLayer(sourceLayer, targetLayer)) throw new MetadataError(`Extension '${meta.name}': layer '${sourceLayer}' must be higher than target '${targetName}' layer '${targetLayer}'`);
+    const targetApp = this.artifactApp.get(targetName);
+    if (targetApp && targetApp !== appName && !this.dependsOnTransitively(appName, targetApp)) {
+      throw new MetadataError(`Extension '${meta.name}': app '${appName}' must depend on '${targetApp}'`);
+    }
+    const tuple = `${appName}:${ext.model}:${meta.kind}:${targetName}`;
+    if (this.extensionTargets.has(tuple)) throw new MetadataError(`Model '${ext.model}' already has a ${meta.kind} for '${targetName}'`);
+    this.extensionTargets.add(tuple);
+    const canonical = canonicalExtensionName(appName, ext.model, targetName);
+    if (meta.name !== canonical) {
+      const warning = `Extension '${meta.name}' uses a legacy name; canonical name is '${canonical}'`;
+      this.warningMessages.push(warning);
+      if (!loggedWarnings.has(warning)) { loggedWarnings.add(warning); console.warn(warning); }
+    }
+  }
+
+  private dependsOnTransitively(appName: string, target: string, seen = new Set<string>()): boolean {
+    if (seen.has(appName)) return false;
+    seen.add(appName);
+    for (const dependency of this.appManifests.get(appName)?.dependsOn ?? []) {
+      if (dependency === target || this.dependsOnTransitively(dependency, target, seen)) return true;
+    }
+    return false;
+  }
+
+  warnings(): string[] { return [...this.warningMessages]; }
 
   private addBase(appName: string, meta: AnyMeta, map: Map<string, AnyMeta>): void {
     const existing = map.get(meta.name);

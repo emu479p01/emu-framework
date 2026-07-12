@@ -59,7 +59,7 @@ describe('system maintenance', () => {
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const response = await app.inject({ method: 'GET', url: '/api/system/update/latest', headers: auth });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ currentVersion: '0.0.1.1', latestVersion: '0.0.1.2', updateAvailable: true });
+    expect(response.json()).toMatchObject({ currentVersion: '0.0.1.2', latestVersion: '0.0.1.2', updateAvailable: false });
   });
 
   it('exposes an unauthenticated health check for container supervision', async () => {

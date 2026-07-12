@@ -23,7 +23,7 @@ const baseMenu: MenuMeta = { kind: 'menu', name: 'TESTAPP_Main', items: [{ form:
 
 function baseRegistry(): MetadataRegistry {
   const registry = new MetadataRegistry();
-  registry.registerApp(testManifest('testapp'), [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable, baseForm, baseMenu]);
+  registry.registerApp(testManifest('testapp', 'SYS'), [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable, baseForm, baseMenu]);
   return registry;
 }
 
@@ -35,6 +35,26 @@ const tableExt: TableExtensionMeta = {
 };
 
 describe('extensions', () => {
+  it.each([
+    ['ISV', 'SYS'], ['LOC', 'SYS'], ['LOC', 'ISV'], ['DEV', 'LOC'], ['CUS', 'DEV'],
+  ] as const)('allows %s to extend %s', (source, target) => {
+    const registry = new MetadataRegistry();
+    registry.registerApp(testManifest('base', target), [{ kind: 'table', name: 'BASE_T', fields: [] }]);
+    registry.registerApp({ ...testManifest('ext', source), dependsOn: ['base'] }, [{ kind: 'tableExtension', name: `EXT_ClientCustom_BASE_T_Extension`, table: 'BASE_T', fields: [{ name: 'added', type: 'string' }] }]);
+    expect(registry.getTable('BASE_T').fields[0].name).toBe('added');
+  });
+
+  it.each([['CUS', 'CUS'], ['LOC', 'DEV'], ['SYS', 'ISV']] as const)('rejects %s extending %s', (source, target) => {
+    const registry = new MetadataRegistry();
+    registry.registerApp(testManifest('base', target), [{ kind: 'table', name: 'BASE_T', fields: [] }]);
+    expect(() => registry.registerApp({ ...testManifest('ext', source), dependsOn: ['base'] }, [{ kind: 'tableExtension', name: 'EXT_ClientCustom_BASE_T_Extension', table: 'BASE_T' }])).toThrow(/must be higher/);
+  });
+
+  it('requires a dependency for cross-app extensions', () => {
+    const registry = new MetadataRegistry();
+    registry.registerApp(testManifest('base', 'SYS'), [{ kind: 'table', name: 'BASE_T', fields: [] }]);
+    expect(() => registry.registerApp(testManifest('ext', 'CUS'), [{ kind: 'tableExtension', name: 'EXT_ClientCustom_BASE_T_Extension', table: 'BASE_T' }])).toThrow(/must depend/);
+  });
   it('table extension adds fields to the effective table', () => {
     const registry = baseRegistry();
     registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [tableExt]);

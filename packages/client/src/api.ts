@@ -68,6 +68,7 @@ export interface MetadataPackagePreview {
   destructive: boolean;
   diff: { op: 'create' | 'update' | 'delete'; kind: string; name: string; highRisk?: boolean }[];
   diagnostics: { path: string; code: string; message: string }[];
+  warnings?: { path: string; code: string; message: string }[];
   package: {
     scope: { type: 'app'; app: string } | { type: 'model'; app: string; model: string };
     frameworkVersion: string;
