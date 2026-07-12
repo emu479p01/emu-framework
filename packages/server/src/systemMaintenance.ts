@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -8,9 +8,10 @@ import { fileURLToPath } from 'node:url';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { strFromU8, unzipSync, zipSync } from 'fflate';
 import { CORE_VERSION, type Kernel } from '@emu/core';
+import { fontCachePath } from './fontManager.js';
 
 const BACKUP_FORMAT = 'emuframework-backup';
-const BACKUP_SCHEMA_VERSION = 1;
+const BACKUP_SCHEMA_VERSION = 2;
 const MAX_BACKUP_BYTES = 512 * 1024 * 1024;
 const REPOSITORY = 'emu479p01/emu-framework';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -22,7 +23,7 @@ interface BackupManifest {
   schemaVersion: typeof BACKUP_SCHEMA_VERSION;
   frameworkVersion: string;
   createdAt: string;
-  files: { name: 'data.db' | 'designer.db'; sha256: string; bytes: number }[];
+  files: { name: string; sha256: string; bytes: number }[];
 }
 
 export interface UpdateJob {
@@ -110,17 +111,24 @@ async function createBackupArchive(kernel: Kernel, output?: string): Promise<{ a
     await kernel.designerDb.backup(designerPath);
     const data = new Uint8Array(await readFile(dataPath));
     const designer = new Uint8Array(await readFile(designerPath));
+    const payload: Record<string, Uint8Array> = { 'data.db': data, 'designer.db': designer };
+    const collectFonts = async (directory: string, prefix = 'fonts'): Promise<void> => {
+      if (!existsSync(directory)) return;
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const full = join(directory, entry.name); const name = `${prefix}/${entry.name}`;
+        if (entry.isDirectory()) await collectFonts(full, name);
+        else if (entry.isFile()) payload[name] = new Uint8Array(await readFile(full));
+      }
+    };
+    await collectFonts(fontCachePath());
     const manifest: BackupManifest = {
       format: BACKUP_FORMAT, schemaVersion: BACKUP_SCHEMA_VERSION, frameworkVersion: CORE_VERSION,
       createdAt: new Date().toISOString(),
-      files: [
-        { name: 'data.db', sha256: sha256(data), bytes: data.length },
-        { name: 'designer.db', sha256: sha256(designer), bytes: designer.length },
-      ],
+      files: Object.entries(payload).map(([name, bytes]) => ({ name, sha256: sha256(bytes), bytes: bytes.length })),
     };
     const archive = Buffer.from(zipSync({
       'manifest.json': new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
-      'data.db': data, 'designer.db': designer,
+      ...payload,
     }, { level: 6 }));
     if (output) { await mkdir(dirname(output), { recursive: true }); await writeFile(output, archive); }
     return { archive, manifest };
@@ -130,8 +138,7 @@ async function createBackupArchive(kernel: Kernel, output?: string): Promise<{ a
 function validateArchive(buffer: Buffer): { manifest: BackupManifest; files: Record<string, Uint8Array> } {
   if (buffer.length > MAX_BACKUP_BYTES) throw new Error('Backup exceeds the 512 MB safety limit');
   const files = unzipSync(buffer);
-  const allowed = new Set(['manifest.json', 'data.db', 'designer.db']);
-  for (const name of Object.keys(files)) if (!allowed.has(name) || name.includes('..') || name.includes('/') || name.includes('\\')) throw new Error('Backup contains an unsafe file path');
+  for (const name of Object.keys(files)) if ((name !== 'manifest.json' && name !== 'data.db' && name !== 'designer.db' && !/^fonts\/[A-Za-z0-9 _-]+\/[A-Za-z0-9._-]+$/.test(name)) || name.includes('..') || name.includes('\\')) throw new Error('Backup contains an unsafe file path');
   if (!files['manifest.json'] || !files['data.db'] || !files['designer.db']) throw new Error('Backup is missing required files');
   let manifest: BackupManifest;
   try { manifest = JSON.parse(strFromU8(files['manifest.json'])) as BackupManifest; }

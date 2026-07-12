@@ -146,11 +146,11 @@ watch(() => artifact.value.name, (n) => {
 // base object as <AppPrefix>_<BaseName>_Extension. If that extension already
 // exists, open it instead of silently overwriting on save.
 watch(
-  [selectedApp, () => (EXT_TARGET_FIELD[props.kind] ? artifact.value[EXT_TARGET_FIELD[props.kind]] : undefined)],
-  ([app, target]) => {
+  [selectedApp, selectedModel, () => (EXT_TARGET_FIELD[props.kind] ? artifact.value[EXT_TARGET_FIELD[props.kind]] : undefined)],
+  ([app, , target]) => {
     if (!isNew.value || !isExtension.value) return;
     if (!app || !target) { artifact.value.name = ''; return; }
-    const derived = deriveExtensionName(app as string, target as string);
+    const derived = deriveExtensionName(app as string, selectedModel.value, target as string);
     artifact.value.name = derived;
     if (designer.get(derived)) {
       message.info('An extension for this object already exists — opening it');
@@ -202,6 +202,37 @@ const menuOptions = computed(() => {
 const allMenuOptions = computed(() =>
   (meta.meta?.apps ?? []).flatMap((a) => a.menus.map((m) => ({ label: `${m.label ?? m.name} (${a.name})`, value: m.name }))),
 );
+
+const LAYER_ORDER = ['SYS', 'ISV', 'LOC', 'DEV', 'CUS'];
+function canExtendTarget(target: { app?: string; layer?: string }): boolean {
+  const source = LAYER_ORDER.indexOf(selectedLayer.value);
+  const targetLayer = LAYER_ORDER.indexOf(target.layer ?? 'SYS');
+  if (source <= targetLayer) return false;
+  if (!target.app || target.app === selectedApp.value) return true;
+  const visit = (appName: string, seen = new Set<string>()): boolean => {
+    if (seen.has(appName)) return false; seen.add(appName);
+    const app = designer.apps.find((entry) => entry.name === appName);
+    return (app?.dependsOn ?? []).some((dependency) => dependency === target.app || visit(dependency, seen));
+  };
+  return visit(selectedApp.value);
+}
+function extensionOptions(items: { name: string; label?: string; app?: string; layer?: string }[]) {
+  return items.filter(canExtendTarget).map((item) => ({ label: item.label ?? item.name, value: item.name }));
+}
+const extensionTableOptions = computed(() => extensionOptions(meta.meta?.tables ?? []));
+const extensionFormOptions = computed(() => extensionOptions(meta.meta?.forms ?? []));
+const extensionMenuOptions = computed(() => extensionOptions(meta.meta?.apps.flatMap((app) => app.menus) ?? []));
+const extensionEnumOptions = computed(() => extensionOptions(meta.meta?.enums ?? []));
+const extensionPrivilegeOptions = computed(() => extensionOptions(meta.meta?.privileges ?? []));
+const extensionDutyOptions = computed(() => extensionOptions(meta.meta?.duties ?? []));
+const extensionRoleOptions = computed(() => extensionOptions(meta.meta?.roles ?? []));
+const extensionScriptOptions = computed(() => extensionOptions(designer.artifacts.filter((entry) => entry.kind === 'script').map((entry) => entry.artifact as any)));
+const legacyExtensionWarning = computed(() => {
+  if (!isExtension.value || isNew.value) return '';
+  const target = artifact.value[EXT_TARGET_FIELD[props.kind]] as string | undefined;
+  const expected = deriveExtensionName(selectedApp.value, selectedModel.value, target ?? '');
+  return expected && artifact.value.name !== expected ? `Legacy extension name. New objects use '${expected}'. This object remains supported and is not renamed automatically.` : '';
+});
 
 const tableOptions = computed(() =>
   (meta.meta?.tables ?? []).map((t) => ({ label: t.name, value: t.name })),
@@ -268,7 +299,7 @@ async function save() {
     if (isExtension.value && isNew.value) {
       const target = art[EXT_TARGET_FIELD[props.kind]] as string | undefined;
       if (!target) { message.error('Select the object to extend'); return; }
-      art.name = deriveExtensionName(selectedApp.value, target);
+      art.name = deriveExtensionName(selectedApp.value, selectedModel.value, target);
     }
     if (!art.name) { message.error(isExtension.value ? 'Select the object to extend' : 'Name is required'); return; }
 
@@ -330,7 +361,7 @@ async function save() {
           await designer.save(menuArt);
         } else {
           // Append to existing menu via menuExtension
-          const extName = deriveExtensionName(selectedApp.value, selectedMenu.value);
+          const extName = deriveExtensionName(selectedApp.value, selectedModel.value, selectedMenu.value);
           const existingExt = designer.get(extName);
           const items = existingExt
             ? [...(existingExt.artifact.items as { label?: string; form: string }[])]
@@ -359,7 +390,7 @@ async function save() {
           (f) => f.table === art.table && (f.groups?.length ?? 0) > 0,
         );
         for (const f of targetForms) {
-          const extName = deriveExtensionName(selectedApp.value, f.name);
+          const extName = deriveExtensionName(selectedApp.value, selectedModel.value, f.name);
           const existingExt = designer.get(extName)?.artifact as { listFields?: string[]; groups?: { label?: string; fields: string[] }[] } | undefined;
           const listFields = [...new Set([...(existingExt?.listFields ?? []), ...fieldNames])];
           await designer.save({
@@ -465,6 +496,7 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
     </n-space>
 
     <n-alert v-if="saveError" type="error" title="Object could not be saved" closable style="margin-bottom:16px;white-space:pre-line" @close="saveError=''">{{ saveError }}</n-alert>
+    <n-alert v-if="legacyExtensionWarning" type="warning" title="Legacy extension name" style="margin-bottom:16px">{{ legacyExtensionWarning }}</n-alert>
     <n-tabs v-model:value="activeTab" type="line">
       <n-tab-pane v-if="DESIGN_KINDS.has(kind)" name="design" tab="Design">
         <n-form label-placement="top" style="max-width: 960px">
@@ -508,43 +540,43 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
               <!-- Form/Extension target selectors -->
               <n-space v-if="kind === 'form' || kind === 'tableExtension'" :size="24" style="margin-top: 8px">
                 <n-form-item label="Table" :required="true">
-                  <n-select v-model:value="(artifact.table as string)" :options="tableOptions"
+                  <n-select v-model:value="(artifact.table as string)" :options="extensionTableOptions"
                     :disabled="kind === 'tableExtension' && !isNew" style="min-width: 220px" filterable />
                 </n-form-item>
               </n-space>
               <n-space v-if="kind === 'formExtension'" :size="24" style="margin-top: 8px">
                 <n-form-item label="Form" required>
-                  <n-select v-model:value="(artifact.form as string)" :options="formOptions" style="min-width: 260px" filterable />
+                  <n-select v-model:value="(artifact.form as string)" :options="extensionFormOptions" style="min-width: 260px" filterable />
                 </n-form-item>
               </n-space>
               <n-space v-if="kind === 'menuExtension'" :size="24" style="margin-top: 8px">
                 <n-form-item label="Menu" required>
-                  <n-select v-model:value="(artifact.menu as string)" :options="allMenuOptions" style="min-width: 260px" filterable />
+                  <n-select v-model:value="(artifact.menu as string)" :options="extensionMenuOptions" style="min-width: 260px" filterable />
                 </n-form-item>
               </n-space>
               <n-space v-if="kind === 'enumExtension'" :size="24" style="margin-top: 8px">
                 <n-form-item label="Enum" required>
-                  <n-select v-model:value="(artifact.enum as string)" :options="enumOptions" style="min-width: 260px" filterable />
+                  <n-select v-model:value="(artifact.enum as string)" :options="extensionEnumOptions" style="min-width: 260px" filterable />
                 </n-form-item>
               </n-space>
               <n-space v-if="kind === 'privilegeExtension'" :size="24" style="margin-top: 8px">
                 <n-form-item label="Privilege" required>
-                  <n-select v-model:value="(artifact.privilege as string)" :options="privilegeOptions" style="min-width: 260px" filterable />
+                  <n-select v-model:value="(artifact.privilege as string)" :options="extensionPrivilegeOptions" style="min-width: 260px" filterable />
                 </n-form-item>
               </n-space>
               <n-space v-if="kind === 'dutyExtension'" :size="24" style="margin-top: 8px">
                 <n-form-item label="Duty" required>
-                  <n-select v-model:value="(artifact.duty as string)" :options="dutyOptions" style="min-width: 260px" filterable />
+                  <n-select v-model:value="(artifact.duty as string)" :options="extensionDutyOptions" style="min-width: 260px" filterable />
                 </n-form-item>
               </n-space>
               <n-space v-if="kind === 'roleExtension'" :size="24" style="margin-top: 8px">
                 <n-form-item label="Role" required>
-                  <n-select v-model:value="(artifact.role as string)" :options="roleOptions" style="min-width: 260px" filterable />
+                  <n-select v-model:value="(artifact.role as string)" :options="extensionRoleOptions" style="min-width: 260px" filterable />
                 </n-form-item>
               </n-space>
               <n-space v-if="kind === 'scriptExtension'" :size="24" style="margin-top: 8px">
                 <n-form-item label="Script" required>
-                  <n-select v-model:value="(artifact.script as string)" :options="scriptOptions" style="min-width: 260px" filterable />
+                  <n-select v-model:value="(artifact.script as string)" :options="extensionScriptOptions" style="min-width: 260px" filterable />
                 </n-form-item>
               </n-space>
             </n-card>

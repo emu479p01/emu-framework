@@ -682,6 +682,9 @@ async function onReload() {
         <n-alert v-if="packagePreview.diff.some((item) => item.highRisk)" type="warning" style="margin-bottom:16px">
           This package contains executable scripts. Import only packages from a trusted source.
         </n-alert>
+        <n-alert v-if="packagePreview.warnings?.length" type="warning" style="margin-bottom:16px">
+          <div v-for="warning in packagePreview.warnings" :key="warning.path">{{ warning.message }}</div>
+        </n-alert>
         <div class="package-summary">
           <strong>{{ packagePreview.package.scope.type === 'app' ? 'App' : 'Model' }}:</strong>
           {{ packagePreview.package.scope.app }}<template v-if="packagePreview.package.scope.type === 'model'"> / {{ packagePreview.package.scope.model }}</template>

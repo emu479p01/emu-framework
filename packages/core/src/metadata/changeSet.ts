@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Kernel, WebArtifactError } from '../kernel.js';
-import type { AnyMeta } from './types.js';
+import { EXTENSION_KINDS, canonicalExtensionName, type AnyMeta } from './types.js';
 import { validateMetadataChangeSet, type MetadataArtifact, type MetadataChangeSet, type SchemaDiagnostic } from './schema.js';
 
 export interface ArtifactDiff { op: 'create' | 'update' | 'delete'; kind: string; name: string; highRisk?: boolean }
@@ -11,6 +11,7 @@ export interface ChangeSetPreview {
   nextRevision: string;
   diagnostics: SchemaDiagnostic[];
   registryErrors: WebArtifactError[];
+  warnings: SchemaDiagnostic[];
   diff: ArtifactDiff[];
   schemaEffects: SchemaEffect[];
   destructive: boolean;
@@ -80,6 +81,13 @@ export function previewMetadataChangeSet(
     } else schemaEffects.push({ type: 'metadata-only', target: artifact.name });
   }
   const candidateArtifacts = [...byName.values()];
+  const warnings: SchemaDiagnostic[] = candidateArtifacts.flatMap((artifact) => {
+    if (!EXTENSION_KINDS.has(artifact.kind) || !('app' in artifact) || !artifact.app || !('model' in artifact) || !artifact.model) return [];
+    const targetField = ({ tableExtension: 'table', formExtension: 'form', menuExtension: 'menu', enumExtension: 'enum', privilegeExtension: 'privilege', dutyExtension: 'duty', roleExtension: 'role', scriptExtension: 'script' } as Record<string, string>)[artifact.kind];
+    const target = (artifact as unknown as Record<string, string>)[targetField];
+    const expected = canonicalExtensionName(artifact.app, artifact.model, target);
+    return artifact.name === expected ? [] : [{ path: `/artifacts/${artifact.name}/name`, code: 'legacy_extension_name', message: `Canonical extension name is '${expected}'` }];
+  });
   const registryErrors = diagnostics.length === 0 ? kernel.previewWebArtifacts(candidateArtifacts as unknown as AnyMeta[]) : [];
   const nextRevision = metadataRevision(candidateArtifacts);
   return {
@@ -88,6 +96,7 @@ export function previewMetadataChangeSet(
     nextRevision,
     diagnostics,
     registryErrors,
+    warnings,
     diff,
     schemaEffects,
     destructive: diff.some((item) => item.op === 'delete' && item.highRisk),

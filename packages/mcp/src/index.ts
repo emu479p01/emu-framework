@@ -34,7 +34,7 @@ function workspaceRoot(): string {
 }
 
 const server = new Server(
-  { name: 'emuframework-dev', version: '0.0.1.1' },
+  { name: 'emuframework-dev', version: '0.0.1.2' },
   { capabilities: { resources: {}, tools: {}, prompts: {} } },
 );
 

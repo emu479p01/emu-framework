@@ -1,11 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import pdfMake from 'pdfmake';
-// @ts-expect-error — no type declarations for this subpath; it's a plain font-descriptor map
-import helveticaFonts from 'pdfmake/standard-fonts/Helvetica.js';
 import type { DataContext, Kernel, ReportBandMeta, ReportElementMeta, ReportMeta, TableMeta } from '@emu/core';
 import { buildFilteredQuery } from './importExport.js';
+import { DEFAULT_REPORT_FONT, registerPdfFonts } from './fontManager.js';
 
-pdfMake.setFonts(helveticaFonts);
 // Fonts/images referenced in a report are always server-authored (never taken from request
 // input), so it's safe to allow local-file resolution; remote URLs stay disabled.
 pdfMake.setLocalAccessPolicy(() => true);
@@ -56,6 +54,7 @@ function renderElement(
   row: ReportRow | null,
   originX: number,
   originY: number,
+  availableFonts: Set<string>,
 ): unknown {
   const x = originX + el.x;
   const y = originY + el.y;
@@ -85,11 +84,13 @@ function renderElement(
     italics: style.italic,
     alignment: style.align,
     color: style.color,
+    font: style.fontFamily && availableFonts.has(style.fontFamily) ? style.fontFamily : undefined,
   };
 }
 
 /** Builds a pdfmake docDefinition by walking the report's bands top-to-bottom, tracking a running Y cursor. */
-function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: ReportMeta, mainRows: ReportRow[]): Record<string, unknown> {
+export function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: ReportMeta, mainRows: ReportRow[]): Record<string, unknown> {
+  const availableFonts = registerPdfFonts(kernel);
   const table = kernel.registry.getTable(report.dataSource);
   const margins = report.page?.margins ?? [40, 40, 40, 40];
   const [marginTop, , , marginLeft] = margins;
@@ -98,7 +99,7 @@ function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: ReportMeta
 
   const renderBand = (band: ReportBandMeta, row: ReportRow | null, bandTable: TableMeta) => {
     for (const el of band.elements) {
-      content.push(renderElement(kernel, ctx, bandTable, el, row, marginLeft, cursorY));
+      content.push(renderElement(kernel, ctx, bandTable, el, row, marginLeft, cursorY, availableFonts));
     }
     cursorY += band.height;
   };
@@ -132,7 +133,7 @@ function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: ReportMeta
     pageSize: report.page?.size ?? 'A4',
     pageOrientation: report.page?.orientation ?? 'portrait',
     pageMargins: margins,
-    defaultStyle: { font: 'Helvetica', fontSize: 10 },
+    defaultStyle: { font: report.defaultFont && availableFonts.has(report.defaultFont) ? report.defaultFont : DEFAULT_REPORT_FONT, fontSize: 10 },
     content,
   };
 }

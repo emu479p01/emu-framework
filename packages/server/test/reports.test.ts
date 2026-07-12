@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { AnyMeta, Kernel } from '@emu/core';
 import { buildServer } from '../src/server.js';
-import { formatReportFieldValue } from '../src/reports.js';
+import { buildDocDefinition, formatReportFieldValue } from '../src/reports.js';
 import { applyErpSample } from './fixtures/erpSample.js';
 
 const custListReport: AnyMeta = {
@@ -72,7 +72,7 @@ describe('report PDF rendering', () => {
 
   it('renders a list-style report to a valid PDF', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/report/ERP_CustListReport/pdf', headers: auth() });
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode, res.body).toBe(200);
     expect(res.headers['content-type']).toContain('application/pdf');
     expect(res.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
   });
@@ -84,6 +84,27 @@ describe('report PDF rendering', () => {
     expect(formatReportFieldValue(kernel, ctx, table, { custId: 999_999 }, 'custId')).toBe('999999');
   });
 
+  it('preserves copied ASCII and Unicode strings in the PDF document definition', () => {
+    const table = kernel.registry.getTable('ERP_CustTable');
+    const ctx = kernel.context();
+    expect(formatReportFieldValue(kernel, ctx, table, { name: 'Bomb' }, 'name')).toBe('Bomb');
+    expect(formatReportFieldValue(kernel, ctx, table, { name: 'ทดสอบ café' }, 'name')).toBe('ทดสอบ café');
+    const doc = buildDocDefinition(kernel, ctx, { ...custListReport, defaultFont: 'Missing Font' } as any, [{ accountNum: 'HO', name: 'Bomb' }]) as any;
+    expect(doc.defaultStyle.font).toBe('Roboto');
+    expect(doc.content.map((item: any) => item.text).filter(Boolean)).toContain('Bomb');
+    expect(doc.content.map((item: any) => item.text).filter(Boolean)).toContain('HO');
+  });
+
+  it('masks the stored Google Fonts API key and lists the offline default font', async () => {
+    const saved = await app.inject({ method: 'PUT', url: '/api/system/fonts/settings', headers: auth(), payload: { apiKey: 'example-secret-1234' } });
+    expect(saved.statusCode).toBe(200);
+    const settings = await app.inject({ method: 'GET', url: '/api/system/fonts/settings', headers: auth() });
+    expect(settings.json()).toEqual({ configured: true, maskedKey: '••••1234' });
+    expect(settings.body).not.toContain('example-secret');
+    const fonts = await app.inject({ method: 'GET', url: '/api/fonts', headers: auth() });
+    expect(fonts.json().fonts).toContainEqual({ family: 'Roboto', builtIn: true });
+  });
+
   it('rejects unauthenticated report requests', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/report/ERP_CustListReport/pdf' });
     expect(res.statusCode).toBe(401);
@@ -91,7 +112,7 @@ describe('report PDF rendering', () => {
 
   it('accepts declared parameters and rejects undeclared parameters', async () => {
     const ok = await app.inject({ method: 'GET', url: '/api/report/ERP_CustListReport/pdf?param.accountNum.eq=C001', headers: auth() });
-    expect(ok.statusCode).toBe(200);
+    expect(ok.statusCode, ok.body).toBe(200);
     const bad = await app.inject({ method: 'GET', url: '/api/report/ERP_CustListReport/pdf?param.name.eq=Acme', headers: auth() });
     expect(bad.statusCode).toBe(400);
     expect(bad.json().error).toMatch(/not declared/);

@@ -236,11 +236,22 @@ export class Kernel {
         if (step.kind === 'dir') fresh.loadAppFromDir(step.dir);
         else fresh.registerApp(step.manifest, step.artifacts);
       }
-      const names = [...new Set([...appArtifacts.keys()])].sort((a, b) => {
+      const unorderedNames = [...new Set([...appArtifacts.keys()])];
+      const names: string[] = [];
+      const visiting = new Set<string>();
+      const visit = (name: string) => {
+        if (names.includes(name) || visiting.has(name)) return;
+        visiting.add(name);
+        for (const dependency of appManifestByName.get(name)?.dependsOn ?? []) if (unorderedNames.includes(dependency)) visit(dependency);
+        visiting.delete(name); names.push(name);
+      };
+      for (const name of unorderedNames.sort((a, b) => {
         if (a === 'system') return -1;
         if (b === 'system') return 1;
-        return a.localeCompare(b);
-      });
+        const aLayer = LAYER_ORDER.indexOf(appManifestByName.get(a)?.models?.[0]?.layer ?? 'SYS');
+        const bLayer = LAYER_ORDER.indexOf(appManifestByName.get(b)?.models?.[0]?.layer ?? 'SYS');
+        return aLayer - bLayer || a.localeCompare(b);
+      })) visit(name);
       for (const appName of names) {
         const artifacts = (acceptedAppArtifacts.get(appName) ?? []).map((a) => ({ ...a } as AnyMeta));
         // an app with a declared manifest must register even while empty —

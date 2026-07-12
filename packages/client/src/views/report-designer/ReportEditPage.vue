@@ -33,7 +33,7 @@ interface ReportElement {
   height: number;
   text?: string;
   field?: string;
-  style?: { fontSize?: number; bold?: boolean; italic?: boolean; align?: 'left' | 'center' | 'right'; color?: string; borderWidth?: number };
+  style?: { fontSize?: number; bold?: boolean; italic?: boolean; align?: 'left' | 'center' | 'right'; color?: string; borderWidth?: number; fontFamily?: string };
 }
 type ReportBandKind = 'pageHeader' | 'header' | 'detail' | 'footer' | 'pageFooter';
 interface ReportBand {
@@ -53,6 +53,7 @@ interface ReportArtifact {
   model?: string;
   layer?: string;
   label?: string;
+  defaultFont?: string;
   dataSource: string;
   bands: ReportBand[];
   lineSources?: ReportLineSource[];
@@ -97,6 +98,19 @@ const report = reactive<ReportArtifact>(blank());
 const selectedApp = ref('');
 const selectedModel = ref('');
 const selectedLayer = ref('CUS');
+const fontOptions = ref<{ label: string; value: string }[]>([{ label: 'Roboto', value: 'Roboto' }]);
+
+async function loadFonts() {
+  const result = await api.get<{ defaultFont: string; fonts: { family: string; builtIn: boolean; variants?: Record<string, string> }[] }>('/api/fonts');
+  fontOptions.value = result.fonts.map((font) => ({ label: font.family, value: font.family }));
+  for (const font of result.fonts.filter((entry) => !entry.builtIn)) {
+    const id = `emu-font-${font.family.replace(/\W/g, '-')}`;
+    if (document.getElementById(id)) continue;
+    const style = document.createElement('style'); style.id = id;
+    style.textContent = `@font-face{font-family:${JSON.stringify(font.family)};src:url('/api/fonts/${encodeURIComponent(font.family)}/regular')}@font-face{font-family:${JSON.stringify(font.family)};src:url('/api/fonts/${encodeURIComponent(font.family)}/700');font-weight:700}`;
+    document.head.appendChild(style);
+  }
+}
 
 let idCounter = 0;
 function nextId(): string {
@@ -106,6 +120,7 @@ function nextId(): string {
 
 async function load() {
   if (!designer.loaded) await designer.load();
+  await loadFonts();
   if (isNew.value) {
     Object.assign(report, blank());
     selectedApp.value = (route.params.appName as string) ?? (route.query.app as string) ?? selectedApp.value;
@@ -292,6 +307,10 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
           <span style="width: 90px">Label</span>
           <n-input v-model:value="report.label" placeholder="Customer list" style="width: 240px" />
         </n-space>
+        <n-space align="center">
+          <span style="width: 110px">Default font</span>
+          <n-select v-model:value="report.defaultFont" :options="fontOptions" clearable placeholder="Roboto (system default)" style="width: 240px" />
+        </n-space>
         <n-space align="start">
           <span style="width:110px">Parameters</span>
           <div><n-space v-for="(parameter, pi) in report.parameters ?? []" :key="pi" style="margin-bottom:6px">
@@ -341,7 +360,7 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
               :key="el.id"
               class="report-element"
               :class="{ selected: selected?.list === bandFor(bk.kind)!.elements && selected?.index === i }"
-              :style="{ left: el.x + 'px', top: el.y + 'px', width: el.width + 'px', height: el.height + 'px', fontSize: (el.style?.fontSize ?? 10) + 'px', fontWeight: el.style?.bold ? 'bold' : 'normal', fontStyle: el.style?.italic ? 'italic' : 'normal', textAlign: el.style?.align ?? 'left', color: el.style?.color ?? '#000' }"
+              :style="{ left: el.x + 'px', top: el.y + 'px', width: el.width + 'px', height: el.height + 'px', fontFamily: el.style?.fontFamily ?? report.defaultFont ?? 'Roboto', fontSize: (el.style?.fontSize ?? 10) + 'px', fontWeight: el.style?.bold ? 'bold' : 'normal', fontStyle: el.style?.italic ? 'italic' : 'normal', textAlign: el.style?.align ?? 'left', color: el.style?.color ?? '#000' }"
               @pointerdown="(e) => { selectElement(bandFor(bk.kind)!.elements, i, mainFieldOptions); dragHandlers(el).onDragStart(e); }"
             >
               <span v-if="el.type === 'text'">{{ el.text }}</span>
@@ -395,6 +414,13 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
             placeholder="Bound field"
           />
           <template v-if="selectedElement.type === 'text' || selectedElement.type === 'field'">
+            <n-select
+              :value="selectedElement.style?.fontFamily"
+              :options="fontOptions"
+              clearable
+              :placeholder="`Report default (${report.defaultFont ?? 'Roboto'})`"
+              @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, fontFamily: v || undefined }; }"
+            />
             <n-space align="center">
               <span>Size</span>
               <n-input-number

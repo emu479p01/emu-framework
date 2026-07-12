@@ -96,6 +96,7 @@ const lineGridSchema = Type.Object({
 }, { additionalProperties: false });
 const reportStyleSchema = Type.Object({
   fontSize: Type.Optional(Type.Number()), bold: Type.Optional(Type.Boolean()), italic: Type.Optional(Type.Boolean()),
+  fontFamily: Type.Optional(Type.String({ minLength: 1 })),
   align: Type.Optional(Type.Union([Type.Literal('left'), Type.Literal('center'), Type.Literal('right')])),
   color: Type.Optional(Type.String()), borderWidth: Type.Optional(Type.Number()),
 }, { additionalProperties: false });
@@ -134,7 +135,7 @@ const artifactSchemas = [
   Type.Object({ kind: Type.Literal('script'), ...common, code: Type.String() }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('scriptExtension'), ...common, script: Type.String(), code: Type.String() }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('function'), ...common, code: Type.String(), privileges: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal('report'), ...common, dataSource: Type.String(), privileges: Type.Optional(Type.Array(Type.String())), page: Type.Optional(Type.Object({ size: Type.Optional(Type.Union([Type.Literal('A4'), Type.Literal('Letter')])), orientation: Type.Optional(Type.Union([Type.Literal('portrait'), Type.Literal('landscape')])), margins: Type.Optional(Type.Tuple([Type.Number(), Type.Number(), Type.Number(), Type.Number()])) }, { additionalProperties: false })), bands: Type.Array(reportBandSchema), lineSources: Type.Optional(Type.Array(Type.Object({ table: Type.String(), refField: Type.String(), bands: Type.Array(reportBandSchema) }, { additionalProperties: false }))), parameters: Type.Optional(Type.Array(reportParameterSchema)) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('report'), ...common, dataSource: Type.String(), defaultFont: Type.Optional(Type.String({ minLength: 1 })), privileges: Type.Optional(Type.Array(Type.String())), page: Type.Optional(Type.Object({ size: Type.Optional(Type.Union([Type.Literal('A4'), Type.Literal('Letter')])), orientation: Type.Optional(Type.Union([Type.Literal('portrait'), Type.Literal('landscape')])), margins: Type.Optional(Type.Tuple([Type.Number(), Type.Number(), Type.Number(), Type.Number()])) }, { additionalProperties: false })), bands: Type.Array(reportBandSchema), lineSources: Type.Optional(Type.Array(Type.Object({ table: Type.String(), refField: Type.String(), bands: Type.Array(reportBandSchema) }, { additionalProperties: false }))), parameters: Type.Optional(Type.Array(reportParameterSchema)) }, { additionalProperties: false }),
 ] as TSchema[];
 
 export const metadataArtifactSchema = Type.Union(artifactSchemas);

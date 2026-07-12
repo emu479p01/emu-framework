@@ -13,16 +13,16 @@ describe('appPrefix', () => {
 
 describe('deriveExtensionName', () => {
   it('prefixes cross-app targets with the extending app prefix', () => {
-    expect(deriveExtensionName('abc', 'ERP_CustTable')).toBe('ABC_ERP_CustTable_Extension');
-    expect(deriveExtensionName('abc', 'FW_UserForm')).toBe('ABC_FW_UserForm_Extension');
+    expect(deriveExtensionName('abc', 'Customizations', 'ERP_CustTable')).toBe('ABC_Customizations_ERP_CustTable_Extension');
+    expect(deriveExtensionName('abc', 'Local Model', 'FW_UserForm')).toBe('ABC_LocalModel_FW_UserForm_Extension');
   });
 
   it('does not repeat the prefix when extending an object of the same app', () => {
-    expect(deriveExtensionName('erp', 'ERP_CustTable')).toBe('ERP_CustTable_Extension');
+    expect(deriveExtensionName('erp', 'ClientCustom', 'ERP_CustTable')).toBe('ERP_ClientCustom_ERP_CustTable_Extension');
   });
 
   it('returns empty until a target is chosen', () => {
-    expect(deriveExtensionName('abc', '')).toBe('');
+    expect(deriveExtensionName('abc', 'Customizations', '')).toBe('');
   });
 });
 

@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { createMetadataPackage, mergeAppManifest, parseMetadataPackage } from './metadataPackage.js';
+import { missingReportFonts } from './fontManager.js';
 
 /**
  * Web Designer API — CRUD over runtime metadata artifacts stored in
@@ -174,9 +175,10 @@ export function registerDesignerRoutes(
     const candidates = loadStored(kernel).filter((candidate) => candidate.name !== artifact.name);
     candidates.push(artifact as MetadataArtifact);
     const error = kernel.previewWebArtifacts(candidates as unknown as AnyMeta[]).find((entry) => entry.name === artifact.name);
+    const fontWarnings = missingReportFonts(kernel, artifact);
     return {
       valid: !error,
-      diagnostics: error ? [{ path: '/', code: 'metadata', message: error.error }] : [],
+      diagnostics: [...(error ? [{ path: '/', code: 'metadata', message: error.error }] : []), ...fontWarnings.map((font) => ({ path: '/defaultFont', code: 'missing_font', message: `Font '${font}' is not installed; PDF rendering will use Roboto` }))],
       summary: {
         bands: artifact.bands.length,
         elements: artifact.bands.reduce((sum, band) => sum + band.elements.length, 0),
