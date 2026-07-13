@@ -3,7 +3,7 @@ import { computed, h, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   NButton, NCheckbox, NCheckboxGroup, NDataTable, NDropdown, NEmpty, NInput,
-  NPopover, NSpace, useMessage, type DataTableColumns, type DataTableSortState,
+  NPopover, NSelect, NSpace, useMessage, type DataTableColumns, type DataTableSortState,
 } from 'naive-ui';
 import { api, ApiError, type Row } from '../api';
 import { useMeta } from '../stores/meta';
@@ -23,6 +23,8 @@ const page = ref(1);
 const pageSize = 25;
 const search = ref('');
 const appliedSearch = ref('');
+const filterField = ref<string | null>(null);
+const appliedFilterField = ref<string | null>(null);
 const sortKey = ref('id');
 const sortDir = ref<'asc' | 'desc'>('desc');
 const visibleFields = ref<string[]>([]);
@@ -40,6 +42,15 @@ const listFields = computed(() => {
 });
 watch(listFields, (fields) => { visibleFields.value = fields.map((field) => field.name); }, { immediate: true });
 const shownFields = computed(() => listFields.value.filter((field) => visibleFields.value.includes(field.name)));
+const filterFields = computed(() => {
+  if (!form.value || !table.value) return [];
+  const names = form.value.filterFields ?? listFields.value.map((field) => field.name);
+  return names.map((name) => table.value!.fields.find((field) => field.name === name)).filter((field): field is NonNullable<typeof field> => Boolean(field));
+});
+const filterFieldOptions = computed(() => [
+  { label: 'All columns', value: '' },
+  ...filterFields.value.map((field) => ({ label: field.label ?? field.name, value: field.name })),
+]);
 const formPath = computed(() => props.appName ? `/app/${props.appName}` : '');
 function display(field: (typeof listFields.value)[number], row: Row): string {
   const value = row[field.name];
@@ -72,7 +83,8 @@ async function load() {
     await loadLookups();
     const result = await api.list(table.value.name, {
       limit: pageSize, offset: (page.value - 1) * pageSize, sort: `${sortKey.value}:${sortDir.value}`,
-      ...(appliedSearch.value ? { search: appliedSearch.value } : {}),
+      ...(appliedSearch.value && appliedFilterField.value ? { [`filter.${appliedFilterField.value}.contains`]: appliedSearch.value } : {}),
+      ...(appliedSearch.value && !appliedFilterField.value ? { search: appliedSearch.value } : {}),
     });
     rows.value = result.data; total.value = result.total;
   } catch (error) {
@@ -81,8 +93,8 @@ async function load() {
   } finally { loading.value = false; }
 }
 watch([() => props.formName, page, sortKey, sortDir], load, { immediate: true });
-function applySearch() { page.value = 1; appliedSearch.value = search.value.trim(); load(); }
-function clearSearch() { search.value = ''; appliedSearch.value = ''; page.value = 1; load(); }
+function applySearch() { page.value = 1; appliedSearch.value = search.value.trim(); appliedFilterField.value = filterField.value || null; load(); }
+function clearSearch() { search.value = ''; appliedSearch.value = ''; appliedFilterField.value = null; page.value = 1; load(); }
 function onSorterChange(sorter: DataTableSortState | DataTableSortState[] | null) {
   const selected = Array.isArray(sorter) ? sorter[0] : sorter;
   if (!selected?.columnKey || !selected.order) { sortKey.value = 'id'; sortDir.value = 'desc'; return; }
@@ -115,6 +127,7 @@ function back() { window.history.length > 1 ? router.back() : router.push(formPa
       </n-space>
     </div>
     <div class="list-tools">
+      <n-select v-model:value="filterField" :options="filterFieldOptions" placeholder="All columns" clearable />
       <n-input v-model:value="search" clearable placeholder="Search records…" data-testid="list-search" @keyup.enter="applySearch" @clear="clearSearch" />
       <n-button @click="applySearch">Search</n-button>
       <n-popover trigger="click" placement="bottom-end"><template #trigger><n-button>Columns</n-button></template><n-checkbox-group v-model:value="visibleFields"><n-space vertical><n-checkbox v-for="field in listFields" :key="field.name" :value="field.name" :label="field.label ?? field.name" /></n-space></n-checkbox-group></n-popover>
@@ -130,5 +143,5 @@ function back() { window.history.length > 1 ? router.back() : router.push(formPa
 </template>
 
 <style scoped>
-.list-heading{display:flex;justify-content:space-between;gap:16px;align-items:start;margin-bottom:22px}.list-heading h1{margin:0;font-size:30px;letter-spacing:-.04em}.list-heading p{margin:5px 0;color:var(--emu-muted)}.list-tools{display:grid;grid-template-columns:minmax(220px,420px) auto auto;gap:8px;margin-bottom:16px;padding:12px;background:#fff;border:1px solid var(--emu-border);border-radius:var(--emu-radius-lg);box-shadow:var(--emu-shadow-sm)}.desktop-table{border:1px solid var(--emu-border);border-radius:var(--emu-radius-lg);overflow:hidden;box-shadow:var(--emu-shadow-sm)}.list-empty{padding:70px 0;background:#fff;border:1px dashed var(--emu-border);border-radius:var(--emu-radius-lg)}.mobile-cards{display:none}.record-card{width:100%;border:1px solid var(--emu-border);background:#fff;border-radius:12px;padding:15px;text-align:left;margin-bottom:10px;box-shadow:var(--emu-shadow-sm)}.record-card span{display:block;margin-bottom:8px}.record-card small{display:block;color:var(--emu-muted);font-size:11px}@media(max-width:700px){.list-heading{display:block}.list-heading>.n-space{margin-top:12px}.list-tools{grid-template-columns:1fr auto}.list-tools>*:last-child{display:none}.desktop-table{display:none!important}.mobile-cards{display:block}}
+.list-heading{display:flex;justify-content:space-between;gap:16px;align-items:start;margin-bottom:22px}.list-heading h1{margin:0;font-size:30px;letter-spacing:-.04em}.list-heading p{margin:5px 0;color:var(--emu-muted)}.list-tools{display:grid;grid-template-columns:minmax(150px,220px) minmax(220px,420px) auto auto;gap:8px;margin-bottom:16px;padding:12px;background:#fff;border:1px solid var(--emu-border);border-radius:var(--emu-radius-lg);box-shadow:var(--emu-shadow-sm)}.desktop-table{border:1px solid var(--emu-border);border-radius:var(--emu-radius-lg);overflow:hidden;box-shadow:var(--emu-shadow-sm)}.list-empty{padding:70px 0;background:#fff;border:1px dashed var(--emu-border);border-radius:var(--emu-radius-lg)}.mobile-cards{display:none}.record-card{width:100%;border:1px solid var(--emu-border);background:#fff;border-radius:12px;padding:15px;text-align:left;margin-bottom:10px;box-shadow:var(--emu-shadow-sm)}.record-card span{display:block;margin-bottom:8px}.record-card small{display:block;color:var(--emu-muted);font-size:11px}@media(max-width:700px){.list-heading{display:block}.list-heading>.n-space{margin-top:12px}.list-tools{grid-template-columns:1fr}.list-tools>*:last-child{display:none}.desktop-table{display:none!important}.mobile-cards{display:block}}
 </style>

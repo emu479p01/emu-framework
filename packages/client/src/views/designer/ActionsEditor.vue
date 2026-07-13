@@ -36,6 +36,7 @@ function enableAllocation(action: FormAction, enabled: boolean) { action.picker!
         <n-form-item v-else-if="actionType(action) === 'report'" label="Report" required><n-select v-model:value="action.target" :options="reportOptions()" filterable /></n-form-item>
         <n-form-item v-else label="Function after selection" required><n-select v-model:value="action.target" :options="functionOptions()" filterable tag placeholder="Allocation function" /></n-form-item>
       </div>
+      <n-checkbox :checked="action.showOnCreate === true" @update:checked="(v) => action.showOnCreate = v || undefined">Show on new records</n-checkbox>
       <n-card v-if="actionType(action) === 'picker' && action.picker" size="small" title="Record picker settings" class="picker-settings">
         <div class="action-grid">
           <n-form-item label="Source table" required><n-select v-model:value="action.picker.table" :options="tableOptions()" filterable /></n-form-item>

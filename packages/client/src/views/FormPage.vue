@@ -133,7 +133,7 @@ function remove() {
       </h1><p>{{ dirty ? 'Unsaved changes' : 'All changes saved' }}</p></div>
       <n-space>
         <n-button
-          v-for="act in isNew ? [] : (form.actions ?? [])"
+          v-for="act in (form.actions ?? []).filter((action) => !isNew || action.showOnCreate)"
           :key="act.target ?? act.action"
           :loading="busy"
           :disabled="act.disabled"
@@ -165,6 +165,8 @@ function remove() {
                 <FieldControl
                   :field="field"
                   :create-mode="isNew"
+                  :record="record"
+                  :record-table="table.name"
                   :model-value="record[field.name]"
                   @update:model-value="(v) => (record[field.name] = v)"
                   @update:related="applyRelated"

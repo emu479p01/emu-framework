@@ -195,6 +195,38 @@ describe('MetadataRegistry', () => {
     };
     expect(() => registry2.registerApp(testManifest('a'),[ref, badTo])).toThrow(/copyFields 'to' unknown\/invalid field/);
   });
+
+  it('validates dynamic lookup filters and form filter columns', () => {
+    const registry = new MetadataRegistry();
+    const category: TableMeta = { kind: 'table', name: 'A_Category', fields: [{ name: 'status', type: 'string' }] };
+    const item: TableMeta = {
+      kind: 'table', name: 'A_Item', fields: [
+        { name: 'categoryId', type: 'reference', reference: { table: 'A_Category' } },
+        { name: 'name', type: 'string' },
+      ],
+    };
+    const line: TableMeta = {
+      kind: 'table', name: 'A_Line', fields: [
+        { name: 'categoryId', type: 'reference', reference: { table: 'A_Category' } },
+        { name: 'itemId', type: 'reference', reference: { table: 'A_Item', filters: [
+          { field: 'categoryId', operator: 'eq', value: { source: 'record', field: 'categoryId' } },
+          { field: 'name', operator: 'ne', value: { source: 'lookup', field: 'categoryId', lookupField: 'status' } },
+        ] } },
+      ],
+    };
+    const form: FormMeta = { kind: 'form', name: 'A_LineForm', table: 'A_Line', listFields: ['itemId'], filterFields: ['categoryId', 'itemId'] };
+    registry.registerApp(testManifest('a'), [category, item, line, form]);
+    expect(registry.getForm('A_LineForm').filterFields).toEqual(['categoryId', 'itemId']);
+
+    const invalid: TableMeta = {
+      ...line,
+      fields: [
+        line.fields[0],
+        { name: 'itemId', type: 'reference', reference: { table: 'A_Item', filters: [{ field: 'categoryId', operator: 'eq', value: { source: 'record', field: 'missing' } }] } },
+      ],
+    };
+    expect(() => new MetadataRegistry().registerApp(testManifest('a'), [category, item, invalid])).toThrow(/unknown current-record field/);
+  });
 });
 
 describe('syncSchema', () => {

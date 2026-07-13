@@ -81,6 +81,25 @@ describe('web designer API', () => {
     expect(meta.json().forms.map((f: { name: string }) => f.name)).toContain('WEB_WebProjectForm');
   });
 
+  it('creates metadata objects through the generic create-only API', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/designer/artifacts',
+      headers: admin,
+      payload: { kind: 'enum', name: 'WEB_ApiPriority', label: 'API priority', values: [{ name: 'Normal', value: 0 }] },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().artifact).toMatchObject({ kind: 'enum', name: 'WEB_ApiPriority' });
+
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/api/designer/artifacts',
+      headers: admin,
+      payload: { kind: 'enum', name: 'WEB_ApiPriority', values: [{ name: 'Other', value: 1 }] },
+    });
+    expect(duplicate.statusCode).toBe(409);
+  });
+
   it('rejects invalid artifacts with 422 and keeps the registry intact', async () => {
     const res = await app.inject({
       method: 'PUT',

@@ -32,7 +32,11 @@ export const fieldSchema = Type.Object({
     filters: Type.Optional(Type.Array(Type.Object({
       field: Type.String({ minLength: 1 }),
       operator: Type.Union(['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains'].map((v) => Type.Literal(v))),
-      value: Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Null()]),
+      value: Type.Union([
+        Type.String(), Type.Number(), Type.Boolean(), Type.Null(),
+        Type.Object({ source: Type.Literal('record'), field: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+        Type.Object({ source: Type.Literal('lookup'), field: Type.String({ minLength: 1 }), lookupField: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+      ]),
     }, { additionalProperties: false }))),
     onDelete: Type.Optional(Type.Union(['restrict', 'cascade', 'setNull'].map((v) => Type.Literal(v)))),
     copyFields: Type.Optional(Type.Array(Type.Object({ from: Type.String(), to: Type.String() }))),
@@ -87,7 +91,7 @@ const pickerSchema = Type.Object({
 const formActionSchema = Type.Object({
   label: Type.String({ minLength: 1 }), action: Type.Optional(Type.String({ minLength: 1 })),
   type: Type.Optional(Type.Union(['function', 'report', 'picker'].map((v) => Type.Literal(v)))),
-  target: Type.Optional(Type.String({ minLength: 1 })), privilege: Type.Optional(Type.String({ minLength: 1 })), disabled: Type.Optional(Type.Boolean()), picker: Type.Optional(pickerSchema),
+  target: Type.Optional(Type.String({ minLength: 1 })), privilege: Type.Optional(Type.String({ minLength: 1 })), disabled: Type.Optional(Type.Boolean()), showOnCreate: Type.Optional(Type.Boolean()), picker: Type.Optional(pickerSchema),
 }, { additionalProperties: false });
 const lineGridSchema = Type.Object({
   table: Type.String(), refField: Type.String(), fields: Type.Array(Type.String()),
@@ -120,13 +124,13 @@ const artifactSchemas = [
   Type.Object({ kind: Type.Literal('app'), name, label: Type.Optional(Type.String()), icon, dependsOn: Type.Optional(Type.Array(Type.String())), models: Type.Optional(Type.Array(Type.Object({ name, label: Type.Optional(Type.String()), layer }))) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('table'), ...common, fields: Type.Array(fieldSchema), titleField: Type.Optional(Type.String()), indexes: Type.Optional(Type.Array(indexSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('enum'), ...common, values: Type.Array(Type.Object({ name, value: Type.Integer(), label: Type.Optional(Type.String()) }, { additionalProperties: false })) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal('form'), ...common, table: Type.String(), actions: Type.Optional(Type.Array(formActionSchema)), listFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), lines: Type.Optional(Type.Array(lineGridSchema)) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('form'), ...common, table: Type.String(), actions: Type.Optional(Type.Array(formActionSchema)), listFields: Type.Optional(Type.Array(Type.String())), filterFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), lines: Type.Optional(Type.Array(lineGridSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('menu'), ...common, items: Type.Array(menuItemSchema) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('privilege'), ...common, tablePermissions: Type.Optional(Type.Array(tablePermissionSchema)), forms: Type.Optional(Type.Array(Type.String())), functions: Type.Optional(Type.Array(Type.String())), reports: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('duty'), ...common, privileges: Type.Array(Type.String()) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('role'), ...common, duties: Type.Optional(Type.Array(Type.String())), privileges: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('tableExtension'), ...common, table: Type.String(), fields: Type.Optional(Type.Array(fieldSchema)), indexes: Type.Optional(Type.Array(indexSchema)) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal('formExtension'), ...common, form: Type.String(), listFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), actions: Type.Optional(Type.Array(formActionSchema)) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('formExtension'), ...common, form: Type.String(), listFields: Type.Optional(Type.Array(Type.String())), filterFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), actions: Type.Optional(Type.Array(formActionSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('menuExtension'), ...common, menu: Type.String(), items: Type.Array(menuItemSchema) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('enumExtension'), ...common, enum: Type.String(), values: Type.Array(Type.Object({ name, value: Type.Integer(), label: Type.Optional(Type.String()) })) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('privilegeExtension'), ...common, privilege: Type.String(), tablePermissions: Type.Optional(Type.Array(tablePermissionSchema)), forms: Type.Optional(Type.Array(Type.String())), functions: Type.Optional(Type.Array(Type.String())), reports: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),

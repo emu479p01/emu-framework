@@ -679,6 +679,9 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
               <n-card size="small" title="List page columns (blank = all fields)">
                 <n-select v-model:value="(artifact.listFields as string[])" :options="fieldOptionsForFormTable" multiple placeholder="all fields" />
               </n-card>
+              <n-card size="small" title="Filter columns (blank = list page columns)">
+                <n-select v-model:value="(artifact.filterFields as string[])" :options="fieldOptionsForFormTable" multiple placeholder="list page columns" />
+              </n-card>
               <n-card size="small" title="Groups (detail layout)">
                 <n-space vertical :size="8">
                   <n-space v-for="(g, i) in formGroups" :key="i" align="center">

@@ -365,6 +365,39 @@ export function registerDesignerRoutes(
     },
   );
 
+  /** Create any supported metadata object using its wire representation.
+   * PUT remains the idempotent upsert API; POST is create-only and rejects
+   * duplicate names so integrations cannot overwrite objects accidentally. */
+  app.post<{ Body: MetadataArtifact }>(
+    '/api/designer/artifacts',
+    (req, reply) => {
+      requireDesigner(req);
+      const artifact = req.body;
+      if (!artifact || typeof artifact !== 'object') return reply.status(400).send({ error: 'A metadata artifact is required' });
+      const { kind, name } = artifact;
+      assertScope(req, { kind, name, app: 'app' in artifact ? artifact.app : undefined });
+      if (!DESIGNER_KINDS.has(kind)) return reply.status(400).send({ error: `Unsupported kind '${kind}'` });
+      const diagnostics = validateMetadataArtifact(artifact);
+      if (diagnostics.length > 0) return reply.status(422).send({ error: 'Artifact does not match the metadata schema', diagnostics });
+
+      const stored = loadStored(kernel);
+      if (stored.some((candidate) => candidate.name === name)) {
+        return reply.status(409).send({ error: `Artifact '${name}' already exists` });
+      }
+      const candidates = [...stored, artifact];
+      const errors = kernel.applyWebArtifacts(candidates as unknown as AnyMeta[]);
+      const own = errors.find((error) => error.name === name);
+      if (own) {
+        lastErrors = errors;
+        return reply.status(422).send({ error: own.error });
+      }
+      lastErrors = errors;
+      kernel.designerContext().newRecord('FW_WebArtifact').setMany({ kind, name, json: JSON.stringify(artifact) }).insert();
+      reply.status(201);
+      return { ok: true, artifact, errors };
+    },
+  );
+
   app.put<{ Params: { kind: string; name: string }; Body: AnyMeta }>(
     '/api/designer/artifacts/:kind/:name',
     (req, reply) => {

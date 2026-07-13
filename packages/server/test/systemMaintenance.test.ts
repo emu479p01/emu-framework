@@ -54,12 +54,12 @@ describe('system maintenance', () => {
 
   it('reports the latest stable release without accepting a client-selected version', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
-      tag_name: '0.0.1.2', name: 'Stable', body: 'Release notes', html_url: 'https://example.test/release',
+      tag_name: '0.1.0.0', name: 'Stable', body: 'Release notes', html_url: 'https://example.test/release',
       published_at: '2026-07-12T00:00:00Z', draft: false, prerelease: false,
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const response = await app.inject({ method: 'GET', url: '/api/system/update/latest', headers: auth });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ currentVersion: '0.0.1.2', latestVersion: '0.0.1.2', updateAvailable: false });
+    expect(response.json()).toMatchObject({ currentVersion: '0.1.0.0', latestVersion: '0.1.0.0', updateAvailable: false });
   });
 
   it('exposes an unauthenticated health check for container supervision', async () => {

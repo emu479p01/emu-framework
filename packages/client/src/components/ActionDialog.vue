@@ -75,7 +75,14 @@ async function confirm() {
   }
   busy.value = true; error.value = '';
   try {
-    await api.post(`/api/action/${encodeURIComponent(target.value)}`, { recordId: props.recordId, id: props.recordId, lineId: props.lineId, ...(type.value === 'picker' ? { selections } : {}) });
+    await api.post(`/api/action/${encodeURIComponent(target.value)}`, {
+      recordId: props.recordId,
+      id: props.recordId,
+      record: props.record,
+      lineId: props.lineId,
+      lineRecord: props.lineRecord,
+      ...(type.value === 'picker' ? { selections } : {}),
+    });
     message.success(`${props.action.label} completed`); emit('completed'); emit('update:show', false);
   } catch (e) { error.value = e instanceof ApiError ? e.message : String(e); }
   finally { busy.value = false; }

@@ -339,6 +339,7 @@ export class MetadataRegistry {
       const base = this.forms.get(e.form);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown form '${e.form}'`);
       if (e.listFields) base.listFields = [...(base.listFields ?? []), ...e.listFields];
+      if (e.filterFields) base.filterFields = [...new Set([...(base.filterFields ?? []), ...e.filterFields])];
       if (e.groups) base.groups = [...(base.groups ?? []), ...e.groups];
       if (e.actions) base.actions = [...(base.actions ?? []), ...e.actions];
     } else if (e.kind === 'menuExtension') {
@@ -430,6 +431,22 @@ export class MetadataRegistry {
             if (filter.field !== 'id' && !refTable.fields.some((x) => x.name === filter.field)) {
               throw new MetadataError(`${table.name}.${f.name}: lookup filter uses unknown field '${filter.field}' on '${refTable.name}'`);
             }
+            if (typeof filter.value === 'object' && filter.value !== null && 'source' in filter.value) {
+              const dynamicValue = filter.value;
+              const sourceField = table.fields.find((x) => x.name === dynamicValue.field);
+              if (!sourceField) {
+                throw new MetadataError(`${table.name}.${f.name}: lookup filter uses unknown current-record field '${dynamicValue.field}'`);
+              }
+              if (dynamicValue.source === 'lookup') {
+                if (sourceField.type !== 'reference' || !sourceField.reference) {
+                  throw new MetadataError(`${table.name}.${f.name}: lookup filter source '${sourceField.name}' must be a reference field`);
+                }
+                const sourceTable = this.tables.get(sourceField.reference.table);
+                if (dynamicValue.lookupField !== 'id' && !sourceTable?.fields.some((x) => x.name === dynamicValue.lookupField)) {
+                  throw new MetadataError(`${table.name}.${f.name}: lookup filter uses unknown field '${dynamicValue.lookupField}' on '${sourceTable?.name}'`);
+                }
+              }
+            }
           }
           if (f.mandatory && f.reference.onDelete === 'setNull') {
             throw new MetadataError(`${table.name}.${f.name}: mandatory references cannot use onDelete 'setNull'`);
@@ -452,6 +469,7 @@ export class MetadataRegistry {
         }
       };
       checkFields(form.listFields, 'listFields');
+      checkFields(form.filterFields, 'filterFields');
       for (const g of form.groups ?? []) checkFields(g.fields, 'group');
       for (const action of form.actions ?? []) this.validateFormAction(action, table, undefined, `Form '${form.name}'`);
       for (const line of form.lines ?? []) {
