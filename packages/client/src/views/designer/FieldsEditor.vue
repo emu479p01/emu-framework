@@ -12,7 +12,7 @@ export interface EditableField {
   allowEdit?: boolean;
   allowEditOnCreate?: boolean;
   enumName?: string;
-  reference?: { table: string; displayField?: string; displayFields?: string[]; onDelete?: 'restrict' | 'cascade' | 'setNull'; filters?: { field: string; operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains'; value: string }[]; copyFields?: { from: string; to: string }[] };
+  reference?: { table: string; displayField?: string; displayFields?: string[]; onDelete?: 'restrict' | 'cascade' | 'setNull'; filters?: { field: string; operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains'; value: string | { source: 'record'; field: string } | { source: 'lookup'; field: string; lookupField: string } }[]; copyFields?: { from: string; to: string }[] };
 }
 
 const props = defineProps<{ fields: EditableField[] }>();
@@ -32,6 +32,21 @@ function removeCopyField(field: EditableField, i: number) {
 function addFilter(field: EditableField) { field.reference?.filters?.push({ field: '', operator: 'eq', value: '' }) ?? (field.reference!.filters = [{ field: '', operator: 'eq', value: '' }]); }
 const DELETE_OPTIONS = ['restrict', 'cascade', 'setNull'].map((value) => ({ label: value, value }));
 const FILTER_OPERATORS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains'].map((value) => ({ label: value, value }));
+const FILTER_SOURCES = [{ label: 'Constant', value: 'constant' }, { label: 'Current record field', value: 'record' }, { label: 'Field from selected lookup', value: 'lookup' }];
+type EditableFilter = NonNullable<NonNullable<EditableField['reference']>['filters']>[number];
+function filterSource(filter: EditableFilter) { return typeof filter.value === 'object' ? filter.value.source : 'constant'; }
+function setFilterSource(filter: EditableFilter, source: 'constant' | 'record' | 'lookup') {
+  filter.value = source === 'constant' ? '' : source === 'record' ? { source, field: '' } : { source, field: '', lookupField: '' };
+}
+function currentFieldOptions(referencesOnly = false) {
+  return props.fields.filter((field) => !referencesOnly || field.type === 'reference').map((field) => ({ label: field.label ?? field.name, value: field.name }));
+}
+function selectedLookupFieldOptions(filter: EditableFilter) {
+  if (typeof filter.value !== 'object' || filter.value.source !== 'lookup') return [];
+  const dynamicValue = filter.value;
+  const source = props.fields.find((field) => field.name === dynamicValue.field);
+  return fieldOptionsFor(source?.reference?.table ?? '');
+}
 
 const TYPE_OPTIONS = ['string', 'int', 'real', 'boolean', 'date', 'datetime', 'enum', 'reference'].map(
   (t) => ({ label: t, value: t }),
@@ -102,7 +117,11 @@ function fieldIssues(field: EditableField): string[] {
         <div v-for="(filter, fi) in field.reference.filters ?? []" :key="`filter-${fi}`" class="setting-row">
           <n-select v-model:value="filter.field" :options="fieldOptionsFor(field.reference.table)" placeholder="Field" filterable />
           <n-select v-model:value="filter.operator" :options="FILTER_OPERATORS" style="width:110px" />
-          <n-input v-model:value="filter.value" placeholder="Value" />
+          <n-select :value="filterSource(filter)" :options="FILTER_SOURCES" @update:value="(v) => setFilterSource(filter, v)" />
+          <n-input v-if="filterSource(filter) === 'constant'" :value="typeof filter.value === 'string' ? filter.value : ''" placeholder="Value" @update:value="(v) => filter.value = v" />
+          <n-select v-else :value="typeof filter.value === 'object' ? filter.value.field : ''" :options="currentFieldOptions(filterSource(filter) === 'lookup')" placeholder="Current field" filterable @update:value="(v) => { if (typeof filter.value === 'object') filter.value.field = v }" />
+          <n-select v-if="typeof filter.value === 'object' && filter.value.source === 'lookup'" v-model:value="filter.value.lookupField" :options="selectedLookupFieldOptions(filter)" placeholder="Lookup field" filterable />
+          <span v-else></span>
           <n-button quaternary type="error" @click="field.reference.filters!.splice(fi, 1)">Remove</n-button>
         </div>
         <n-button size="small" @click="addFilter(field)">+ Lookup filter</n-button>
@@ -124,5 +143,5 @@ function fieldIssues(field: EditableField): string[] {
 </template>
 
 <style scoped>
-.field-card{border:1px solid var(--emu-border)}.field-card small{color:var(--emu-muted);font-weight:400}.field-main-grid,.relation-grid{display:grid;grid-template-columns:1.1fr .8fr 1.1fr;gap:16px}.field-options{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;padding:14px 16px;margin:0 0 16px;background:#f8fafc;border:1px solid var(--emu-border);border-radius:10px}.field-options small{display:block;margin:4px 0 0 24px;line-height:1.35}.relation-card{margin-top:8px;background:#fbfdff}.help,.on-delete-help{color:var(--emu-muted);font-size:13px;line-height:1.5;margin:0 0 14px}.relation-card h4{margin:16px 0 8px}.setting-row{display:grid;grid-template-columns:minmax(150px,1fr) 110px minmax(150px,1fr) auto;align-items:center;gap:8px;margin-bottom:8px}.special-setting{max-width:420px}@media(max-width:850px){.field-main-grid,.relation-grid,.field-options{grid-template-columns:1fr 1fr}.setting-row{grid-template-columns:1fr 1fr}.setting-row>span{display:none}}@media(max-width:560px){.field-main-grid,.relation-grid,.field-options,.setting-row{grid-template-columns:1fr}}
+.field-card{border:1px solid var(--emu-border)}.field-card small{color:var(--emu-muted);font-weight:400}.field-main-grid,.relation-grid{display:grid;grid-template-columns:1.1fr .8fr 1.1fr;gap:16px}.field-options{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;padding:14px 16px;margin:0 0 16px;background:#f8fafc;border:1px solid var(--emu-border);border-radius:10px}.field-options small{display:block;margin:4px 0 0 24px;line-height:1.35}.relation-card{margin-top:8px;background:#fbfdff}.help,.on-delete-help{color:var(--emu-muted);font-size:13px;line-height:1.5;margin:0 0 14px}.relation-card h4{margin:16px 0 8px}.setting-row{display:grid;grid-template-columns:minmax(130px,1fr) 100px minmax(150px,1fr) minmax(150px,1fr) minmax(150px,1fr) auto;align-items:center;gap:8px;margin-bottom:8px}.special-setting{max-width:420px}@media(max-width:1000px){.field-main-grid,.relation-grid,.field-options{grid-template-columns:1fr 1fr}.setting-row{grid-template-columns:1fr 1fr}.setting-row>span{display:none}}@media(max-width:560px){.field-main-grid,.relation-grid,.field-options,.setting-row{grid-template-columns:1fr}}
 </style>

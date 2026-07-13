@@ -27,8 +27,13 @@ export interface FieldReferenceMeta {
 export interface ReferenceFilterMeta {
   field: string;
   operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains';
-  value: string | number | boolean | null;
+  value: ReferenceFilterValueSource;
 }
+
+export type ReferenceFilterValueSource =
+  | string | number | boolean | null
+  | { source: 'record'; field: string }
+  | { source: 'lookup'; field: string; lookupField: string };
 
 export interface FieldMeta {
   name: string;
@@ -128,6 +133,8 @@ export interface FormAction {
   privilege?: string;
   /** Server-computed UI state; not normally authored in metadata. */
   disabled?: boolean;
+  /** Show this action before the record has been inserted. */
+  showOnCreate?: boolean;
   picker?: PickerActionMeta;
 }
 
@@ -161,6 +168,8 @@ export interface FormMeta {
   label?: string;
   actions?: FormAction[];
   listFields?: string[];
+  /** Columns users may select when filtering the list. Defaults to listFields. */
+  filterFields?: string[];
   groups?: FormGroupMeta[];
   lines?: FormLineGridMeta[];
   layer?: LayerType;
@@ -252,6 +261,7 @@ export interface FormExtensionMeta {
   app?: string;
   form: string;
   listFields?: string[];
+  filterFields?: string[];
   groups?: FormGroupMeta[];
   actions?: FormAction[];
   layer?: LayerType;

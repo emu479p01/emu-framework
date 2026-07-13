@@ -15,6 +15,8 @@ services:
       EMU_UPDATER_TOKEN: ${EMU_UPDATER_TOKEN:?Set EMU_UPDATER_TOKEN in .env}
     volumes:
       - emu-data:/data
+    networks:
+      - emu-network
     labels:
       com.emuframework.role: app
     restart: unless-stopped
@@ -32,7 +34,15 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - emu-data:/data
+    networks:
+      - emu-network
     restart: unless-stopped
 
 volumes:
   emu-data:
+    name: ${EMU_VOLUME_NAME:-emuframework-data}
+
+networks:
+  emu-network:
+    name: ${EMU_NETWORK_NAME:-emuframework-network}
+    driver: bridge

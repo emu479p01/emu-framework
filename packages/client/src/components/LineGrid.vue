@@ -95,6 +95,8 @@ const columns = computed<DataTableColumns<Row>>(() => [
         return h(FieldControl, {
           field: f,
           modelValue: draft.value[f.name],
+          record: draft.value,
+          recordTable: props.line.table,
           'onUpdate:modelValue': (v: unknown) => (draft.value[f.name] = v),
           'onUpdate:related': (patch: Record<string, unknown>) => applyIfBlank(draft.value, patch),
         });

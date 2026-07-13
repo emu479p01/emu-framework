@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 import { NInput, NInputNumber, NSwitch, NSelect, NDatePicker, NTooltip, type SelectOption } from 'naive-ui';
 import { api, type Row } from '../api';
 import { useMeta, type FieldMeta } from '../stores/meta';
@@ -9,6 +9,8 @@ const props = defineProps<{
   modelValue: unknown;
   disabled?: boolean;
   createMode?: boolean;
+  record?: Record<string, unknown>;
+  recordTable?: string;
 }>();
 const emit = defineEmits<{ 'update:modelValue': [value: unknown]; 'update:related': [patch: Record<string, unknown>] }>();
 
@@ -23,19 +25,48 @@ const enumOptions = computed<SelectOption[]>(() => {
   return (e?.values ?? []).map((v) => ({ label: v.label ?? v.name, value: v.value }));
 });
 
-onMounted(async () => {
+let lookupRequest = 0;
+async function loadReferenceOptions() {
+  const request = ++lookupRequest;
   if (props.field.type === 'reference' && props.field.reference) {
     const refTable = meta.table(props.field.reference.table);
     const displays = props.field.reference.displayFields ?? [props.field.reference.displayField ?? refTable?.titleField ?? 'id'];
     const params: Record<string, string | number> = { limit: 500 };
-    for (const filter of props.field.reference.filters ?? []) params[`filter.${filter.field}.${filter.operator}`] = String(filter.value ?? '');
+    for (const filter of props.field.reference.filters ?? []) {
+      let value: unknown = filter.value;
+      if (typeof value === 'object' && value !== null && 'source' in value) {
+        const dynamicValue = value as { source: 'record'; field: string } | { source: 'lookup'; field: string; lookupField: string };
+        const selected = props.record?.[dynamicValue.field];
+        if (selected === undefined || selected === null || selected === '') {
+          if (request === lookupRequest) refOptions.value = [];
+          return;
+        }
+        if (dynamicValue.source === 'record') value = selected;
+        else {
+          const sourceField = meta.field(props.recordTable ?? '', dynamicValue.field);
+          if (sourceField?.type !== 'reference' || !sourceField.reference) {
+            if (request === lookupRequest) refOptions.value = [];
+            return;
+          }
+          const sourceRecord = await api.get<Row>(`/api/data/${sourceField.reference.table}/${selected}`);
+          value = sourceRecord[dynamicValue.lookupField];
+        }
+      }
+      params[`filter.${filter.field}.${filter.operator}`] = String(value ?? '');
+    }
     const { data } = await api.list(props.field.reference.table, params);
+    if (request !== lookupRequest) return;
     refOptions.value = data.map((row) => ({
       label: displays.map((field) => String(row[field] ?? '')).join(' | '),
       value: row.id,
     }));
   }
-});
+}
+watch(
+  [() => props.field, () => JSON.stringify(props.record ?? {})],
+  loadReferenceOptions,
+  { immediate: true, deep: true },
+);
 
 function update(value: unknown) {
   emit('update:modelValue', value);

@@ -62,5 +62,5 @@ export function summarizeWorkspace(snapshot: WorkspaceSnapshot) {
   const kinds = Object.fromEntries(
     [...new Set(snapshot.artifacts.map((artifact) => artifact.kind))].sort().map((kind) => [kind, snapshot.artifacts.filter((artifact) => artifact.kind === kind).length]),
   );
-  return { version: '0.0.1.2', revision: snapshot.revision, apps, kinds, errors: snapshot.errors };
+  return { version: '0.1.0.0', revision: snapshot.revision, apps, kinds, errors: snapshot.errors };
 }
