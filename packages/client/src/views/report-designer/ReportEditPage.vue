@@ -54,6 +54,7 @@ interface ReportArtifact {
   layer?: string;
   label?: string;
   defaultFont?: string;
+  page?: { size?: 'A4' | 'Letter'; orientation?: 'portrait' | 'landscape'; margins?: [number, number, number, number] };
   dataSource: string;
   bands: ReportBand[];
   lineSources?: ReportLineSource[];
@@ -99,11 +100,25 @@ const selectedApp = ref('');
 const selectedModel = ref('');
 const selectedLayer = ref('CUS');
 const fontOptions = ref<{ label: string; value: string }[]>([{ label: 'Roboto', value: 'Roboto' }]);
+const THAI_TEXT = /[\u0E00-\u0E7F]/;
+const THAI_FONT = 'Noto Sans Thai';
+const canvasWidth = computed(() => {
+  const size = report.page?.size ?? 'A4';
+  const orientation = report.page?.orientation ?? 'portrait';
+  const dimensions = size === 'Letter' ? [612, 792] : [595, 842];
+  const pageWidth = orientation === 'landscape' ? dimensions[1] : dimensions[0];
+  const margins = report.page?.margins ?? [40, 40, 40, 40];
+  return Math.max(240, pageWidth - margins[0] - margins[2]);
+});
+function previewFont(element: ReportElement): string {
+  if (element.type === 'text' && THAI_TEXT.test(element.text ?? '')) return THAI_FONT;
+  return element.style?.fontFamily ?? report.defaultFont ?? 'Roboto';
+}
 
 async function loadFonts() {
   const result = await api.get<{ defaultFont: string; fonts: { family: string; builtIn: boolean; variants?: Record<string, string> }[] }>('/api/fonts');
   fontOptions.value = result.fonts.map((font) => ({ label: font.family, value: font.family }));
-  for (const font of result.fonts.filter((entry) => !entry.builtIn)) {
+  for (const font of result.fonts.filter((entry) => entry.family !== 'Roboto')) {
     const id = `emu-font-${font.family.replace(/\W/g, '-')}`;
     if (document.getElementById(id)) continue;
     const style = document.createElement('style'); style.id = id;
@@ -287,8 +302,8 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
 </script>
 
 <template>
-  <div>
-    <n-space justify="space-between" style="margin-bottom: 16px">
+  <div class="report-designer-page">
+    <n-space class="report-page-heading" justify="space-between" style="margin-bottom: 16px">
       <h2 style="margin: 0">{{ isNew ? 'New report' : report.name }}</h2>
       <n-space>
         <n-button @click="back">Back</n-button>
@@ -299,7 +314,7 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
 
     <n-tabs v-model:value="activeTab" type="line">
       <n-tab-pane name="design" tab="Design">
-    <n-card size="small" style="margin-bottom: 16px">
+    <n-card size="small" class="report-settings" style="margin-bottom: 16px">
       <n-space vertical>
         <n-space align="center">
           <span style="width: 110px">Name</span>
@@ -313,7 +328,7 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
         </n-space>
         <n-space align="start">
           <span style="width:110px">Parameters</span>
-          <div><n-space v-for="(parameter, pi) in report.parameters ?? []" :key="pi" style="margin-bottom:6px">
+          <div class="report-parameters"><n-space v-for="(parameter, pi) in report.parameters ?? []" :key="pi" class="report-parameter" style="margin-bottom:6px">
             <n-select v-model:value="parameter.field" :options="mainFieldOptions" placeholder="Field" style="width:180px" />
             <n-select v-model:value="parameter.operator" :options="parameterOperators" style="width:120px" />
             <n-input v-model:value="parameter.label" placeholder="Label" style="width:160px" />
@@ -334,8 +349,8 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
       </n-space>
     </n-card>
 
-    <div style="display: flex; gap: 16px; align-items: flex-start">
-      <div style="flex: 1; min-width: 0">
+    <div class="report-workspace">
+      <div class="report-design-main">
         <n-card v-for="bk in BAND_KINDS" :key="bk.kind" size="small" style="margin-bottom: 12px">
           <template #header>
             <n-space align="center">
@@ -350,17 +365,13 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
               </template>
             </n-space>
           </template>
-          <div
-            v-if="hasBand(bk.kind)"
-            class="report-band"
-            :style="{ height: bandFor(bk.kind)!.height + 'px' }"
-          >
+          <div v-if="hasBand(bk.kind)" class="report-canvas-scroll"><div class="report-band" :style="{ height: bandFor(bk.kind)!.height + 'px', width: canvasWidth + 'px' }">
             <div
               v-for="(el, i) in bandFor(bk.kind)!.elements"
               :key="el.id"
               class="report-element"
               :class="{ selected: selected?.list === bandFor(bk.kind)!.elements && selected?.index === i }"
-              :style="{ left: el.x + 'px', top: el.y + 'px', width: el.width + 'px', height: el.height + 'px', fontFamily: el.style?.fontFamily ?? report.defaultFont ?? 'Roboto', fontSize: (el.style?.fontSize ?? 10) + 'px', fontWeight: el.style?.bold ? 'bold' : 'normal', fontStyle: el.style?.italic ? 'italic' : 'normal', textAlign: el.style?.align ?? 'left', color: el.style?.color ?? '#000' }"
+              :style="{ left: el.x + 'px', top: el.y + 'px', width: el.width + 'px', height: el.height + 'px', fontFamily: previewFont(el), fontSize: (el.style?.fontSize ?? 10) + 'px', fontWeight: el.style?.bold ? 'bold' : 'normal', fontStyle: el.style?.italic ? 'italic' : 'normal', textAlign: el.style?.align ?? 'left', color: el.style?.color ?? '#000' }"
               @pointerdown="(e) => { selectElement(bandFor(bk.kind)!.elements, i, mainFieldOptions); dragHandlers(el).onDragStart(e); }"
             >
               <span v-if="el.type === 'text'">{{ el.text }}</span>
@@ -369,7 +380,7 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
               <div v-else-if="el.type === 'rect'" class="report-rect" />
               <div class="resize-handle" @pointerdown="(e) => dragHandlers(el).onResizeStart(e)" />
             </div>
-          </div>
+          </div></div>
         </n-card>
 
         <n-card size="small" title="Line sources (repeating child rows, e.g. invoice lines)">
@@ -377,7 +388,7 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
             <n-button size="tiny" @click="addLineSource">+ Add line source</n-button>
           </template>
           <div v-for="(line, li) in report.lineSources ?? []" :key="li" style="margin-bottom: 16px">
-            <n-space align="center" style="margin-bottom: 8px">
+            <n-space class="line-source-controls" align="center" style="margin-bottom: 8px">
               <n-select v-model:value="line.table" :options="tableOptions" placeholder="Child table" style="width: 200px" />
               <n-select v-model:value="line.refField" :options="refFieldOptions(line.table)" placeholder="Reference field back to main record" style="width: 260px" />
               <n-button size="tiny" @click="addElement(line.bands[0].elements, 'text', lineFieldOptions(line.table))">+ Text</n-button>
@@ -385,7 +396,7 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
               <n-button size="tiny" type="error" quaternary @click="removeLineSource(li)">Remove</n-button>
               <span>Height</span><n-input-number v-model:value="line.bands[0].height" :min="8" size="small" style="width:90px" />
             </n-space>
-            <div class="report-band" :style="{ height: line.bands[0].height + 'px' }">
+            <div class="report-canvas-scroll"><div class="report-band" :style="{ height: line.bands[0].height + 'px', width: canvasWidth + 'px' }">
               <div
                 v-for="(el, i) in line.bands[0].elements"
                 :key="el.id"
@@ -398,12 +409,12 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
                 <span v-else-if="el.type === 'field'">[{{ el.field ?? '?' }}]</span>
                 <div class="resize-handle" @pointerdown="(e) => dragHandlers(el).onResizeStart(e)" />
               </div>
-            </div>
+            </div></div>
           </div>
         </n-card>
       </div>
 
-      <n-card v-if="selectedElement" size="small" title="Element" style="width: 280px; flex-shrink: 0">
+      <n-card v-if="selectedElement" size="small" title="Element" class="report-property-panel">
         <n-space vertical>
           <div>Type: {{ selectedElement.type }}</div>
           <n-input v-if="selectedElement.type === 'text'" v-model:value="selectedElement.text" type="textarea" placeholder="Text" />
@@ -486,6 +497,7 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
 </template>
 
 <style scoped>
+.report-workspace{display:flex;gap:16px;align-items:flex-start}.report-design-main{flex:1;min-width:0}.report-property-panel{width:280px;flex-shrink:0}.report-canvas-scroll{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain}
 .report-band {
   position: relative;
   border: 1px dashed #ccc;
@@ -525,4 +537,5 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
   background: #2080f0;
   cursor: nwse-resize;
 }
+@media(max-width:700px){.report-page-heading{display:block!important}.report-page-heading>h2{font-size:21px;overflow-wrap:anywhere}.report-page-heading>.n-space{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:12px}.report-page-heading>.n-space :deep(.n-button){width:100%;min-height:44px}.report-settings :deep(.n-space:not(.n-space--vertical)){display:grid!important;grid-template-columns:1fr;width:100%}.report-settings :deep(.n-space:not(.n-space--vertical)>*){width:100%!important}.report-settings :deep(.n-space:not(.n-space--vertical)>span){width:auto!important}.report-parameter{padding:12px;border:1px solid var(--emu-border);border-radius:10px}.report-workspace{display:block}.report-property-panel{width:100%;margin-top:14px}.report-designer-page :deep(.n-card-header){flex-wrap:wrap;gap:8px}.report-designer-page :deep(.n-card-header__extra){margin-left:0}.report-designer-page :deep(.n-card-header .n-space){flex-wrap:wrap!important}.line-source-controls{display:grid!important;grid-template-columns:1fr}.line-source-controls :deep(.n-base-selection),.line-source-controls :deep(.n-input-number){width:100%!important}.report-designer-page :deep(.n-button){min-height:40px}.report-canvas-scroll{border-radius:4px}}
 </style>

@@ -486,8 +486,8 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
 </script>
 
 <template>
-  <div>
-    <n-space justify="space-between" style="margin-bottom: 16px">
+  <div class="designer-edit">
+    <n-space class="designer-edit-heading" justify="space-between" style="margin-bottom: 16px">
       <h2 style="margin: 0">{{ isNew ? `New ${kind}` : `${kind}: ${name}` }}</h2>
       <n-space>
         <n-button @click="back">Back</n-button>
@@ -801,3 +801,7 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
     </n-tabs>
   </div>
 </template>
+
+<style scoped>
+@media(max-width:700px){.designer-edit-heading{display:block!important}.designer-edit-heading h2{font-size:21px;overflow-wrap:anywhere}.designer-edit-heading>.n-space{display:grid!important;grid-template-columns:1fr 1fr;margin-top:12px}.designer-edit-heading :deep(.n-button){width:100%;min-height:44px}.designer-edit :deep(.n-card__content){padding:14px}.designer-edit :deep(.n-space:not(.n-space--vertical)){flex-wrap:wrap!important;width:100%}.designer-edit :deep(.n-form-item){width:100%!important;min-width:0!important}.designer-edit :deep(.n-select),.designer-edit :deep(.n-input),.designer-edit :deep(.n-input-number){width:100%!important;min-width:0!important;max-width:100%}.designer-edit :deep(.n-table){display:block;max-width:100%;overflow-x:auto}.designer-edit :deep(.n-table table){min-width:560px}.designer-edit :deep(.n-button){min-height:40px}.designer-edit :deep(.n-card-header){flex-wrap:wrap}}
+</style>

@@ -61,6 +61,18 @@ function startEdit(row: Row | null) {
   }
 }
 
+function isEditing(row: Row): boolean {
+  return editingId.value !== null && (row.id === editingId.value || (editingId.value === 0 && row.id === 0));
+}
+
+function displayValue(row: Row, fieldName: string): string {
+  const field = fields.value.find((entry) => entry.name === fieldName);
+  const value = row[fieldName];
+  if (field?.type === 'enum' && field.enumName) return meta.enumLabel(field.enumName, value);
+  if (field?.type === 'reference' && field.reference) return lookups.value[field.reference.table]?.[value as number] ?? String(value ?? '');
+  return String(value ?? '—');
+}
+
 async function saveDraft() {
   try {
     if (editingId.value === 0) {
@@ -114,9 +126,7 @@ const columns = computed<DataTableColumns<Row>>(() => [
     key: '_actions',
     width: 160,
     render: (row: Row) => {
-      const isEditing =
-        editingId.value !== null && (row.id === editingId.value || (editingId.value === 0 && row.id === 0));
-      if (isEditing) {
+      if (isEditing(row)) {
         return h(NSpace, {}, () => [
           h(NButton, { size: 'small', type: 'primary', onClick: saveDraft }, () => 'Save'),
           h(NButton, { size: 'small', onClick: () => (editingId.value = null) }, () => 'Cancel'),
@@ -148,7 +158,7 @@ const aggregateResults = computed(() =>
 </script>
 
 <template>
-  <n-card :title="table?.label ?? line.table" size="small">
+  <n-card :title="table?.label ?? line.table" size="small" class="line-grid-card">
     <template #header-extra>
       <n-space align="center">
         <span v-for="(agg, i) in aggregateResults" :key="i" style="color: var(--n-text-color-3); font-size: 13px">
@@ -157,7 +167,41 @@ const aggregateResults = computed(() =>
         <n-button size="small" data-testid="add-line" @click="startEdit(null)">Add line</n-button>
       </n-space>
     </template>
-    <n-data-table :columns="columns" :data="displayRows" :row-key="(r: Row) => r.id" size="small" />
+    <n-data-table class="line-desktop-table" :columns="columns" :data="displayRows" :row-key="(r: Row) => r.id" size="small" />
+    <div class="line-mobile-list">
+      <div v-for="row in displayRows" :key="row.id" class="line-mobile-card">
+        <div v-for="field in fields" :key="field.name" class="line-mobile-field">
+          <span class="line-mobile-label">{{ field.label ?? field.name }}</span>
+          <FieldControl
+            v-if="isEditing(row)"
+            :field="field"
+            :model-value="draft[field.name]"
+            :record="draft"
+            :record-table="line.table"
+            @update:model-value="(value) => draft[field.name] = value"
+            @update:related="(patch) => applyIfBlank(draft, patch)"
+          />
+          <span v-else class="line-mobile-value">{{ displayValue(row, field.name) }}</span>
+        </div>
+        <div class="line-mobile-actions">
+          <template v-if="isEditing(row)">
+            <n-button type="primary" @click="saveDraft">Save</n-button>
+            <n-button @click="editingId = null">Cancel</n-button>
+          </template>
+          <template v-else>
+            <n-button v-for="action in line.actions ?? []" :key="action.target ?? action.action" @click="launchAction(action, row)">{{ action.label }}</n-button>
+            <n-button @click="startEdit(row)">Edit</n-button>
+            <n-button quaternary type="error" @click="removeRow(row)">Delete</n-button>
+          </template>
+        </div>
+      </div>
+      <div v-if="displayRows.length === 0" class="line-mobile-empty">No data</div>
+    </div>
     <ActionDialog v-model:show="actionDialogOpen" :action="selectedAction" :record-id="headerId" :record="headerRecord" :line-id="selectedLine?.id" :line-record="selectedLine ?? undefined" @completed="load" />
   </n-card>
 </template>
+
+<style scoped>
+.line-mobile-list{display:none}.line-mobile-card{border:1px solid var(--emu-border);border-radius:12px;padding:14px;background:#fff}.line-mobile-card+.line-mobile-card{margin-top:10px}.line-mobile-field+.line-mobile-field{margin-top:12px}.line-mobile-label{display:block;color:var(--emu-muted);font-size:11px;font-weight:700;margin-bottom:5px}.line-mobile-value{display:block;overflow-wrap:anywhere;line-height:1.45}.line-mobile-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--emu-border)}.line-mobile-empty{padding:30px 10px;text-align:center;color:var(--emu-muted)}
+@media(max-width:700px){.line-desktop-table{display:none}.line-mobile-list{display:block}.line-grid-card :deep(.n-card-header){align-items:flex-start;gap:10px}.line-grid-card :deep(.n-card-header__extra){margin-left:0}.line-grid-card :deep(.n-card-header__extra .n-space){justify-content:flex-start!important;flex-wrap:wrap!important}.line-mobile-actions :deep(.n-button){min-height:44px}}
+</style>

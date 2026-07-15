@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { AnyMeta, Kernel } from '@emu/core';
 import { buildServer } from '../src/server.js';
-import { buildDocDefinition, formatReportFieldValue } from '../src/reports.js';
+import { buildDocDefinition, formatReportFieldValue, reportFontForText } from '../src/reports.js';
+import { THAI_REPORT_FONT } from '../src/fontManager.js';
 import { applyErpSample } from './fixtures/erpSample.js';
 
 const custListReport: AnyMeta = {
@@ -56,6 +57,13 @@ describe('report PDF rendering', () => {
       payload: { accountNum: 'C001', name: 'Acme Co' },
     });
     customerId = customer.json().id as number;
+    const thaiCustomer = await app.inject({
+      method: 'POST',
+      url: '/api/data/ERP_CustTable',
+      headers: auth(),
+      payload: { accountNum: 'TH001', name: 'บริษัท ทดสอบ จำกัด' },
+    });
+    expect(thaiCustomer.statusCode).toBe(201);
   });
 
   function loadArtifacts(kernel: Kernel): AnyMeta[] {
@@ -93,6 +101,11 @@ describe('report PDF rendering', () => {
     expect(doc.defaultStyle.font).toBe('Roboto');
     expect(doc.content.map((item: any) => item.text).filter(Boolean)).toContain('Bomb');
     expect(doc.content.map((item: any) => item.text).filter(Boolean)).toContain('HO');
+    const thaiDoc = buildDocDefinition(kernel, ctx, custListReport as any, [{ accountNum: 'TH001', name: 'โฟมล้างหน้า' }]) as any;
+    expect(thaiDoc.content.find((item: any) => item.text === 'โฟมล้างหน้า')?.font).toBe(THAI_REPORT_FONT);
+    expect(reportFontForText('โฟมล้างหน้า', 'Roboto', new Set(['Roboto', THAI_REPORT_FONT]))).toBe(THAI_REPORT_FONT);
+    expect(reportFontForText('Thai ไทย mixed', 'Roboto', new Set(['Roboto', THAI_REPORT_FONT]))).toBe(THAI_REPORT_FONT);
+    expect(reportFontForText('English only', 'Roboto', new Set(['Roboto', THAI_REPORT_FONT]))).toBe('Roboto');
   });
 
   it('masks the stored Google Fonts API key and lists the offline default font', async () => {
@@ -103,6 +116,11 @@ describe('report PDF rendering', () => {
     expect(settings.body).not.toContain('example-secret');
     const fonts = await app.inject({ method: 'GET', url: '/api/fonts', headers: auth() });
     expect(fonts.json().fonts).toContainEqual({ family: 'Roboto', builtIn: true });
+    expect(fonts.json().fonts).toContainEqual(expect.objectContaining({ family: THAI_REPORT_FONT, builtIn: true, subsets: ['latin', 'thai'] }));
+    const thaiFont = await app.inject({ method: 'GET', url: `/api/fonts/${encodeURIComponent(THAI_REPORT_FONT)}/regular`, headers: auth() });
+    expect(thaiFont.statusCode).toBe(200);
+    expect(thaiFont.headers['content-type']).toContain('font/ttf');
+    expect(thaiFont.rawPayload.length).toBeGreaterThan(30_000);
   });
 
   it('rejects unauthenticated report requests', async () => {

@@ -3,6 +3,6 @@ import { CORE_VERSION } from '../src/index.js';
 
 describe('core', () => {
   it('exports a version', () => {
-    expect(CORE_VERSION).toBe('0.1.0.0');
+    expect(CORE_VERSION).toBe('0.1.0.1');
   });
 });

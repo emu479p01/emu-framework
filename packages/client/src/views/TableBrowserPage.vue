@@ -16,4 +16,24 @@ async function save() { if (!table.value || !editing.value) return; try { const 
 function remove() { if (!editing.value?.id || !table.value) return; dialog.warning({ title: 'Delete record', content: 'Delete this record?', positiveText: 'Delete', negativeText: 'Cancel', onPositiveClick: async () => { await api.delete(`/api/data/${table.value!.name}/${editing.value!.id}`); editing.value = null; await load(); } }); }
 function back() { window.history.length > 1 ? router.back() : router.push('/'); }
 </script>
-<template><div><n-space justify="space-between" style="margin-bottom:16px"><h2 style="margin:0">Table Browser</h2><n-button @click="back">Back</n-button></n-space><n-card><n-space><n-select v-model:value="tableName" :options="tableOptions" filterable placeholder="Business table" style="width:280px"/><n-input v-model:value="search" placeholder="Search" style="width:260px" @keyup.enter="load"/><n-button @click="load">Search</n-button><n-button :disabled="!table" @click="editing = {}">New</n-button></n-space><n-data-table style="margin-top:16px" :columns="columns" :data="rows" :row-key="(r: Row) => r.id" /></n-card><n-modal :show="editing !== null" preset="card" :title="editing?.id ? `Edit #${editing.id}` : 'New record'" style="width:min(700px,95vw)" @update:show="(v) => { if (!v) editing = null }"><template v-if="editing && table"><div v-for="field in table.fields" :key="field.name" style="margin-bottom:12px"><label>{{ field.label ?? field.name }}</label><FieldControl :field="field" :model-value="editing[field.name]" :create-mode="!editing.id" @update:model-value="(v) => editing![field.name] = v" /></div><n-space justify="end"><n-button v-if="editing.id" type="error" quaternary @click="remove">Delete</n-button><n-button @click="editing = null">Cancel</n-button><n-button type="primary" @click="save">Save</n-button></n-space></template></n-modal></div></template>
+<template>
+  <div class="table-browser">
+    <div class="table-browser-heading"><h2>Table Browser</h2><n-button @click="back">Back</n-button></div>
+    <n-card>
+      <div class="table-browser-tools"><n-select v-model:value="tableName" :options="tableOptions" filterable placeholder="Business table"/><n-input v-model:value="search" placeholder="Search" @keyup.enter="load"/><n-button @click="load">Search</n-button><n-button :disabled="!table" @click="editing = {}">New</n-button></div>
+      <n-data-table class="table-browser-desktop" :columns="columns" :data="rows" :row-key="(r: Row) => r.id" />
+      <div class="table-browser-mobile">
+        <button v-for="row in rows" :key="row.id" class="table-browser-record" @click="editing = { ...row }"><span><small>ID</small>{{ row.id }}</span><span v-for="field in table?.fields" :key="field.name"><small>{{ field.label ?? field.name }}</small>{{ row[field.name] ?? '—' }}</span><strong>Edit</strong></button>
+        <div v-if="!rows.length" class="table-browser-empty">No data</div>
+      </div>
+    </n-card>
+    <n-modal :show="editing !== null" preset="card" :title="editing?.id ? `Edit #${editing.id}` : 'New record'" class="table-editor-modal" style="width:min(700px,95vw)" @update:show="(v) => { if (!v) editing = null }">
+      <template v-if="editing && table"><div v-for="field in table.fields" :key="field.name" class="table-editor-field"><label>{{ field.label ?? field.name }}</label><FieldControl :field="field" :model-value="editing[field.name]" :create-mode="!editing.id" @update:model-value="(v) => editing![field.name] = v" /></div><n-space class="table-editor-actions" justify="end"><n-button v-if="editing.id" type="error" quaternary @click="remove">Delete</n-button><n-button @click="editing = null">Cancel</n-button><n-button type="primary" @click="save">Save</n-button></n-space></template>
+    </n-modal>
+  </div>
+</template>
+
+<style scoped>
+.table-browser-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}.table-browser-heading h2{margin:0}.table-browser-tools{display:grid;grid-template-columns:280px minmax(180px,260px) auto auto;gap:8px}.table-browser-desktop{margin-top:16px}.table-browser-mobile{display:none}.table-editor-field{margin-bottom:12px}.table-editor-field label{display:block;margin-bottom:5px}.table-browser-record{display:block;width:100%;padding:14px;border:1px solid var(--emu-border);border-radius:12px;background:#fff;text-align:left}.table-browser-record+.table-browser-record{margin-top:10px}.table-browser-record span{display:block;margin-bottom:9px;overflow-wrap:anywhere}.table-browser-record small{display:block;color:var(--emu-muted);font-size:11px;font-weight:700}.table-browser-record strong{color:var(--emu-primary)}.table-browser-empty{text-align:center;color:var(--emu-muted);padding:30px}
+@media(max-width:700px){.table-browser-tools{grid-template-columns:1fr}.table-browser-tools :deep(.n-button){min-height:44px}.table-browser-desktop{display:none}.table-browser-mobile{display:block;margin-top:16px}.table-editor-modal{width:calc(100vw - 16px)!important}.table-editor-actions{display:grid!important;grid-template-columns:repeat(3,1fr)}.table-editor-actions :deep(.n-button){min-height:44px}}
+</style>
