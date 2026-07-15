@@ -22,7 +22,11 @@ const requiredText = new Map([
   ['Dockerfile.updater', [`node:${nodeVersion}`]],
   ['.github/workflows/ci.yml', [`node-version: ${nodeVersion}`]],
   ['.github/workflows/release.yml', [`node-version: ${nodeVersion}`, `version: ${pnpmVersion}`]],
-  ['launch.ps1', [`nodeVersion = \"${nodeVersion}\"`, `pnpmVersion = \"${pnpmVersion}\"`]],
+  ['launch.ps1', [`nodeVersion = \"${nodeVersion}\"`, `pnpmVersion = \"${pnpmVersion}\"`, `EmuFramework v${expected} Launcher`]],
+  ['start.cmd', [`EmuFramework v${expected}`]],
+  ['packages/core/src/metadata/workspace.ts', [`version: '${expected}'`]],
+  ['packages/cli/src/utils/templates.ts', [`version: '${expected}'`]],
+  ['packages/mcp/src/index.ts', [`version: '${expected}'`]],
   ['scripts/update-framework.ps1', [`node-v${nodeVersion}-win-x64`]],
   ['scripts/restore-database.ps1', [`node-v${nodeVersion}-win-x64`]],
 ]);

@@ -4,7 +4,7 @@
 
 EmuFramework is a metadata-driven TypeScript framework for building business applications. It includes a browser-based Designer, generated forms and lists, role-based security, SQLite storage, reporting, import/export, and Docker deployment.
 
-Current framework version: **0.1.0.0 (Beta)**
+Current framework version: **0.1.0.1 (Beta)**
 
 ## Quick start on Windows
 

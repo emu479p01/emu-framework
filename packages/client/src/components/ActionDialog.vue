@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue';
-import { NAlert, NButton, NDataTable, NInput, NInputNumber, NModal, NSpace, useMessage, type DataTableColumns } from 'naive-ui';
+import { NAlert, NButton, NCheckbox, NDataTable, NInput, NInputNumber, NModal, NSpace, useMessage, type DataTableColumns } from 'naive-ui';
 import type { FormAction, ReportMeta } from '@emu/core';
 import { api, ApiError, type Row } from '../api';
 import { useMeta } from '../stores/meta';
@@ -16,6 +16,19 @@ const target = computed(() => props.action?.target ?? props.action?.action ?? ''
 const report = computed<ReportMeta | undefined>(() => type.value === 'report' ? meta.meta?.reports.find((entry) => entry.name === target.value) : undefined);
 const picker = computed(() => props.action?.picker);
 const table = computed(() => picker.value ? meta.table(picker.value.table) : undefined);
+const pickerFieldNames = computed(() => {
+  const names = [...(picker.value?.columns ?? [])];
+  const available = picker.value?.allocation?.availableField;
+  if (available && !names.includes(available)) names.push(available);
+  return names;
+});
+function pickerLabel(name: string) { return table.value?.fields.find((field) => field.name === name)?.label ?? name; }
+function pickerValue(row: Row, name: string) {
+  const field = table.value?.fields.find((entry) => entry.name === name);
+  const value = row[name];
+  if (field?.type === 'enum' && field.enumName) return meta.enumLabel(field.enumName, value);
+  return String(value ?? '—');
+}
 function resolveFilterValue(value: NonNullable<NonNullable<FormAction['picker']>['filters']>[number]['value']): unknown {
   if (typeof value !== 'object' || value === null || !('source' in value)) return value;
   return value.source === 'line' ? props.lineRecord?.[value.field] : props.record?.[value.field];
@@ -51,6 +64,12 @@ const pickerColumns = computed<DataTableColumns<Row>>(() => {
 function updateChecked(keys: Array<string | number>) {
   selectedIds.value = keys.map(Number);
   for (const id of selectedIds.value) if (picker.value?.allocation && quantities.value[id] === undefined) quantities.value[id] = Math.min(1, Number(rows.value.find((row) => row.id === id)?.[picker.value.allocation.availableField] ?? 0));
+}
+function toggleMobileRow(row: Row, checked: boolean) {
+  const next = checked
+    ? (picker.value?.multiple === false ? [row.id] : [...new Set([...selectedIds.value, row.id])])
+    : selectedIds.value.filter((id) => id !== row.id);
+  updateChecked(next);
 }
 function parameterKey(parameter: NonNullable<ReportMeta['parameters']>[number]) { return `${parameter.field}:${parameter.operator ?? 'eq'}`; }
 async function confirm() {
@@ -90,19 +109,32 @@ async function confirm() {
 </script>
 
 <template>
-  <n-modal :show="show" preset="card" :title="action?.label ?? 'Action'" style="width:min(960px,96vw)" @update:show="(value) => emit('update:show', value)">
+  <n-modal :show="show" preset="card" :title="action?.label ?? 'Action'" class="action-modal" style="width:min(960px,96vw)" @update:show="(value) => emit('update:show', value)">
     <n-alert v-if="error" type="error" title="Action could not continue" style="margin-bottom:14px;white-space:pre-line">{{ error }}</n-alert>
     <template v-if="type === 'picker' && picker">
-      <n-space style="margin-bottom:12px"><n-input v-model:value="search" clearable placeholder="Search available records" style="width:320px" @keyup.enter="loadPicker" /><n-button :loading="busy" @click="loadPicker">Search</n-button></n-space>
-      <n-data-table :columns="pickerColumns" :data="rows" :loading="busy" :row-key="(row: Row) => row.id" :checked-row-keys="selectedIds" :max-height="460" @update:checked-row-keys="updateChecked" />
+      <n-space class="picker-search" style="margin-bottom:12px"><n-input v-model:value="search" clearable placeholder="Search available records" style="width:320px" @keyup.enter="loadPicker" /><n-button :loading="busy" @click="loadPicker">Search</n-button></n-space>
+      <n-data-table class="picker-desktop-table" :columns="pickerColumns" :data="rows" :loading="busy" :row-key="(row: Row) => row.id" :checked-row-keys="selectedIds" :max-height="460" @update:checked-row-keys="updateChecked" />
+      <div class="picker-mobile-list">
+        <label v-for="row in rows" :key="row.id" class="picker-mobile-card">
+          <n-checkbox :checked="selectedIds.includes(row.id)" @update:checked="(checked) => toggleMobileRow(row, checked)" />
+          <div class="picker-mobile-content">
+            <div v-for="name in pickerFieldNames" :key="name" class="picker-mobile-field"><small>{{ pickerLabel(name) }}</small><span>{{ pickerValue(row, name) }}</span></div>
+            <div v-if="picker.allocation" class="picker-mobile-field picker-mobile-quantity"><small>{{ picker.allocation.quantityLabel ?? 'Selected quantity' }}</small><n-input-number :value="quantities[row.id] ?? null" :min="0" :max="Number(row[picker.allocation.availableField] ?? 0)" :disabled="!selectedIds.includes(row.id)" @update:value="(value) => quantities[row.id] = value ?? 0" /></div>
+          </div>
+        </label>
+        <div v-if="!rows.length && !busy" class="picker-mobile-empty">No data</div>
+      </div>
     </template>
     <template v-else-if="type === 'report' && report">
       <div v-for="parameter in report.parameters ?? []" :key="parameterKey(parameter)" class="parameter-field"><label>{{ parameter.label ?? parameter.field }}<span v-if="parameter.required"> *</span></label><FieldControl :field="meta.field(report.dataSource, parameter.field)!" :model-value="reportValues[parameterKey(parameter)]" create-mode @update:model-value="(value) => reportValues[parameterKey(parameter)] = value" /></div>
       <n-alert v-if="!(report.parameters?.length)" type="info">This report has no parameters and is ready to open.</n-alert>
     </template>
     <n-alert v-else-if="type === 'function'" type="info">Run server function <b>{{ target }}</b> for the current record?</n-alert>
-    <template #footer><n-space justify="end"><n-button @click="emit('update:show', false)">Cancel</n-button><n-button type="primary" :loading="busy" @click="confirm">{{ type === 'report' ? 'Open PDF' : type === 'picker' ? 'Confirm selection' : 'Run function' }}</n-button></n-space></template>
+    <template #footer><n-space class="action-modal-footer" justify="end"><n-button @click="emit('update:show', false)">Cancel</n-button><n-button type="primary" :loading="busy" @click="confirm">{{ type === 'report' ? 'Open PDF' : type === 'picker' ? 'Confirm selection' : 'Run function' }}</n-button></n-space></template>
   </n-modal>
 </template>
 
-<style scoped>.parameter-field{margin-bottom:16px}.parameter-field label{display:block;font-weight:600;margin-bottom:6px}</style>
+<style scoped>
+.parameter-field{margin-bottom:16px}.parameter-field label{display:block;font-weight:600;margin-bottom:6px}.picker-mobile-list{display:none}.picker-mobile-card{display:flex;align-items:flex-start;gap:12px;border:1px solid var(--emu-border);border-radius:12px;padding:14px}.picker-mobile-card+.picker-mobile-card{margin-top:10px}.picker-mobile-content{flex:1;min-width:0}.picker-mobile-field+ .picker-mobile-field{margin-top:10px}.picker-mobile-field small{display:block;color:var(--emu-muted);font-size:11px;font-weight:700}.picker-mobile-field span{display:block;overflow-wrap:anywhere;margin-top:3px}.picker-mobile-quantity :deep(.n-input-number){width:100%;margin-top:5px}.picker-mobile-empty{text-align:center;color:var(--emu-muted);padding:30px}
+@media(max-width:700px){.action-modal{width:calc(100vw - 16px)!important;max-height:calc(100dvh - 16px)}.picker-search{display:grid!important;grid-template-columns:1fr auto}.picker-search :deep(.n-input){width:100%!important}.picker-desktop-table{display:none}.picker-mobile-list{display:block;max-height:55dvh;overflow:auto}.action-modal-footer{width:100%;display:grid!important;grid-template-columns:1fr 1fr}.action-modal-footer :deep(.n-button){min-height:44px}.picker-mobile-card :deep(.n-checkbox){margin-top:2px}}
+</style>

@@ -109,7 +109,7 @@ const failedColumns: DataTableColumns<{ row: number; error: string }> = [
 </script>
 
 <template>
-  <n-modal :show="show" preset="card" title="Import data" style="width: 640px" @update:show="(v: boolean) => !v && close()">
+  <n-modal :show="show" preset="card" title="Import data" class="import-modal" style="width:min(640px,calc(100vw - 24px))" @update:show="(v: boolean) => !v && close()">
     <n-spin :show="loading">
       <div v-if="step === 'pick'">
         <n-upload
@@ -130,7 +130,7 @@ const failedColumns: DataTableColumns<{ row: number; error: string }> = [
 
       <div v-else-if="step === 'map' && preview">
         <n-text depth="3">{{ preview.rowCount }} rows detected</n-text>
-        <table style="width: 100%; margin-top: 12px; border-collapse: collapse">
+        <table class="mapping-table">
           <thead>
             <tr>
               <th style="text-align: left; padding: 4px 8px">Column</th>
@@ -166,14 +166,7 @@ const failedColumns: DataTableColumns<{ row: number; error: string }> = [
           />
         </n-space>
 
-        <n-data-table
-          v-if="preview.sampleRows.length > 0"
-          :columns="sampleColumns"
-          :data="preview.sampleRows"
-          size="small"
-          style="margin-top: 16px"
-          max-height="200"
-        />
+        <div v-if="preview.sampleRows.length > 0" class="import-table-scroll"><n-data-table :columns="sampleColumns" :data="preview.sampleRows" size="small" max-height="200" /></div>
 
         <n-space justify="end" style="margin-top: 16px">
           <n-button @click="step = 'pick'">Back</n-button>
@@ -185,14 +178,7 @@ const failedColumns: DataTableColumns<{ row: number; error: string }> = [
         <n-alert :type="result.failed.length > 0 ? 'warning' : 'success'">
           Inserted {{ result.inserted }}, updated {{ result.updated }}, skipped {{ result.skipped }}.
         </n-alert>
-        <n-data-table
-          v-if="result.failed.length > 0"
-          :columns="failedColumns"
-          :data="result.failed"
-          size="small"
-          style="margin-top: 16px"
-          max-height="240"
-        />
+        <div v-if="result.failed.length > 0" class="import-table-scroll"><n-data-table :columns="failedColumns" :data="result.failed" size="small" max-height="240" /></div>
         <n-space justify="end" style="margin-top: 16px">
           <n-button type="primary" @click="close">Done</n-button>
         </n-space>
@@ -200,3 +186,8 @@ const failedColumns: DataTableColumns<{ row: number; error: string }> = [
     </n-spin>
   </n-modal>
 </template>
+
+<style scoped>
+.mapping-table{width:100%;margin-top:12px;border-collapse:collapse}.import-table-scroll{margin-top:16px;overflow-x:auto}.import-table-scroll :deep(.n-data-table){min-width:520px}
+@media(max-width:700px){.import-modal{width:calc(100vw - 16px)!important}.mapping-table,.mapping-table tbody,.mapping-table tr,.mapping-table td{display:block}.mapping-table thead{display:none}.mapping-table tr{padding:12px;border:1px solid var(--emu-border);border-radius:10px}.mapping-table tr+tr{margin-top:8px}.mapping-table td{padding:0!important}.mapping-table td:first-child{font-weight:700;margin-bottom:7px;overflow-wrap:anywhere}.import-modal :deep(.n-upload-dragger){padding:20px 12px}.import-modal :deep(.n-button){min-height:44px}}
+</style>

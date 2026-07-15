@@ -141,5 +141,6 @@ body { margin:0; color:var(--emu-text); background:var(--emu-bg); font-family:In
 .user-button { max-width:220px; }
 .page-content { flex:1 1 auto; min-height:0; overflow-x:hidden; overflow-y:auto; padding:32px; background:radial-gradient(circle at 100% 0,rgba(99,102,241,.055),transparent 28%),var(--emu-bg); }
 :focus-visible { outline:3px solid rgba(79,70,229,.45) !important; outline-offset:2px; }
-@media (max-width:899px) { .topbar{padding:0 14px}.page-content{padding:18px 14px}.user-button{max-width:145px} }
+@media (max-width:899px) { .topbar{padding:0 10px;gap:8px}.page-content{padding:16px 10px}.user-button{max-width:130px;min-width:0}.user-button .n-button__content{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.crumb{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.n-modal{max-width:calc(100vw - 16px)} }
+@media (max-width:380px) { .topbar{height:60px;flex-basis:60px}.page-content{padding:12px 8px}.user-button{max-width:108px} }
 </style>

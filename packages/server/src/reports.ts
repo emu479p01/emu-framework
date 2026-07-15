@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import pdfMake from 'pdfmake';
 import type { DataContext, Kernel, ReportBandMeta, ReportElementMeta, ReportMeta, TableMeta } from '@emu/core';
 import { buildFilteredQuery } from './importExport.js';
-import { DEFAULT_REPORT_FONT, registerPdfFonts } from './fontManager.js';
+import { DEFAULT_REPORT_FONT, THAI_REPORT_FONT, registerPdfFonts } from './fontManager.js';
 
 // Fonts/images referenced in a report are always server-authored (never taken from request
 // input), so it's safe to allow local-file resolution; remote URLs stay disabled.
@@ -15,6 +15,12 @@ export interface ReportRouteDeps {
 }
 
 type ReportRow = { [field: string]: unknown };
+const THAI_TEXT = /[\u0E00-\u0E7F]/;
+
+export function reportFontForText(text: string, requestedFont: string | undefined, availableFonts: Set<string>): string | undefined {
+  if (THAI_TEXT.test(text)) return THAI_REPORT_FONT;
+  return requestedFont && availableFonts.has(requestedFont) ? requestedFont : undefined;
+}
 
 export function formatReportFieldValue(kernel: Kernel, ctx: DataContext, table: TableMeta, row: ReportRow | null, fieldName: string): string {
   if (!row) return '';
@@ -84,7 +90,7 @@ function renderElement(
     italics: style.italic,
     alignment: style.align,
     color: style.color,
-    font: style.fontFamily && availableFonts.has(style.fontFamily) ? style.fontFamily : undefined,
+    font: reportFontForText(text, style.fontFamily, availableFonts),
   };
 }
 
