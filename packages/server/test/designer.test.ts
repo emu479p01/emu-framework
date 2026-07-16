@@ -6,19 +6,21 @@ import { buildServer } from '../src/server.js';
 import { hashPassword } from '../src/auth.js';
 import type { Kernel } from '@emu/core';
 import { applyErpSample } from './fixtures/erpSample.js';
+import { completeTestSetup, TEST_SETUP_CODE } from './setupHelper.js';
 
 describe('web designer API', () => {
   let app: FastifyInstance;
   let admin: { cookie: string };
 
   beforeAll(async () => {
-    app = buildServer();
+    app = buildServer({ setupCode: TEST_SETUP_CODE });
     await app.ready();
+    await completeTestSetup(app);
     applyErpSample((app as unknown as { kernel: Kernel }).kernel);
     const res = await app.inject({
       method: 'POST',
       url: '/api/login',
-      payload: { username: 'admin', password: 'admin' },
+      payload: { username: 'admin', password: 'Admin-password-123' },
     });
     admin = { cookie: (res.headers['set-cookie'] as string).split(';')[0] };
   });

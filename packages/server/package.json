@@ -1,6 +1,6 @@
 {
   "name": "@emu/server",
-  "version": "0.1.0.1",
+  "version": "0.1.0.2",
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
@@ -24,10 +24,12 @@
     "exceljs": "^4.4.0",
     "fastify": "^4.28.1",
     "fflate": "0.8.3",
+    "nodemailer": "^9.0.3",
     "pdfmake": "^0.3.11"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/pdfmake": "^0.3.3",
     "nodemon": "^3.1.4",
     "tsx": "^4.19.0",

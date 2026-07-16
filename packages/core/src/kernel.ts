@@ -12,7 +12,39 @@ import { HookRegistry } from './data/hooks.js';
 import { DataContext, type SessionInfo } from './data/context.js';
 import { allowAll, type SecurityPolicy } from './security/policy.js';
 
-export type ActionHandler = (ctx: DataContext, args: { [key: string]: unknown }) => unknown;
+export interface HttpRequestInput {
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  json?: unknown;
+  text?: string;
+  timeoutMs?: number;
+}
+
+export interface HttpResponseOutput {
+  status: number;
+  ok: boolean;
+  headers: Record<string, string>;
+  text: string;
+  json: unknown | null;
+}
+
+export interface EmailSendInput {
+  to: string | string[];
+  cc?: string | string[];
+  bcc?: string | string[];
+  replyTo?: string;
+  subject: string;
+  text?: string;
+  html?: string;
+}
+
+export interface FunctionServices {
+  http: { request(input: HttpRequestInput): Promise<HttpResponseOutput> };
+  email: { send(input: EmailSendInput): Promise<{ messageId: string; accepted: string[]; rejected: string[] }> };
+}
+
+export type ActionHandler = (ctx: DataContext, args: { [key: string]: unknown }, services?: FunctionServices) => unknown;
 
 type BootStep =
   | { kind: 'dir'; dir: string }
@@ -73,6 +105,7 @@ export class Kernel {
   readonly events = new EventBus();
   readonly hooks = new HookRegistry();
   readonly actions = new Map<string, ActionHandler>();
+  readonly actionModes = new Map<string, 'transactional' | 'async'>();
 
   private _registry = new MetadataRegistry();
   private bootSteps: BootStep[] = [];
@@ -325,6 +358,7 @@ export class Kernel {
     this.events.clear();
     this.hooks.clear();
     this.actions.clear();
+    this.actionModes.clear();
     // native (TypeScript) logic must survive web-script rebuilds — e.g. the
     // FW_User password-hashing hook; without this any Designer save wipes it
     for (const fn of this.nativeLogic) fn(this);
@@ -398,8 +432,13 @@ export class Kernel {
     for (const f of functions) {
       if (!f.code) continue;
       try {
-        const fn = new Function('ctx', 'args', 'kernel', f.code);
-        this.actions.set(f.name, (ctx, args) => fn(ctx, args, this));
+        const mode = f.executionMode ?? 'transactional';
+        const FunctionCtor = mode === 'async'
+          ? Object.getPrototypeOf(async function () {}).constructor as FunctionConstructor
+          : Function;
+        const fn = new FunctionCtor('ctx', 'args', 'kernel', 'services', f.code);
+        this.actions.set(f.name, (ctx, args, services) => fn(ctx, args, this, services));
+        this.actionModes.set(f.name, mode);
       } catch (err) {
         errors.push({
           kind: 'function',

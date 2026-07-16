@@ -349,6 +349,8 @@ export interface FunctionMeta {
   label?: string;
   /** Function body compiled as (ctx, args) with `kernel` also in scope; registered as a kernel action. */
   code: string;
+  /** Transactional is synchronous and atomic; async supports await and external integrations. */
+  executionMode?: 'transactional' | 'async';
   privileges?: string[];
   layer?: LayerType;
   model?: string;

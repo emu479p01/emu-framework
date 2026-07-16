@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { unzipSync } from 'fflate';
 import { buildServer } from '../src/server.js';
 import { hashPassword } from '../src/auth.js';
+import { completeTestSetup, TEST_SETUP_CODE } from './setupHelper.js';
 
 function multipart(file: Buffer) {
   const boundary = `----EmuBackup${Date.now()}`;
@@ -21,9 +22,10 @@ describe('system maintenance', () => {
   let auth: { cookie: string };
   let clerkAuth: { cookie: string };
   beforeAll(async () => {
-    app = buildServer();
+    app = buildServer({ setupCode: TEST_SETUP_CODE });
     await app.ready();
-    const login = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'admin', password: 'admin' } });
+    await completeTestSetup(app);
+    const login = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'admin', password: 'Admin-password-123' } });
     auth = { cookie: (login.headers['set-cookie'] as string).split(';')[0] };
     const ctx = (app as FastifyInstance & { kernel: any }).kernel.context();
     ctx.newRecord('FW_User').setMany({ username: 'clerk', displayName: 'Clerk', passwordHash: hashPassword('clerk'), enabled: true }).insert();
@@ -54,12 +56,12 @@ describe('system maintenance', () => {
 
   it('reports the latest stable release without accepting a client-selected version', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
-      tag_name: '0.1.0.1', name: 'Stable', body: 'Release notes', html_url: 'https://example.test/release',
+      tag_name: '0.1.0.2', name: 'Stable', body: 'Release notes', html_url: 'https://example.test/release',
       published_at: '2026-07-12T00:00:00Z', draft: false, prerelease: false,
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const response = await app.inject({ method: 'GET', url: '/api/system/update/latest', headers: auth });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ currentVersion: '0.1.0.1', latestVersion: '0.1.0.1', updateAvailable: false });
+    expect(response.json()).toMatchObject({ currentVersion: '0.1.0.2', latestVersion: '0.1.0.2', updateAvailable: false });
   });
 
   it('exposes an unauthenticated health check for container supervision', async () => {

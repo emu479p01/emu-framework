@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Kernel } from '@emu/core';
 import { buildServer } from '../src/server.js';
 import { applyErpSample } from './fixtures/erpSample.js';
+import { completeTestSetup, TEST_SETUP_CODE } from './setupHelper.js';
 
 /** Builds a minimal multipart/form-data body for fastify's inject() (no external deps). */
 function buildMultipart(fields: { name: string; value: string }[], file?: { name: string; filename: string; content: Buffer; contentType: string }) {
@@ -31,13 +32,14 @@ describe('import/export', () => {
   let cookie: string;
 
   beforeAll(async () => {
-    app = buildServer();
+    app = buildServer({ setupCode: TEST_SETUP_CODE });
     await app.ready();
+    await completeTestSetup(app);
     applyErpSample((app as unknown as { kernel: Kernel }).kernel);
     const res = await app.inject({
       method: 'POST',
       url: '/api/login',
-      payload: { username: 'admin', password: 'admin' },
+      payload: { username: 'admin', password: 'Admin-password-123' },
     });
     cookie = res.headers['set-cookie'] as string;
     // seed two customers to export
