@@ -3,6 +3,7 @@ import { createMetadataPackage, mergeAppManifest, parseMetadataPackage } from '.
 import type { MetadataArtifact } from '@emu/core';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server.js';
+import { completeTestSetup, TEST_SETUP_CODE } from './setupHelper.js';
 
 describe('metadata packages', () => {
   it('round-trips a checksummed package and rejects tampering', () => {
@@ -25,8 +26,9 @@ describe('metadata package API', () => {
   let app: FastifyInstance;
   let auth: { cookie: string };
   beforeAll(async () => {
-    app = buildServer(); await app.ready();
-    const login = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'admin', password: 'admin' } });
+    app = buildServer({ setupCode: TEST_SETUP_CODE }); await app.ready();
+    await completeTestSetup(app);
+    const login = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'admin', password: 'Admin-password-123' } });
     auth = { cookie: (login.headers['set-cookie'] as string).split(';')[0] };
     const createdApp = await app.inject({ method: 'PUT', url: '/api/designer/artifacts/app/sales', headers: auth,
       payload: { kind: 'app', name: 'sales', icon: 'chart', models: [{ name: 'Core', layer: 'CUS' }] } });

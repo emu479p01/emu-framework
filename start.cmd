@@ -1,4 +1,4 @@
 @echo off
-title EmuFramework v0.1.0.1
+title EmuFramework v0.1.0.2
 cd /d "%~dp0"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launch.ps1"

@@ -59,17 +59,3 @@ export function resolveSession(ctx: DataContext, token: string | undefined): Aut
     displayName: (user.f.displayName as string) ?? (user.f.username as string),
   };
 }
-
-/** Create the default admin/admin account if it does not exist (idempotent). */
-export function seedAdmin(ctx: DataContext): void {
-  if (ctx.select('FW_User').whereEq({ username: 'admin' }).firstOnly()) return;
-  ctx
-    .newRecord('FW_User')
-    .setMany({
-      username: 'admin',
-      displayName: 'Administrator',
-      passwordHash: hashPassword('admin'),
-      enabled: true,
-    })
-    .insert();
-}

@@ -4,6 +4,7 @@ import { buildServer } from '../src/server.js';
 import { hashPassword } from '../src/auth.js';
 import type { Kernel } from '@emu/core';
 import { applyErpSample } from './fixtures/erpSample.js';
+import { completeTestSetup, TEST_SETUP_CODE } from './setupHelper.js';
 
 /**
  * FW_AppAccess: explicit per-user app permissions.
@@ -21,8 +22,9 @@ describe('FW_AppAccess enforcement', () => {
   };
 
   beforeAll(async () => {
-    app = buildServer();
+    app = buildServer({ setupCode: TEST_SETUP_CODE });
     await app.ready();
+    await completeTestSetup(app);
     kernel = (app as unknown as { kernel: Kernel }).kernel;
     applyErpSample(kernel);
 
@@ -108,7 +110,7 @@ describe('FW_AppAccess enforcement', () => {
   });
 
   it('admin still sees everything', async () => {
-    const admin = await loginAs('admin', 'admin');
+    const admin = await loginAs('admin', 'Admin-password-123');
     const meta = await app.inject({ method: 'GET', url: '/api/metadata', headers: admin });
     expect(meta.json().apps.map((a: { name: string }) => a.name)).toContain('erp');
     const designer = await app.inject({ method: 'GET', url: '/api/designer/artifacts', headers: admin });
@@ -116,7 +118,7 @@ describe('FW_AppAccess enforcement', () => {
   });
 
   it('FW_UserForm carries the app-access line grid', async () => {
-    const admin = await loginAs('admin', 'admin');
+    const admin = await loginAs('admin', 'Admin-password-123');
     const meta = await app.inject({ method: 'GET', url: '/api/metadata', headers: admin });
     const userForm = meta.json().forms.find((f: { name: string }) => f.name === 'FW_UserForm');
     expect(userForm.lines.some((l: { table: string }) => l.table === 'FW_AppAccess')).toBe(true);

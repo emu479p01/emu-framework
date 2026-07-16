@@ -1,6 +1,15 @@
-export const CORE_VERSION = '0.1.0.1';
+export const CORE_VERSION = '0.1.0.2';
 
-export { Kernel, orderScriptsForExecution, type ActionHandler, type WebArtifactError } from './kernel.js';
+export {
+  Kernel,
+  orderScriptsForExecution,
+  type ActionHandler,
+  type WebArtifactError,
+  type FunctionServices,
+  type HttpRequestInput,
+  type HttpResponseOutput,
+  type EmailSendInput,
+} from './kernel.js';
 export {
   SecurityError,
   allowAll,

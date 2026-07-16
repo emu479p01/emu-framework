@@ -5,6 +5,7 @@ import { buildServer } from '../src/server.js';
 import { buildDocDefinition, formatReportFieldValue, reportFontForText } from '../src/reports.js';
 import { THAI_REPORT_FONT } from '../src/fontManager.js';
 import { applyErpSample } from './fixtures/erpSample.js';
+import { completeTestSetup, TEST_SETUP_CODE } from './setupHelper.js';
 
 const custListReport: AnyMeta = {
   kind: 'report',
@@ -38,8 +39,9 @@ describe('report PDF rendering', () => {
   let customerId: number;
 
   beforeAll(async () => {
-    app = buildServer();
+    app = buildServer({ setupCode: TEST_SETUP_CODE });
     await app.ready();
+    await completeTestSetup(app);
     kernel = (app as unknown as { kernel: Kernel }).kernel;
     applyErpSample(kernel);
     const errors = kernel.applyWebArtifacts([...loadArtifacts(kernel), custListReport]);
@@ -47,7 +49,7 @@ describe('report PDF rendering', () => {
     const dctx = kernel.designerContext();
     dctx.newRecord('FW_WebArtifact').setMany({ kind: 'report', name: custListReport.name, json: JSON.stringify(custListReport) }).insert();
 
-    const res = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'admin', password: 'admin' } });
+    const res = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'admin', password: 'Admin-password-123' } });
     cookie = res.headers['set-cookie'] as string;
 
     const customer = await app.inject({

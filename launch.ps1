@@ -125,7 +125,7 @@ function Stop-All {
 function Start-App {
   Write-Host ""
   Write-Host "======================================" -ForegroundColor Cyan
-  Write-Host "  EmuFramework v0.1.0.1 Launcher" -ForegroundColor Cyan
+  Write-Host "  EmuFramework v0.1.0.2 Launcher" -ForegroundColor Cyan
   Write-Host "======================================" -ForegroundColor Cyan
   Write-Host ""
 
@@ -197,10 +197,8 @@ function Start-App {
   Write-Host "  App is ready!" -ForegroundColor Green
   Write-Host "  $appUrl              " -ForegroundColor White
   Write-Host "======================================" -ForegroundColor Green
-  Write-Host "  Logins:" -ForegroundColor Gray
-  Write-Host "    admin   / admin   (Admin)" -ForegroundColor Gray
-  Write-Host "    manager / manager (Sales Manager)" -ForegroundColor Gray
-  Write-Host "    clerk   / clerk   (Sales Clerk)" -ForegroundColor Gray
+  Write-Host "  On first run, open the setup page and use the one-time code" -ForegroundColor Gray
+  Write-Host "  printed in the Emu-Server window." -ForegroundColor Gray
   Write-Host ""
 
   # Open browser

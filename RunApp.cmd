@@ -37,6 +37,6 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Opening http://localhost:5199  ^(logins: admin/admin, manager/manager, clerk/clerk^)
+echo Opening http://localhost:5199 - first run requires the one-time setup code shown by the API server.
 start http://localhost:5199
 exit /b 0

@@ -95,7 +95,7 @@ function blank(kind: string): Artifact {
     case 'script':
       return { kind, name: '', label: '', code: '// register events, hooks, and actions\n// kernel.actions.set("MyAction", (ctx, args) => { ... });\n// kernel.events.on("MyTable", "onInserting", (e) => { ... });\n// kernel.hooks.register("MyTable", { validateWrite(rec) { ... } });\n' };
     case 'function':
-      return { kind, name: '', label: '', code: '// Function body — invoked as (ctx, args); `kernel` is also in scope.\n// Return a value (it becomes the API response), e.g.:\n// return { ok: true, count: ctx.select("MyTable").count() };\n' };
+      return { kind, name: '', label: '', executionMode: 'transactional', code: '// Function body — invoked as (ctx, args, kernel, services).\n// Choose Async integration mode to use await services.http or services.email.\n// return { ok: true, count: ctx.select("MyTable").count() };\n' };
     default:
       return { kind, name: '' };
   }
@@ -613,11 +613,20 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
                 </n-alert>
                 <n-form-item>
                   <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0">
-                    Write the function body. It is invoked as <b>(ctx, args)</b> with <b>kernel</b> also in scope,
+                    Write the function body. It receives <b>ctx</b>, <b>args</b>, <b>kernel</b>, and <b>services</b>,
                     registered as an action under this artifact's name, and callable from form/menu
                     Function targets or <b>POST /api/action/&lt;name&gt;</b>. The return value becomes the response.
                   </p>
                 </n-form-item>
+                <n-form-item label="Execution mode">
+                  <n-select v-model:value="(artifact.executionMode as string)" :options="[
+                    { label: 'Transactional — synchronous and atomic', value: 'transactional' },
+                    { label: 'Async integration — supports await, HTTP and email', value: 'async' },
+                  ]" />
+                </n-form-item>
+                <n-alert v-if="artifact.executionMode === 'async'" type="info">
+                  Async functions do not keep one database transaction open while waiting for the network.
+                </n-alert>
                 <n-form-item label="Code">
                   <n-input
                     v-model:value="(artifact.code as string)"
@@ -783,6 +792,9 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
             </n-card>
 
             <n-card v-if="kind === 'role' || kind === 'roleExtension'" size="small" title="Role grants">
+              <n-alert v-if="artifact.name === 'FW_SystemAdminRole' || artifact.role === 'FW_SystemAdminRole'" type="warning" style="margin-bottom:12px">
+                System administrators bypass all App Access, menu, form, data, Function, and Report restrictions.
+              </n-alert>
               <n-form-item label="Duties">
                 <n-select v-model:value="selectedDuties" :options="dutyOptions" multiple filterable />
               </n-form-item>

@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
@@ -19,13 +20,14 @@ import {
   type SecurityPolicy,
 } from '@emu/core';
 import { registerSystemApp, registerSystemHooks } from './systemApp.js';
-import { login, logout, resolveSession, seedAdmin, type AuthUser } from './auth.js';
+import { hashPassword, login, logout, resolveSession, verifyPassword, type AuthUser } from './auth.js';
 import { bootWebArtifacts, registerDesignerRoutes } from './designer.js';
 import { seedDesignerDb } from './seeder.js';
 import { buildFilteredQuery, registerImportExportRoutes } from './importExport.js';
 import { registerReportRoutes } from './reports.js';
 import { registerFontRoutes } from './fontManager.js';
 import { registerSystemMaintenanceRoutes } from './systemMaintenance.js';
+import { createIntegrationManager, registerIntegrationRoutes } from './integrationServices.js';
 
 export interface ServerOptions {
   dbPath?: string;
@@ -37,14 +39,16 @@ export interface ServerOptions {
   registerLogic?: (kernel: Kernel) => void;
   /** Display title for branding (login page, sidebar, etc). Default "EmuFramework". */
   appTitle?: string;
+  /** Deterministic first-setup code for automated tests. Production generates one. */
+  setupCode?: string;
 }
 
 const COOKIE_NAME = 'nf_session';
 const SECURE_COOKIES = process.env.NODE_ENV === 'production' || process.env.EMU_SECURE_COOKIES === 'true';
 /** Auth/system tables are never exposed through the generic data API. */
 const PROTECTED_TABLES = new Set(['FW_Session', 'FW_WebArtifact']);
-/** Users whose sessions bypass role checks (dev/admin). */
-const ADMIN_USERS = new Set(['admin']);
+const SETUP_TTL_MS = 15 * 60 * 1000;
+const SETUP_MAX_FAILURES = 10;
 
 interface ListQuery {
   limit?: string;
@@ -197,7 +201,9 @@ function migrateManifestModels(kernel: Kernel): void {
 }
 
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
-  const kernel = new Kernel(options.dbPath ?? ':memory:', options.designerDbPath);
+  const dbPath = options.dbPath ?? ':memory:';
+  const designerDbPath = options.designerDbPath ?? (dbPath === ':memory:' ? undefined : dbPath.replace(/\.sqlite$|\.db$/i, '.designer.sqlite'));
+  const kernel = new Kernel(dbPath, designerDbPath);
   registerSystemApp(kernel);
   kernel.registerNativeLogic(registerSystemHooks);
   const appDirs = [...(options.appDirs ?? [])];
@@ -208,8 +214,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   // boot-time only (seed-style logic isn't idempotent) — persistent hooks
   // belong in kernel.registerNativeLogic or script artifacts
   options.registerLogic?.(kernel);
-  seedAdmin(kernel.context());
-
   // First-boot: seed designer.db with all metadata if empty
   seedDesignerDb(kernel);
   migrateLegacyDesignerArtifacts(kernel);
@@ -220,30 +224,37 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   migrateLegacyRoleTables(kernel);
   migrateRoleValuesToNames(kernel);
 
-  // Assign admin roles now that the FW_Role list + FW_UserRole table exist
-  (function seedAdminRoles() {
-    const ctx = kernel.context();
-    const admin = ctx.select('FW_User').whereEq({ username: 'admin' }).firstOnly();
-    if (!admin || !admin.f.id) return;
-    const uid = admin.f.id as number;
+  const initialCtx = kernel.context();
+  const legacyAdmin = initialCtx.select('FW_User').whereEq({ username: 'admin' }).firstOnly();
+  const legacyDefaultPassword = Boolean(
+    legacyAdmin?.f.passwordHash && verifyPassword('admin', legacyAdmin.f.passwordHash as string),
+  );
+  if (legacyDefaultPassword) {
+    for (const session of initialCtx.select('FW_Session').whereEq({ username: 'admin' }).toArray()) session.delete();
+  }
+
+  const hasEnabledSystemAdmin = (): boolean => {
     try {
-      for (const roleName of ['FW_FrameworkUser', 'FW_SystemAdminRole']) {
-        if (!kernel.registry.getRole(roleName)) continue;
-        const exists = ctx
-          .select('FW_UserRole')
-          .whereEq({ userId: uid })
-          .where('role', '=', roleName)
-          .firstOnly();
-        if (!exists) {
-          ctx.newRecord('FW_UserRole').setMany({ userId: uid, username: 'admin', role: roleName }).insert();
-        }
-      }
-    } catch {
-      // FW_UserRole table not yet available - skip
-    }
-  })();
+      const roleRows = kernel.context().select('FW_UserRole').whereEq({ role: 'FW_SystemAdminRole' }).toArray();
+      return roleRows.some((row) => {
+        const user = kernel.context().find('FW_User', row.f.userId as number);
+        return Boolean(user?.f.enabled) && !(user?.f.username === 'admin' && legacyDefaultPassword);
+      });
+    } catch { return false; }
+  };
+
+  let setupRequired = legacyDefaultPassword || !hasEnabledSystemAdmin();
+  let setupCompleting = false;
+  let setupFailures = 0;
+  let setupExpiresAt = Date.now() + SETUP_TTL_MS;
+  const setupCode = options.setupCode ?? randomBytes(6).toString('hex').toUpperCase();
+  const setupCodeHash = createHash('sha256').update(setupCode).digest();
+  if (setupRequired) {
+    console.log(`[Setup] Administrator setup required. One-time code: ${setupCode} (expires in 15 minutes)`);
+  }
 
   const app = Fastify({ logger: false });
+  const integrations = createIntegrationManager(kernel, designerDbPath);
   app.register(cookie);
   app.register(multipart);
 
@@ -309,7 +320,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   const policyOf = (username: string): SecurityPolicy => {
     const roles = rolesOf(username);
-    if (ADMIN_USERS.has(username) || roles.includes('FW_SystemAdminRole')) return allowAll;
+    if (roles.includes('FW_SystemAdminRole')) return allowAll;
     const base = buildRolePolicy(kernel.registry, roles);
     // Framework users may maintain only their own account and password.
     if (roles.includes('FW_FrameworkUser')) {
@@ -333,7 +344,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   const dataTable = (name: string, req?: FastifyRequest) => {
     const user = req ? currentUser(req) : null;
-    const isAdmin = user !== null && ADMIN_USERS.has(user.username);
+    const isAdmin = user !== null && rolesOf(user.username).includes('FW_SystemAdminRole');
     if (!isAdmin && PROTECTED_TABLES.has(name)) {
       throw Object.assign(new Error(`Unknown table '${name}'`), { statusCode: 404 });
     }
@@ -392,7 +403,58 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   // ---- auth ----
 
+  app.get('/api/setup/status', () => ({
+    required: setupRequired,
+    expiresAt: setupRequired ? new Date(setupExpiresAt).toISOString() : null,
+    legacyReset: setupRequired && legacyDefaultPassword,
+    username: setupRequired && legacyDefaultPassword ? 'admin' : null,
+  }));
+
+  app.post<{ Body: { code?: string; username?: string; displayName?: string; password?: string } }>('/api/setup/complete', (req, reply) => {
+    if (!setupRequired) return reply.status(409).send({ error: 'Administrator setup is already complete' });
+    if (setupCompleting) return reply.status(409).send({ error: 'Administrator setup is already in progress' });
+    if (Date.now() > setupExpiresAt || setupFailures >= SETUP_MAX_FAILURES) {
+      return reply.status(410).send({ error: 'Setup code expired; restart the server to generate a new code' });
+    }
+    const candidateHash = createHash('sha256').update(String(req.body?.code ?? '').trim().toUpperCase()).digest();
+    if (!timingSafeEqual(candidateHash, setupCodeHash)) {
+      setupFailures += 1;
+      return reply.status(403).send({ error: 'Invalid setup code' });
+    }
+    const requestedUsername = String(req.body?.username ?? '').trim();
+    const username = legacyDefaultPassword ? 'admin' : requestedUsername;
+    const displayName = String(req.body?.displayName ?? '').trim() || username;
+    const password = String(req.body?.password ?? '');
+    if (!/^[A-Za-z0-9._-]{3,60}$/.test(username)) return reply.status(422).send({ error: 'Username must be 3-60 letters, numbers, dots, underscores, or hyphens' });
+    if (password.length < 12) return reply.status(422).send({ error: 'Password must be at least 12 characters' });
+    setupCompleting = true;
+    try {
+      const ctx = kernel.context();
+      ctx.tts(() => {
+        let user = ctx.select('FW_User').whereEq({ username }).firstOnly();
+        if (user && !legacyDefaultPassword) throw Object.assign(new Error('Username already exists'), { statusCode: 409 });
+        if (user) user.setMany({ displayName, passwordHash: hashPassword(password), password: null, enabled: true }).update();
+        else {
+          user = ctx.newRecord('FW_User').setMany({ username, displayName, passwordHash: hashPassword(password), enabled: true });
+          user.insert();
+        }
+        const existingRole = ctx.select('FW_UserRole').whereEq({ userId: user.id as number }).where('role', '=', 'FW_SystemAdminRole').firstOnly();
+        if (!existingRole) ctx.newRecord('FW_UserRole').setMany({ userId: user.id, username, role: 'FW_SystemAdminRole' }).insert();
+        for (const session of ctx.select('FW_Session').whereEq({ username }).toArray()) session.delete();
+      });
+      setupRequired = false;
+      setupExpiresAt = 0;
+      const token = login(kernel.context(), username, password);
+      if (!token) throw new Error('Administrator setup succeeded but login failed');
+      reply.setCookie(COOKIE_NAME, token, { path: '/', httpOnly: true, sameSite: 'lax', secure: SECURE_COOKIES });
+      return { ok: true };
+    } finally {
+      setupCompleting = false;
+    }
+  });
+
   app.post<{ Body: { username?: string; password?: string } }>('/api/login', (req, reply) => {
+    if (setupRequired) return reply.status(409).send({ error: 'Administrator setup is required' });
     const { username, password } = req.body ?? {};
     const token = username && password ? login(systemCtx(), username, password) : null;
     if (!token) return reply.status(401).send({ error: 'Invalid credentials' });
@@ -425,7 +487,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     };
     const canOpenFunction = (name: string) => policy.canFunction(name);
     const userRoles = rolesOf(user.username);
-    const isSystemAdmin = ADMIN_USERS.has(user.username) || userRoles.includes('FW_SystemAdminRole');
+    const isSystemAdmin = userRoles.includes('FW_SystemAdminRole');
 
     const isSelfService = userRoles.includes('FW_FrameworkUser') && !isSystemAdmin;
     const forms = kernel.registry.allForms().filter((f) => canOpen(f.name)).map((f) => {
@@ -498,7 +560,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       if (appName === 'system') {
         if (isFrameworkUser) {
           const systemItems = menu.items.filter((item) => {
-            if (item.route === '/system/tables' || item.route === '/system/maintenance' || item.route === '/system/fonts') return isFrameworkAdmin;
+            if (item.route === '/system/tables' || item.route === '/system/maintenance' || item.route === '/system/fonts' || item.route === '/system/integrations/smtp') return isFrameworkAdmin;
             return true;
           });
           const filtered = { ...menu, items: filterItems(systemItems, true) ?? [] };
@@ -537,7 +599,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       apps: [...appMap.values()].filter((a) => {
         if (a.menus.length === 0) return false;
         if (a.name === 'system') return false;
-        if (ADMIN_USERS.has(user.username)) return true;
         // App access is explicit: no FW_AppAccess row with canOpen = the app is invisible.
         // (Framework admins keep full visibility so they can manage everything.)
         if (isSystemAdmin) return true;
@@ -552,7 +613,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const user = requireUser(req);
     const access = appAccessOf(user.username);
     const allowed =
-      ADMIN_USERS.has(user.username) ||
       rolesOf(user.username).some((r) => r === 'FW_SystemAdminRole' || r === 'FW_FrameworkUser') ||
       access.customizeApps.size > 0;
     if (!allowed) {
@@ -565,7 +625,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const designerScope = (req: FastifyRequest): 'all' | Set<string> => {
     const user = requireUser(req);
     if (
-      ADMIN_USERS.has(user.username) ||
       rolesOf(user.username).some((r) => r === 'FW_SystemAdminRole' || r === 'FW_FrameworkUser')
     ) {
       return 'all';
@@ -575,24 +634,28 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   registerDesignerRoutes(app, kernel, requireDesigner, designerScope);
   const requireFrameworkAdmin = (req: FastifyRequest): string => {
     const user = requireUser(req);
-    if (!ADMIN_USERS.has(user.username) && !rolesOf(user.username).includes('FW_SystemAdminRole')) {
+    if (!rolesOf(user.username).includes('FW_SystemAdminRole')) {
       throw Object.assign(new Error('System maintenance requires a framework administrator'), { statusCode: 403 });
     }
     return user.username;
   };
   registerSystemMaintenanceRoutes(app, kernel, requireFrameworkAdmin);
   registerFontRoutes(app, kernel, requireFrameworkAdmin, requireUser);
+  registerIntegrationRoutes(app, integrations, requireFrameworkAdmin);
 
   // ---- actions (named server-side operations, e.g. SalesOrderPost) ----
 
   app.post<{ Params: { name: string }; Body: { [key: string]: unknown } }>(
     '/api/action/:name',
-    (req) => {
+    async (req) => {
       const handler = kernel.actions.get(req.params.name);
       if (!handler) throw Object.assign(new Error(`Unknown action '${req.params.name}'`), { statusCode: 404 });
       const ctx = userCtx(req);
       if (!ctx.policy.canFunction(req.params.name)) throw new SecurityError(`Access denied: function '${req.params.name}'`);
-      return ctx.tts(() => handler(ctx, req.body ?? {}) ?? { ok: true });
+      if (kernel.actionModes.get(req.params.name) === 'async') {
+        return (await handler(ctx, req.body ?? {}, integrations.services)) ?? { ok: true };
+      }
+      return ctx.tts(() => handler(ctx, req.body ?? {}, integrations.services) ?? { ok: true });
     },
   );
 

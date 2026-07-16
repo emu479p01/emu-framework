@@ -6,19 +6,21 @@ import { buildServer } from '../src/server.js';
 import { hashPassword } from '../src/auth.js';
 import type { Kernel } from '@emu/core';
 import { applyErpSample } from './fixtures/erpSample.js';
+import { completeTestSetup, TEST_ADMIN_PASSWORD, TEST_SETUP_CODE } from './setupHelper.js';
 
 describe('server', () => {
   let app: FastifyInstance;
   let cookie: string;
 
   beforeAll(async () => {
-    app = buildServer();
+    app = buildServer({ setupCode: TEST_SETUP_CODE });
     await app.ready();
+    await completeTestSetup(app);
     applyErpSample((app as unknown as { kernel: Kernel }).kernel);
     const res = await app.inject({
       method: 'POST',
       url: '/api/login',
-      payload: { username: 'admin', password: 'admin' },
+      payload: { username: 'admin', password: TEST_ADMIN_PASSWORD },
     });
     expect(res.statusCode).toBe(200);
     cookie = res.headers['set-cookie'] as string;
@@ -186,8 +188,9 @@ describe('server', () => {
     expect(allForms).toEqual(['ERP_SalesTableForm']);
   });
 
-  it('seeds admin even when registerLogic creates users first', async () => {
+  it('requires explicit setup even when registerLogic creates users first', async () => {
     const app2 = buildServer({
+      setupCode: TEST_SETUP_CODE,
       registerLogic(kernel) {
         kernel
           .context()
@@ -197,12 +200,9 @@ describe('server', () => {
       },
     });
     await app2.ready();
-    const res = await app2.inject({
-      method: 'POST',
-      url: '/api/login',
-      payload: { username: 'admin', password: 'admin' },
-    });
-    expect(res.statusCode).toBe(200);
+    expect((await app2.inject({ method: 'GET', url: '/api/setup/status' })).json().required).toBe(true);
+    expect((await app2.inject({ method: 'POST', url: '/api/login', payload: { username: 'admin', password: 'admin' } })).statusCode).toBe(409);
+    await app2.close();
   });
 
   it('runs server actions atomically and rolls back on failure', async () => {
@@ -221,7 +221,7 @@ describe('server', () => {
     const login = await app.inject({
       method: 'POST',
       url: '/api/login',
-      payload: { username: 'admin', password: 'admin' },
+      payload: { username: 'admin', password: TEST_ADMIN_PASSWORD },
     });
     const c = (login.headers['set-cookie'] as string).split(';')[0];
     await app.inject({ method: 'POST', url: '/api/logout', headers: { cookie: c } });
