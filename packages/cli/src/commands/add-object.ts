@@ -1,5 +1,5 @@
 import { defineCommand } from 'citty';
-import { readdirSync, existsSync } from 'node:fs';
+import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
@@ -15,6 +15,7 @@ import {
   scaffoldRole,
   type FieldDef,
   type IndexDef,
+  type Placement,
 } from '../scaffold/object.js';
 
 type ObjectKind = 'table' | 'enum' | 'form' | 'menu' | 'privilege' | 'duty' | 'role';
@@ -41,6 +42,7 @@ export const addObjectCommand = defineCommand({
       description: 'Module name (optional)',
       required: false,
     },
+    model: { type: 'string', description: 'Required Model name from app.json' },
     // non-interactive flags — when provided, no wizard is needed (works without a TTY)
     name: { type: 'string', description: 'Object name (PascalCase)' },
     label: { type: 'string', description: 'Display label' },
@@ -74,6 +76,20 @@ export const addObjectCommand = defineCommand({
       process.exit(1);
     }
 
+    const manifest = JSON.parse(readFileSync(join(appDir, 'app.json'), 'utf8')) as { models?: { name: string; layer: string }[] };
+    const models = manifest.models ?? [];
+    if (models.length === 0) {
+      console.error(pc.red(`App '${args.app}' has no Models. Run: pnpm emu add model ${args.app} <name> --layer CUS`));
+      process.exit(1);
+    }
+    let modelName = String(args.model ?? '');
+    if (!modelName && isInteractive()) modelName = await p.select({ message: 'Model', options: models.map((model) => ({ label: `${model.name} (${model.layer})`, value: model.name })) }) as string;
+    const selectedModel = models.find((model) => model.name === modelName);
+    if (!selectedModel) {
+      console.error(pc.red(`--model is required and must be one of: ${models.map((model) => model.name).join(', ')}`));
+      process.exit(1);
+    }
+
     const flags = {
       name: args.name as string | undefined,
       label: args.label as string | undefined,
@@ -83,6 +99,7 @@ export const addObjectCommand = defineCommand({
       values: args.values as string | undefined,
       table: args.table as string | undefined,
       items: args.items as string | undefined,
+      app: String(args.app), model: selectedModel.name, layer: selectedModel.layer,
     };
 
     // Detect available modules
@@ -109,15 +126,15 @@ export const addObjectCommand = defineCommand({
       case 'menu': await addMenu(root, targetDir, flags); break;
       case 'privilege':
         requireInteractive(`Privileges have no non-interactive mode yet — run from a real terminal or create apps/${args.app}/metadata/.../privileges/<Name>.json by hand.`);
-        await addPrivilege(root, targetDir);
+        await addPrivilege(root, targetDir, flags);
         break;
       case 'duty':
         requireInteractive(`Duties have no non-interactive mode yet — run from a real terminal or create the JSON by hand.`);
-        await addDuty(root, targetDir);
+        await addDuty(root, targetDir, flags);
         break;
       case 'role':
         requireInteractive(`Roles have no non-interactive mode yet — run from a real terminal or create the JSON by hand.`);
-        await addRole(root, targetDir);
+        await addRole(root, targetDir, flags);
         break;
     }
   },
@@ -134,7 +151,7 @@ const FIELD_TYPES = [
   { value: 'reference', label: 'reference' },
 ];
 
-interface Flags {
+interface Flags extends Placement {
   name?: string;
   label?: string;
   titleField?: string;
@@ -174,6 +191,7 @@ async function addTable(root: string, appDir: string, flags: Flags) {
     const fields = parseFields(flags.fields ?? '');
     const indexes = parseIndexes(flags.indexes ?? '');
     const filepath = scaffoldTable(appDir, {
+      app: flags.app, model: flags.model, layer: flags.layer,
       name: flags.name,
       label: flags.label ?? flags.name,
       titleField: flags.titleField,
@@ -235,7 +253,7 @@ async function addTable(root: string, appDir: string, flags: Flags) {
     p.log.success(`  Added index: ${idxName} (${idxFields.join(', ')})`);
   }
 
-  const filepath = scaffoldTable(appDir, { name, label, titleField, fields, indexes: indexes.length > 0 ? indexes : undefined });
+  const filepath = scaffoldTable(appDir, { app: flags.app, model: flags.model, layer: flags.layer, name, label, titleField, fields, indexes: indexes.length > 0 ? indexes : undefined });
   p.outro(pc.green(`Created ${filepath}`));
 }
 
@@ -252,7 +270,7 @@ async function addEnum(appDir: string, flags: Flags) {
         next = value + 1;
         return { name: vName, value };
       });
-    const filepath = scaffoldEnum(appDir, { name: flags.name, label: flags.label ?? flags.name, values });
+    const filepath = scaffoldEnum(appDir, { app: flags.app, model: flags.model, layer: flags.layer, name: flags.name, label: flags.label ?? flags.name, values });
     p.outro(pc.green(`Created ${filepath}`));
     return;
   }
@@ -281,13 +299,14 @@ async function addEnum(appDir: string, flags: Flags) {
     p.log.success(`  Added: ${vName} = ${code}`);
   }
 
-  const filepath = scaffoldEnum(appDir, { name, label, values });
+  const filepath = scaffoldEnum(appDir, { app: flags.app, model: flags.model, layer: flags.layer, name, label, values });
   p.outro(pc.green(`Created ${filepath}`));
 }
 
 async function addForm(root: string, appDir: string, flags: Flags) {
   if (flags.table) {
     const filepath = scaffoldForm(appDir, {
+      app: flags.app, model: flags.model, layer: flags.layer,
       name: flags.name ?? `${flags.table}Form`,
       label: flags.label ?? flags.table,
       table: flags.table,
@@ -308,7 +327,7 @@ async function addForm(root: string, appDir: string, flags: Flags) {
   const label = await p.text({ message: 'Form label', placeholder: table });
   if (p.isCancel(label)) process.exit(0);
 
-  const filepath = scaffoldForm(appDir, { name, label, table });
+  const filepath = scaffoldForm(appDir, { app: flags.app, model: flags.model, layer: flags.layer, name, label, table });
   p.outro(pc.green(`Created ${filepath}`));
   p.log.message(pc.dim('Edit the JSON to add groups, listFields, actions, and lines.'));
 }
@@ -323,7 +342,7 @@ async function addMenu(root: string, appDir: string, flags: Flags) {
         const [label, form] = s.includes('=') ? s.split('=').map((x) => x.trim()) : [undefined, s];
         return { label: label || undefined, form: form! };
       });
-    const filepath = scaffoldMenu(appDir, { name: flags.name, label: flags.label ?? flags.name, items });
+    const filepath = scaffoldMenu(appDir, { app: flags.app, model: flags.model, layer: flags.layer, name: flags.name, label: flags.label ?? flags.name, items });
     p.outro(pc.green(`Created ${filepath}`));
     return;
   }
@@ -353,11 +372,11 @@ async function addMenu(root: string, appDir: string, flags: Flags) {
     p.log.success(`  Added: ${itemLabel || form} -> ${form}`);
   }
 
-  const filepath = scaffoldMenu(appDir, { name, label, items });
+  const filepath = scaffoldMenu(appDir, { app: flags.app, model: flags.model, layer: flags.layer, name, label, items });
   p.outro(pc.green(`Created ${filepath}`));
 }
 
-async function addPrivilege(root: string, appDir: string) {
+async function addPrivilege(root: string, appDir: string, placement: Placement) {
   const allTables = listAllByKind(root, 'tables');
   const allForms = listAllByKind(root, 'forms');
 
@@ -401,6 +420,7 @@ async function addPrivilege(root: string, appDir: string) {
   if (p.isCancel(forms)) process.exit(0);
 
   const filepath = scaffoldPrivilege(appDir, {
+    ...placement,
     name,
     label,
     tablePermissions: tablePermissions.length > 0 ? tablePermissions : undefined,
@@ -410,7 +430,7 @@ async function addPrivilege(root: string, appDir: string) {
   p.outro(pc.green(`Created ${filepath}`));
 }
 
-async function addDuty(root: string, appDir: string) {
+async function addDuty(root: string, appDir: string, placement: Placement) {
   const allPrivileges = listAllByKind(root, 'privileges');
 
   const name = await p.text({ message: 'Duty name (PascalCase)', placeholder: 'MyDuty' });
@@ -426,11 +446,11 @@ async function addDuty(root: string, appDir: string) {
   }) as string[];
   if (p.isCancel(privs)) process.exit(0);
 
-  const filepath = scaffoldDuty(appDir, { name, label, privileges: privs });
+  const filepath = scaffoldDuty(appDir, { ...placement, name, label, privileges: privs });
   p.outro(pc.green(`Created ${filepath}`));
 }
 
-async function addRole(root: string, appDir: string) {
+async function addRole(root: string, appDir: string, placement: Placement) {
   const allDuties = listAllByKind(root, 'duties');
   const allPrivileges = listAllByKind(root, 'privileges');
 
@@ -463,7 +483,7 @@ async function addRole(root: string, appDir: string) {
     if (priv.length > 0) privileges = priv;
   }
 
-  const filepath = scaffoldRole(appDir, { name, label, duties, privileges });
+  const filepath = scaffoldRole(appDir, { ...placement, name, label, duties, privileges });
   p.outro(pc.green(`Created ${filepath}`));
 }
 
@@ -496,7 +516,7 @@ function listAllByKind(root: string, kindDir: string): string[] {
 function listModules(appDir: string): string[] {
   const metaDir = join(appDir, 'metadata');
   if (!existsSync(metaDir)) return [];
-  const known = new Set(['tables', 'enums', 'forms', 'menus', 'privileges', 'duties', 'roles', 'tableExtensions', 'formExtensions', 'menuExtensions']);
+  const known = new Set(['tables', 'enums', 'forms', 'menus', 'views', 'charts', 'privileges', 'duties', 'roles', 'functions', 'reports', 'tableExtensions', 'formExtensions', 'menuExtensions']);
   return readdirSync(metaDir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && !known.has(d.name))
     .map((d) => d.name);

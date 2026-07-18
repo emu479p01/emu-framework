@@ -47,12 +47,12 @@ describe('server', () => {
     expect(res.json()).toMatchObject({ username: 'admin' });
   });
 
-  it('serves metadata with system tables visible to ERP_Admin', async () => {
+  it('serves business metadata while security tables remain dedicated', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/metadata', headers: auth() });
     const meta = res.json();
     const names = meta.tables.map((t: { name: string }) => t.name);
     expect(names).toContain('ERP_CustTable');
-    expect(names).toContain('FW_User');
+    expect(names).not.toContain('FW_User');
     expect(names).not.toContain('FW_Session');
     const erpApp = meta.apps.find((a: { name: string }) => a.name === 'erp');
     expect(erpApp).toBeDefined();
@@ -66,7 +66,9 @@ describe('server', () => {
       }
     };
     collectLabels(ERP_MainMenu.items);
-    expect(allLabels).toContain('Users');
+    expect(allLabels).not.toContain('Users');
+    const frameworkLabels = meta.frameworkMenus.flatMap((menu: any) => menu.items.map((item: any) => item.label));
+    expect(frameworkLabels).toContain('Users & Security');
   });
 
   it('does CRUD through the data API', async () => {
@@ -137,10 +139,9 @@ describe('server', () => {
     expect(res.json().total).toBe(1);
   });
 
-  it('allows ERP_Admin to access system tables via data API', async () => {
+  it('blocks security tables through the generic data API even for System Admin', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/data/FW_User', headers: auth() });
-    expect(res.statusCode).toBe(200);
-    expect(res.json().total).toBeGreaterThanOrEqual(1);
+    expect(res.statusCode).toBe(404);
   });
 
   it('enforces role security over REST (ERP_SalesClerk)', async () => {

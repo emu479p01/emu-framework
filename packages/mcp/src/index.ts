@@ -34,7 +34,7 @@ function workspaceRoot(): string {
 }
 
 const server = new Server(
-  { name: 'emuframework-dev', version: '0.1.0.2' },
+  { name: 'emuframework-dev', version: '0.1.1.0' },
   { capabilities: { resources: {}, tools: {}, prompts: {} } },
 );
 
@@ -99,7 +99,7 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [
 server.setRequestHandler(GetPromptRequestSchema, async (request) => {
   const args = request.params.arguments ?? {};
   const text = request.params.name === 'create_business_app'
-    ? `Create a version-1 EmuFramework MetadataChangeSet for these requirements: ${args.requirements}. Read emu://schema/metadata and emu://workspace/apps first. Use Customizations/CUS, include app, table, form, and menu artifacts, and call validate_change_set. Do not create scripts.`
+    ? `Create a version-1 EmuFramework MetadataChangeSet for these requirements: ${args.requirements}. Read emu://schema/metadata and emu://workspace/apps first. Require an explicit App, Model and Layer for every artifact; include an App manifest with an explicit Model when creating an App, and call validate_change_set. Do not create scripts.`
     : `Extend app ${args.app} for these requirements: ${args.requirements}. Inspect emu://workspace/app/${args.app}, use extension artifacts, preserve the base model, and validate the result. Do not create scripts.`;
   return { messages: [{ role: 'user', content: { type: 'text', text } }] };
 });

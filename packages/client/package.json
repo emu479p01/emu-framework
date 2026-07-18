@@ -1,6 +1,6 @@
 {
   "name": "@emu/client",
-  "version": "0.1.0.2",
+  "version": "0.1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@emu/core": "link:../core",
+    "echarts": "^5.6.0",
     "naive-ui": "^2.39.0",
     "pinia": "^2.2.2",
     "vue": "^3.4.38",

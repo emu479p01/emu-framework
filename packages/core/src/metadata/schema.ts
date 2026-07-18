@@ -98,6 +98,37 @@ const lineGridSchema = Type.Object({
   aggregates: Type.Optional(Type.Array(aggregateSchema)),
   actions: Type.Optional(Type.Array(formActionSchema)),
 }, { additionalProperties: false });
+const formChartSchema = Type.Object({
+  chart: Type.String({ minLength: 1 }),
+  width: Type.Optional(Type.Union([Type.Literal('half'), Type.Literal('full')])),
+  parameterBindings: Type.Optional(Type.Array(Type.Object({
+    parameter: Type.String({ minLength: 1 }),
+    source: Type.Union([Type.Literal('record'), Type.Literal('literal')]),
+    field: Type.Optional(Type.String({ minLength: 1 })),
+    value: Type.Optional(Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Null()])),
+  }, { additionalProperties: false }))),
+}, { additionalProperties: false });
+const viewParameterSchema = Type.Object({
+  name, type: Type.Union(['string', 'int', 'real', 'boolean', 'date', 'datetime'].map((v) => Type.Literal(v))),
+  required: Type.Optional(Type.Boolean()),
+}, { additionalProperties: false });
+const viewColumnSchema = Type.Object({
+  name, label: Type.Optional(Type.String()),
+  expression: Type.Union([
+    Type.Object({ type: Type.Literal('field'), ref: Type.String({ minLength: 3 }) }, { additionalProperties: false }),
+    Type.Object({ type: Type.Literal('aggregate'), fn: Type.Union(['count', 'sum', 'avg', 'min', 'max'].map((v) => Type.Literal(v))), ref: Type.Optional(Type.String({ minLength: 3 })) }, { additionalProperties: false }),
+  ]),
+}, { additionalProperties: false });
+const viewLiteralSchema = Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Null()]);
+const viewFilterSchema = Type.Object({
+  ref: Type.String({ minLength: 3 }),
+  operator: Type.Union(['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'in'].map((v) => Type.Literal(v))),
+  value: Type.Union([
+    viewLiteralSchema,
+    Type.Array(viewLiteralSchema),
+    Type.Object({ parameter: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+  ]),
+}, { additionalProperties: false });
 const reportStyleSchema = Type.Object({
   fontSize: Type.Optional(Type.Number()), bold: Type.Optional(Type.Boolean()), italic: Type.Optional(Type.Boolean()),
   fontFamily: Type.Optional(Type.String({ minLength: 1 })),
@@ -124,22 +155,38 @@ const artifactSchemas = [
   Type.Object({ kind: Type.Literal('app'), name, label: Type.Optional(Type.String()), icon, dependsOn: Type.Optional(Type.Array(Type.String())), models: Type.Optional(Type.Array(Type.Object({ name, label: Type.Optional(Type.String()), layer }))) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('table'), ...common, fields: Type.Array(fieldSchema), titleField: Type.Optional(Type.String()), indexes: Type.Optional(Type.Array(indexSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('enum'), ...common, values: Type.Array(Type.Object({ name, value: Type.Integer(), label: Type.Optional(Type.String()) }, { additionalProperties: false })) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal('form'), ...common, table: Type.String(), actions: Type.Optional(Type.Array(formActionSchema)), listFields: Type.Optional(Type.Array(Type.String())), filterFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), lines: Type.Optional(Type.Array(lineGridSchema)) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('form'), ...common, table: Type.String(), actions: Type.Optional(Type.Array(formActionSchema)), listFields: Type.Optional(Type.Array(Type.String())), filterFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), charts: Type.Optional(Type.Array(formChartSchema)), lines: Type.Optional(Type.Array(lineGridSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('menu'), ...common, items: Type.Array(menuItemSchema) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal('privilege'), ...common, tablePermissions: Type.Optional(Type.Array(tablePermissionSchema)), forms: Type.Optional(Type.Array(Type.String())), functions: Type.Optional(Type.Array(Type.String())), reports: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('privilege'), ...common, tablePermissions: Type.Optional(Type.Array(tablePermissionSchema)), forms: Type.Optional(Type.Array(Type.String())), functions: Type.Optional(Type.Array(Type.String())), reports: Type.Optional(Type.Array(Type.String())), views: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('duty'), ...common, privileges: Type.Array(Type.String()) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('role'), ...common, duties: Type.Optional(Type.Array(Type.String())), privileges: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('tableExtension'), ...common, table: Type.String(), fields: Type.Optional(Type.Array(fieldSchema)), indexes: Type.Optional(Type.Array(indexSchema)) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal('formExtension'), ...common, form: Type.String(), listFields: Type.Optional(Type.Array(Type.String())), filterFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), actions: Type.Optional(Type.Array(formActionSchema)) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('formExtension'), ...common, form: Type.String(), listFields: Type.Optional(Type.Array(Type.String())), filterFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), charts: Type.Optional(Type.Array(formChartSchema)), actions: Type.Optional(Type.Array(formActionSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('menuExtension'), ...common, menu: Type.String(), items: Type.Array(menuItemSchema) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('enumExtension'), ...common, enum: Type.String(), values: Type.Array(Type.Object({ name, value: Type.Integer(), label: Type.Optional(Type.String()) })) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal('privilegeExtension'), ...common, privilege: Type.String(), tablePermissions: Type.Optional(Type.Array(tablePermissionSchema)), forms: Type.Optional(Type.Array(Type.String())), functions: Type.Optional(Type.Array(Type.String())), reports: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('privilegeExtension'), ...common, privilege: Type.String(), tablePermissions: Type.Optional(Type.Array(tablePermissionSchema)), forms: Type.Optional(Type.Array(Type.String())), functions: Type.Optional(Type.Array(Type.String())), reports: Type.Optional(Type.Array(Type.String())), views: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('dutyExtension'), ...common, duty: Type.String(), privileges: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('roleExtension'), ...common, role: Type.String(), duties: Type.Optional(Type.Array(Type.String())), privileges: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('script'), ...common, code: Type.String() }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('scriptExtension'), ...common, script: Type.String(), code: Type.String() }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('function'), ...common, code: Type.String(), privileges: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('report'), ...common, dataSource: Type.String(), defaultFont: Type.Optional(Type.String({ minLength: 1 })), privileges: Type.Optional(Type.Array(Type.String())), page: Type.Optional(Type.Object({ size: Type.Optional(Type.Union([Type.Literal('A4'), Type.Literal('Letter')])), orientation: Type.Optional(Type.Union([Type.Literal('portrait'), Type.Literal('landscape')])), margins: Type.Optional(Type.Tuple([Type.Number(), Type.Number(), Type.Number(), Type.Number()])) }, { additionalProperties: false })), bands: Type.Array(reportBandSchema), lineSources: Type.Optional(Type.Array(Type.Object({ table: Type.String(), refField: Type.String(), bands: Type.Array(reportBandSchema) }, { additionalProperties: false }))), parameters: Type.Optional(Type.Array(reportParameterSchema)) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('view'), ...common,
+    source: Type.Object({ table: Type.String({ minLength: 1 }), alias: name }, { additionalProperties: false }),
+    joins: Type.Optional(Type.Array(Type.Object({
+      type: Type.Union([Type.Literal('inner'), Type.Literal('left')]), table: Type.String({ minLength: 1 }), alias: name,
+      on: Type.Array(Type.Object({ left: Type.String({ minLength: 3 }), right: Type.String({ minLength: 3 }) }, { additionalProperties: false }), { minItems: 1 }),
+    }, { additionalProperties: false }))),
+    columns: Type.Array(viewColumnSchema, { minItems: 1 }), parameters: Type.Optional(Type.Array(viewParameterSchema)),
+    filters: Type.Optional(Type.Array(viewFilterSchema)), groupBy: Type.Optional(Type.Array(Type.String({ minLength: 3 }))),
+    orderBy: Type.Optional(Type.Array(Type.Object({ column: Type.String({ minLength: 1 }), direction: Type.Optional(Type.Union([Type.Literal('asc'), Type.Literal('desc')])) }, { additionalProperties: false }))),
+  }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('chart'), ...common,
+    type: Type.Union(['bar', 'line', 'pie', 'donut', 'kpi'].map((v) => Type.Literal(v))),
+    view: Type.String({ minLength: 1 }), dimension: Type.Optional(Type.String({ minLength: 1 })),
+    measures: Type.Array(Type.Object({ field: Type.String({ minLength: 1 }), label: Type.Optional(Type.String()), color: Type.Optional(Type.String()) }, { additionalProperties: false }), { minItems: 1 }),
+    legend: Type.Optional(Type.Boolean()), stacked: Type.Optional(Type.Boolean()),
+  }, { additionalProperties: false }),
 ] as TSchema[];
 
 export const metadataArtifactSchema = Type.Union(artifactSchemas);

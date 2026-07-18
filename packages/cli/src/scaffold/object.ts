@@ -44,15 +44,17 @@ export interface MenuItemDef {
   label?: string;
   form: string;
 }
+export interface Placement { app: string; model: string; layer: string }
 
 export function scaffoldTable(
   metaDir: string,
-  data: { name: string; label: string; titleField?: string; fields: FieldDef[]; indexes?: IndexDef[] },
+  data: Placement & { name: string; label: string; titleField?: string; fields: FieldDef[]; indexes?: IndexDef[] },
 ): string {
   const path = join(metaDir, 'tables', `${data.name}.json`);
   const json = {
     kind: 'table',
     name: data.name,
+    app: data.app, model: data.model, layer: data.layer,
     label: data.label,
     ...(data.titleField ? { titleField: data.titleField } : {}),
     fields: data.fields.map(f => ({
@@ -70,16 +72,16 @@ export function scaffoldTable(
 
 export function scaffoldEnum(
   metaDir: string,
-  data: { name: string; label: string; values: EnumValueDef[] },
+  data: Placement & { name: string; label: string; values: EnumValueDef[] },
 ): string {
   const path = join(metaDir, 'enums', `${data.name}.json`);
-  writeJson(path, { kind: 'enum', name: data.name, label: data.label, values: data.values });
+  writeJson(path, { kind: 'enum', name: data.name, app: data.app, model: data.model, layer: data.layer, label: data.label, values: data.values });
   return path;
 }
 
 export function scaffoldForm(
   metaDir: string,
-  data: {
+  data: Placement & {
     name: string;
     label: string;
     table: string;
@@ -93,6 +95,7 @@ export function scaffoldForm(
   const json: Record<string, unknown> = {
     kind: 'form',
     name: data.name,
+    app: data.app, model: data.model, layer: data.layer,
     label: data.label,
     table: data.table,
   };
@@ -106,16 +109,16 @@ export function scaffoldForm(
 
 export function scaffoldMenu(
   metaDir: string,
-  data: { name: string; label: string; items: MenuItemDef[] },
+  data: Placement & { name: string; label: string; items: MenuItemDef[] },
 ): string {
   const path = join(metaDir, 'menus', `${data.name}.json`);
-  writeJson(path, { kind: 'menu', name: data.name, label: data.label, items: data.items });
+  writeJson(path, { kind: 'menu', name: data.name, app: data.app, model: data.model, layer: data.layer, label: data.label, items: data.items });
   return path;
 }
 
 export function scaffoldPrivilege(
   metaDir: string,
-  data: {
+  data: Placement & {
     name: string;
     label: string;
     tablePermissions?: TablePermissionDef[];
@@ -123,7 +126,7 @@ export function scaffoldPrivilege(
   },
 ): string {
   const path = join(metaDir, 'privileges', `${data.name}.json`);
-  const json: Record<string, unknown> = { kind: 'privilege', name: data.name, label: data.label };
+  const json: Record<string, unknown> = { kind: 'privilege', name: data.name, app: data.app, model: data.model, layer: data.layer, label: data.label };
   if (data.tablePermissions) json.tablePermissions = data.tablePermissions;
   if (data.forms) json.forms = data.forms;
   writeJson(path, json);
@@ -132,19 +135,19 @@ export function scaffoldPrivilege(
 
 export function scaffoldDuty(
   metaDir: string,
-  data: { name: string; label: string; privileges: string[] },
+  data: Placement & { name: string; label: string; privileges: string[] },
 ): string {
   const path = join(metaDir, 'duties', `${data.name}.json`);
-  writeJson(path, { kind: 'duty', name: data.name, label: data.label, privileges: data.privileges });
+  writeJson(path, { kind: 'duty', name: data.name, app: data.app, model: data.model, layer: data.layer, label: data.label, privileges: data.privileges });
   return path;
 }
 
 export function scaffoldRole(
   metaDir: string,
-  data: { name: string; label: string; duties?: string[]; privileges?: string[] },
+  data: Placement & { name: string; label: string; duties?: string[]; privileges?: string[] },
 ): string {
   const path = join(metaDir, 'roles', `${data.name}.json`);
-  const json: Record<string, unknown> = { kind: 'role', name: data.name, label: data.label };
+  const json: Record<string, unknown> = { kind: 'role', name: data.name, app: data.app, model: data.model, layer: data.layer, label: data.label };
   if (data.duties) json.duties = data.duties;
   if (data.privileges) json.privileges = data.privileges;
   writeJson(path, json);

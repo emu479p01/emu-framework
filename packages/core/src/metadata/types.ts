@@ -171,6 +171,8 @@ export interface FormMeta {
   /** Columns users may select when filtering the list. Defaults to listFields. */
   filterFields?: string[];
   groups?: FormGroupMeta[];
+  /** Reusable charts rendered after field groups and before line grids. */
+  charts?: FormChartMeta[];
   lines?: FormLineGridMeta[];
   layer?: LayerType;
   model?: string;
@@ -217,6 +219,7 @@ export interface PrivilegeMeta {
   forms?: string[];
   functions?: string[];
   reports?: string[];
+  views?: string[];
   layer?: LayerType;
   model?: string;
 }
@@ -263,6 +266,7 @@ export interface FormExtensionMeta {
   listFields?: string[];
   filterFields?: string[];
   groups?: FormGroupMeta[];
+  charts?: FormChartMeta[];
   actions?: FormAction[];
   layer?: LayerType;
   model?: string;
@@ -297,6 +301,7 @@ export interface PrivilegeExtensionMeta {
   forms?: string[];
   functions?: string[];
   reports?: string[];
+  views?: string[];
   layer?: LayerType;
   model?: string;
 }
@@ -436,6 +441,94 @@ export interface ReportParameterMeta {
   required?: boolean;
 }
 
+// ---- declarative views and reusable charts ----
+
+export type ViewParameterType = 'string' | 'int' | 'real' | 'boolean' | 'date' | 'datetime';
+export type ViewAggregate = 'count' | 'sum' | 'avg' | 'min' | 'max';
+
+export interface ViewParameterMeta {
+  name: string;
+  type: ViewParameterType;
+  required?: boolean;
+}
+
+export interface ViewSourceMeta {
+  table: string;
+  alias: string;
+}
+
+export interface ViewJoinMeta {
+  type: 'inner' | 'left';
+  table: string;
+  alias: string;
+  on: { left: string; right: string }[];
+}
+
+export interface ViewColumnMeta {
+  name: string;
+  label?: string;
+  expression:
+    | { type: 'field'; ref: string }
+    | { type: 'aggregate'; fn: ViewAggregate; ref?: string };
+}
+
+export type ViewFilterLiteral = string | number | boolean | null;
+export interface ViewFilterMeta {
+  ref: string;
+  operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'in';
+  value: ViewFilterLiteral | ViewFilterLiteral[] | { parameter: string };
+}
+
+export interface ViewMeta {
+  kind: 'view';
+  name: string;
+  app?: string;
+  label?: string;
+  source: ViewSourceMeta;
+  joins?: ViewJoinMeta[];
+  columns: ViewColumnMeta[];
+  parameters?: ViewParameterMeta[];
+  filters?: ViewFilterMeta[];
+  groupBy?: string[];
+  orderBy?: { column: string; direction?: 'asc' | 'desc' }[];
+  layer?: LayerType;
+  model?: string;
+}
+
+export interface ChartMeasureMeta {
+  field: string;
+  label?: string;
+  color?: string;
+}
+
+export interface ChartMeta {
+  kind: 'chart';
+  name: string;
+  app?: string;
+  label?: string;
+  type: 'bar' | 'line' | 'pie' | 'donut' | 'kpi';
+  view: string;
+  dimension?: string;
+  measures: ChartMeasureMeta[];
+  legend?: boolean;
+  stacked?: boolean;
+  layer?: LayerType;
+  model?: string;
+}
+
+export interface FormChartParameterBindingMeta {
+  parameter: string;
+  source: 'record' | 'literal';
+  field?: string;
+  value?: ViewFilterLiteral;
+}
+
+export interface FormChartMeta {
+  chart: string;
+  width?: 'half' | 'full';
+  parameterBindings?: FormChartParameterBindingMeta[];
+}
+
 export interface AppManifest {
   name: string;
   label?: string;
@@ -463,7 +556,9 @@ export type AnyMeta =
   | ScriptExtensionMeta
   | ScriptMeta
   | FunctionMeta
-  | ReportMeta;
+  | ReportMeta
+  | ViewMeta
+  | ChartMeta;
 
 /** All extension kinds (accumulate into base, never override). */
 export const EXTENSION_KINDS = new Set([
@@ -489,6 +584,8 @@ export const BASE_KINDS = new Set([
   'script',
   'function',
   'report',
+  'view',
+  'chart',
 ]);
 
 export const SYSTEM_FIELDS = ['id', 'createdAt', 'createdBy', 'modifiedAt', 'modifiedBy'] as const;

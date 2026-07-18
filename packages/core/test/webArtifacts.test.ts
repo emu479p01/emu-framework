@@ -12,6 +12,7 @@ function bootKernel(): Kernel {
 const webTable: AnyMeta = {
   kind: 'table',
   name: 'WEB_WebNote',
+  app: 'web', model: 'ClientCustom', layer: 'CUS',
   titleField: 'title',
   fields: [
     { name: 'title', type: 'string', mandatory: true },
@@ -19,7 +20,8 @@ const webTable: AnyMeta = {
   ],
 };
 
-const webForm: AnyMeta = { kind: 'form', name: 'WEB_WebNoteForm', table: 'WEB_WebNote' };
+const webForm: AnyMeta = { kind: 'form', name: 'WEB_WebNoteForm', app: 'web', model: 'ClientCustom', layer: 'CUS', table: 'WEB_WebNote' };
+const webManifest = { kind: 'app', name: 'web', models: [{ name: 'ClientCustom', layer: 'CUS' }] } as unknown as AnyMeta;
 
 describe('orderScriptsForExecution', () => {
   it('orders base scripts by layer/name and slots extensions after their base', () => {
@@ -39,9 +41,20 @@ describe('orderScriptsForExecution', () => {
 });
 
 describe('Kernel.applyWebArtifacts', () => {
+  it('never injects Models based on an App name', () => {
+    const kernel = bootKernel();
+    expect(kernel.applyWebArtifacts([{ kind: 'app', name: 'erp', label: 'Fresh ERP' } as unknown as AnyMeta])).toEqual([]);
+    expect(kernel.registry.loadedApps().find((app) => app.name === 'erp')?.models).toEqual([]);
+    const errors = kernel.applyWebArtifacts([
+      { kind: 'app', name: 'erp', label: 'Fresh ERP' } as unknown as AnyMeta,
+      { kind: 'table', name: 'ERP_Item', app: 'erp', fields: [{ name: 'name', type: 'string' }] } as AnyMeta,
+    ]);
+    expect(errors[0]?.error).toMatch(/model is required/i);
+  });
+
   it('adds new runtime artifacts and syncs schema — usable immediately', () => {
     const kernel = bootKernel();
-    const errors = kernel.applyWebArtifacts([webForm, webTable]); // out of order on purpose
+    const errors = kernel.applyWebArtifacts([webManifest, webForm, webTable]); // out of order on purpose
     expect(errors).toEqual([]);
     expect(kernel.registry.getTable('WEB_WebNote').name).toBe('WEB_WebNote');
     expect(kernel.registry.getForm('WEB_WebNoteForm').table).toBe('WEB_WebNote');
@@ -73,8 +86,8 @@ describe('Kernel.applyWebArtifacts', () => {
 
   it('skips invalid artifacts with errors, keeps valid ones', () => {
     const kernel = bootKernel();
-    const bad: AnyMeta = { kind: 'form', name: 'WEB_BadForm', table: 'Nope' };
-    const errors = kernel.applyWebArtifacts([webTable, bad]);
+    const bad: AnyMeta = { kind: 'form', name: 'WEB_BadForm', app: 'web', model: 'ClientCustom', layer: 'CUS', table: 'Nope' };
+    const errors = kernel.applyWebArtifacts([webManifest, webTable, bad]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatchObject({ name: 'WEB_BadForm' });
     expect(kernel.registry.hasTable('WEB_WebNote')).toBe(true);
@@ -82,9 +95,9 @@ describe('Kernel.applyWebArtifacts', () => {
 
   it('re-apply replaces the web layer (edit + delete semantics)', () => {
     const kernel = bootKernel();
-    kernel.applyWebArtifacts([webTable, webForm]);
+    kernel.applyWebArtifacts([webManifest, webTable, webForm]);
     // now remove the form, keep only the table
-    const errors = kernel.applyWebArtifacts([webTable]);
+    const errors = kernel.applyWebArtifacts([webManifest, webTable]);
     expect(errors).toEqual([]);
     expect(kernel.registry.hasTable('WEB_WebNote')).toBe(true);
     expect(() => kernel.registry.getForm('WEB_WebNoteForm')).toThrow();
@@ -135,7 +148,7 @@ describe('Kernel.applyWebArtifacts', () => {
         },
       });
     });
-    kernel.applyWebArtifacts([webTable]); // clears + rebuilds hooks
+    kernel.applyWebArtifacts([webManifest, webTable]); // clears + rebuilds hooks
     const rec = kernel.context().newRecord('TESTAPP_CustTable');
     expect(rec.f.name).toBe('from-native-hook');
     expect(calls).toBeGreaterThan(0);

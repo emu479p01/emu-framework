@@ -23,6 +23,8 @@ describe('web designer API', () => {
       payload: { username: 'admin', password: 'Admin-password-123' },
     });
     admin = { cookie: (res.headers['set-cookie'] as string).split(';')[0] };
+    const webApp = await app.inject({ method: 'PUT', url: '/api/designer/artifacts/app/web', headers: admin, payload: { kind: 'app', name: 'web', label: 'Web', models: [{ name: 'ClientCustom', layer: 'CUS' }] } });
+    expect(webApp.statusCode).toBe(200);
   });
 
   it('rejects non-admin users', async () => {
@@ -51,6 +53,7 @@ describe('web designer API', () => {
       payload: {
         kind: 'table',
         name: 'WEB_WebProject',
+        app: 'web', model: 'ClientCustom', layer: 'CUS',
         label: 'Projects',
         titleField: 'projName',
         fields: [
@@ -65,7 +68,7 @@ describe('web designer API', () => {
       method: 'PUT',
       url: '/api/designer/artifacts/form/WEB_WebProjectForm',
       headers: admin,
-      payload: { kind: 'form', name: 'WEB_WebProjectForm', table: 'WEB_WebProject' },
+      payload: { kind: 'form', name: 'WEB_WebProjectForm', app: 'web', model: 'ClientCustom', layer: 'CUS', table: 'WEB_WebProject' },
     });
     expect(form.statusCode).toBe(200);
 
@@ -88,7 +91,7 @@ describe('web designer API', () => {
       method: 'POST',
       url: '/api/designer/artifacts',
       headers: admin,
-      payload: { kind: 'enum', name: 'WEB_ApiPriority', label: 'API priority', values: [{ name: 'Normal', value: 0 }] },
+      payload: { kind: 'enum', name: 'WEB_ApiPriority', app: 'web', model: 'ClientCustom', layer: 'CUS', label: 'API priority', values: [{ name: 'Normal', value: 0 }] },
     });
     expect(created.statusCode).toBe(201);
     expect(created.json().artifact).toMatchObject({ kind: 'enum', name: 'WEB_ApiPriority' });
@@ -97,9 +100,48 @@ describe('web designer API', () => {
       method: 'POST',
       url: '/api/designer/artifacts',
       headers: admin,
-      payload: { kind: 'enum', name: 'WEB_ApiPriority', values: [{ name: 'Other', value: 1 }] },
+      payload: { kind: 'enum', name: 'WEB_ApiPriority', app: 'web', model: 'ClientCustom', layer: 'CUS', values: [{ name: 'Other', value: 1 }] },
     });
     expect(duplicate.statusCode).toBe(409);
+  });
+
+  it('creates Apps with zero Models and requires explicit placement for every new artifact', async () => {
+    const createdApp = await app.inject({
+      method: 'PUT', url: '/api/designer/artifacts/app/zeromodel', headers: admin,
+      payload: { kind: 'app', name: 'zeromodel', label: 'Zero model' },
+    });
+    expect(createdApp.statusCode).toBe(200);
+    const listed = await app.inject({ method: 'GET', url: '/api/designer/artifacts', headers: admin });
+    expect(listed.json().apps.find((entry: { name: string }) => entry.name === 'zeromodel').models).toEqual([]);
+
+    const missingModel = await app.inject({
+      method: 'PUT', url: '/api/designer/artifacts/table/ZEROMODEL_Thing', headers: admin,
+      payload: { kind: 'table', name: 'ZEROMODEL_Thing', app: 'zeromodel', fields: [{ name: 'name', type: 'string' }] },
+    });
+    expect(missingModel.statusCode).toBe(422);
+    expect(missingModel.json().error).toMatch(/explicit app and model/i);
+
+    const model = await app.inject({ method: 'PUT', url: '/api/designer/artifacts/model/zeromodel/Main', headers: admin, payload: { layer: 'CUS' } });
+    expect(model.statusCode).toBe(200);
+    const table = await app.inject({
+      method: 'PUT', url: '/api/designer/artifacts/table/ZEROMODEL_Thing', headers: admin,
+      payload: { kind: 'table', name: 'ZEROMODEL_Thing', app: 'zeromodel', model: 'Main', fields: [{ name: 'name', type: 'string' }] },
+    });
+    expect(table.statusCode).toBe(200);
+  });
+
+  it('does not allow an existing artifact to be moved across Apps', async () => {
+    const creditApp = await app.inject({
+      method: 'PUT', url: '/api/designer/artifacts/app/erp.credit', headers: admin,
+      payload: { kind: 'app', name: 'erp.credit', label: 'Credit', dependsOn: ['erp'], models: [{ name: 'Credit', layer: 'CUS' }] },
+    });
+    expect(creditApp.statusCode).toBe(200);
+    const moved = await app.inject({
+      method: 'PUT', url: '/api/designer/artifacts/table/ERP_CustTable', headers: admin,
+      payload: { kind: 'table', name: 'ERP_CustTable', app: 'erp.credit', model: 'Credit', fields: [{ name: 'replacement', type: 'string' }] },
+    });
+    expect(moved.statusCode).toBe(422);
+    expect(moved.json().error).toMatch(/cannot move/i);
   });
 
   it('rejects invalid artifacts with 422 and keeps the registry intact', async () => {
@@ -107,7 +149,7 @@ describe('web designer API', () => {
       method: 'PUT',
       url: '/api/designer/artifacts/form/WEB_BadForm',
       headers: admin,
-      payload: { kind: 'form', name: 'WEB_BadForm', table: 'DoesNotExist' },
+      payload: { kind: 'form', name: 'WEB_BadForm', app: 'web', model: 'ClientCustom', layer: 'CUS', table: 'DoesNotExist' },
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error).toMatch(/unknown table/i);

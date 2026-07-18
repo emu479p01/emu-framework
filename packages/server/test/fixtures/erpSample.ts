@@ -93,22 +93,16 @@ export const erpSampleArtifacts: (AnyMeta & { app?: string })[] = [
     { table: `${P}_InventItem`, read: true, create: true, update: true, delete: true },
     { table: `${P}_DirPartyTable`, read: true, create: true, update: true, delete: true },
   ], forms: [`${P}_CustTableForm`, `${P}_VendTableForm`, `${P}_InventItemForm`, `${P}_DirPartyTableForm`] } as any,
-  { kind: 'privilege', name: 'ERP_UserRoleMaintain', label: 'Maintain app users', ...erp, tablePermissions: [
-    { table: 'FW_User', read: true, update: true },
-    { table: 'FW_UserRole', read: true, create: true, update: true, delete: true },
-  ], forms: ['FW_UserForm'] } as any,
   { kind: 'duty', name: 'ERP_SalesOrderProcessing', label: 'Sales order processing', ...erp, privileges: ['ERP_SalesOrderProcess'] } as any,
   { kind: 'duty', name: 'ERP_MasterDataMaintenance', label: 'Master data maintenance', ...erp, privileges: ['ERP_MasterDataMaintain'] } as any,
-  { kind: 'duty', name: 'ERP_AppAdministration', label: 'App administration', ...erp, privileges: ['ERP_UserRoleMaintain'] } as any,
-  { kind: 'role', name: 'ERP_SalesManager', label: 'Sales manager', ...erp, duties: ['ERP_SalesOrderProcessing', 'ERP_MasterDataMaintenance', 'ERP_AppAdministration'] } as any,
+  { kind: 'role', name: 'ERP_SalesManager', label: 'Sales manager', ...erp, duties: ['ERP_SalesOrderProcessing', 'ERP_MasterDataMaintenance'] } as any,
   { kind: 'role', name: 'ERP_SalesClerk', label: 'Sales clerk', ...erp, duties: ['ERP_SalesOrderProcessing'] } as any,
-  { kind: 'role', name: 'ERP_Admin', label: 'Administrator', ...erp, duties: ['ERP_SalesOrderProcessing', 'ERP_MasterDataMaintenance', 'ERP_AppAdministration'] } as any,
+  { kind: 'role', name: 'ERP_Admin', label: 'Administrator', ...erp, duties: ['ERP_SalesOrderProcessing', 'ERP_MasterDataMaintenance'] } as any,
   { kind: 'menu', name: 'ERP_MainMenu', label: 'Mini ERP', ...erp, items: [
     { label: 'Sales', items: [{ label: 'Sales orders', form: `${P}_SalesTableForm` }] },
     { label: 'Inventory', items: [{ label: 'Items', form: `${P}_InventItemForm` }] },
     { label: 'Customers', items: [{ label: 'Customers', form: `${P}_CustTableForm` }, { label: 'All parties', form: `${P}_DirPartyTableForm` }] },
     { label: 'Vendors', items: [{ label: 'Vendors', form: `${P}_VendTableForm` }] },
-    { label: 'Administration', items: [{ label: 'Users', form: 'FW_UserForm' }] },
   ] } as any,
 ];
 

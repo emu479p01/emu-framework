@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import { NButton, NCard, NCheckbox, NFormItem, NInput, NSelect, NSpace } from 'naive-ui';
 import type { FormAction, PickerFilterMeta } from '@emu/core';
-import { useMeta } from '../../stores/meta';
+import { useDesigner } from '../../stores/designer';
 
 const props = defineProps<{ actions: FormAction[]; recordTable: string; lineTable?: string }>();
-const meta = useMeta();
+const designer = useDesigner();
 const TYPES = [{ label: 'Function', value: 'function' }, { label: 'Report', value: 'report' }, { label: 'Record picker', value: 'picker' }];
 const OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains'].map((value) => ({ label: value, value }));
 const VALUE_SOURCES = [{ label: 'Constant value', value: 'constant' }, { label: 'Current record field', value: 'record' }, { label: 'Current line field', value: 'line' }];
-const tableOptions = () => (meta.meta?.tables ?? []).map((table) => ({ label: table.label ?? table.name, value: table.name }));
-const fieldOptions = (table: string | undefined) => (table ? (meta.table(table)?.fields ?? []).map((field) => ({ label: field.label ?? field.name, value: field.name })) : []);
-const functionOptions = () => (meta.meta?.actions ?? []).map((name) => ({ label: name, value: name }));
-const reportOptions = () => (meta.meta?.reports ?? []).map((report) => ({ label: report.label ?? report.name, value: report.name }));
+const tableOptions = () => designer.catalog.tables.map((table) => ({ label: String(table.label ?? table.name), value: table.name }));
+const fieldOptions = (table: string | undefined) => {
+  const item = table ? designer.catalog.tables.find((candidate) => candidate.name === table) : undefined;
+  return ((item?.fields ?? []) as { name: string; label?: string }[]).map((field) => ({ label: field.label ?? field.name, value: field.name }));
+};
+const functionOptions = () => designer.catalog.functions.map((item) => ({ label: String(item.label ?? item.name), value: item.name }));
+const reportOptions = () => designer.catalog.reports.map((report) => ({ label: String(report.label ?? report.name), value: report.name }));
 function actionType(action: FormAction) { return action.type ?? 'function'; }
 function add() { props.actions.push({ label: '', type: 'function', target: '' }); }
 function changeType(action: FormAction, type: 'function' | 'report' | 'picker') {

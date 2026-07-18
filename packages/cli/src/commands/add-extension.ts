@@ -129,7 +129,7 @@ async function addTableExt(root: string, appDir: string, targetApps: string[], a
     p.log.success(`  Added index: ${idxName} (${idxFields.join(', ')})`);
   }
 
-  const filepath = scaffoldTableExtension(appDir, { name, table, fields, indexes: indexes.length > 0 ? indexes : undefined });
+  const filepath = scaffoldTableExtension(appDir, { app, model, layer: sourceLayer, name, table, fields, indexes: indexes.length > 0 ? indexes : undefined });
   p.outro(pc.green(`Created ${filepath}`));
 }
 
@@ -149,7 +149,7 @@ async function addFormExt(root: string, appDir: string, targetApps: string[], ap
   }) as string;
   if (p.isCancel(name)) process.exit(0);
 
-  const filepath = scaffoldFormExtension(appDir, { name, form });
+  const filepath = scaffoldFormExtension(appDir, { app, model, layer: sourceLayer, name, form });
   p.outro(pc.green(`Created ${filepath}`));
   p.log.message(pc.dim('Edit the JSON to add listFields, groups, etc.'));
 }
@@ -188,7 +188,7 @@ async function addMenuExt(root: string, appDir: string, targetApps: string[], ap
     p.log.success(`  Added: ${itemLabel || itemForm} -> ${itemForm}`);
   }
 
-  const filepath = scaffoldMenuExtension(appDir, { name, menu, items });
+  const filepath = scaffoldMenuExtension(appDir, { app, model, layer: sourceLayer, name, menu, items });
   p.outro(pc.green(`Created ${filepath}`));
 }
 

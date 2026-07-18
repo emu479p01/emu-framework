@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypt
 import type { DataContext } from '@emu/core';
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12; // 12 hours
+export const MIN_PASSWORD_LENGTH = 12;
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString('hex');
@@ -37,6 +38,20 @@ export function login(ctx: DataContext, username: string, password: string): str
     })
     .insert();
   return token;
+}
+
+export function createSession(ctx: DataContext, username: string): string {
+  const token = randomUUID() + randomBytes(16).toString('hex');
+  ctx.newRecord('FW_Session').setMany({
+    token,
+    username,
+    expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
+  }).insert();
+  return token;
+}
+
+export function revokeSessions(ctx: DataContext, username: string): void {
+  for (const session of ctx.select('FW_Session').whereEq({ username }).toArray()) session.delete();
 }
 
 export function logout(ctx: DataContext, token: string): void {

@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import ExcelJS from 'exceljs';
 import { parse as parseCsvSync } from 'csv-parse/sync';
 import { stringify as stringifyCsvSync } from 'csv-stringify/sync';
-import type { DataContext, FieldValue, Kernel, TableMeta } from '@emu/core';
+import { SecurityError, type DataContext, type FieldValue, type Kernel, type TableMeta } from '@emu/core';
 
 /** Rows beyond this are silently truncated on export — a safety cap, not an expected ceiling. */
 const EXPORT_ROW_CAP = 50_000;
@@ -181,7 +181,10 @@ export function registerImportExportRoutes(app: FastifyInstance, kernel: Kernel,
 
   app.post<{ Params: { table: string } }>('/api/data/:table/import/preview', async (req, reply) => {
     const table = dataTable(req.params.table, req);
-    userCtx(req); // ensure authenticated; read-level access is enough to preview
+    const ctx = userCtx(req);
+    if (!ctx.policy.can(table.name, 'create') && !ctx.policy.can(table.name, 'update')) {
+      throw new SecurityError(`Access denied: import '${table.name}'`);
+    }
     const file = await req.file();
     if (!file) return reply.status(400).send({ error: 'No file uploaded' });
     const buffer = await file.toBuffer();
@@ -227,6 +230,10 @@ export function registerImportExportRoutes(app: FastifyInstance, kernel: Kernel,
     if (!fileBuffer) return reply.status(400).send({ error: 'No file uploaded' });
     if (mode === 'upsert' && !keyField) {
       return reply.status(400).send({ error: 'keyField is required for upsert mode' });
+    }
+    if (mode === 'insert' && !ctx.policy.can(table.name, 'create')) throw new SecurityError(`Access denied: import '${table.name}'`);
+    if (mode === 'upsert' && (!ctx.policy.can(table.name, 'create') || !ctx.policy.can(table.name, 'update'))) {
+      throw new SecurityError(`Access denied: upsert '${table.name}'`);
     }
 
     const parsed = await parseUploadedFile(filename, fileBuffer);

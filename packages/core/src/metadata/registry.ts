@@ -23,6 +23,8 @@ import type {
   DutyExtensionMeta,
   TableExtensionMeta,
   TableMeta,
+  ViewMeta,
+  ChartMeta,
 } from './types.js';
 import { SYSTEM_FIELDS, LAYER_ORDER, DEFAULT_LAYER, EXTENSION_KINDS, isIconName, canExtendLayer, canonicalExtensionName, type LayerType } from './types.js';
 import { validateMetadataArtifact } from './schema.js';
@@ -54,6 +56,8 @@ const META_DIRS: { dir: string; kind: AnyMeta['kind'] }[] = [
   { dir: 'scriptExtensions', kind: 'scriptExtension' },
   { dir: 'functions', kind: 'function' },
   { dir: 'reports', kind: 'report' },
+  { dir: 'views', kind: 'view' },
+  { dir: 'charts', kind: 'chart' },
 ];
 
 const KNOWN_META_KINDS = new Set(META_DIRS.map((d) => d.dir));
@@ -74,6 +78,8 @@ export class MetadataRegistry {
   private scripts = new Map<string, ScriptMeta>();
   private functions = new Map<string, FunctionMeta>();
   private reports = new Map<string, ReportMeta>();
+  private views = new Map<string, ViewMeta>();
+  private charts = new Map<string, ChartMeta>();
   private extensionNames = new Set<string>();
   private extensionTargets = new Set<string>();
   private warningMessages: string[] = [];
@@ -217,6 +223,9 @@ export class MetadataRegistry {
     const targetLayer = (target as any).layer ?? DEFAULT_LAYER;
     if (!canExtendLayer(sourceLayer, targetLayer)) throw new MetadataError(`Extension '${meta.name}': layer '${sourceLayer}' must be higher than target '${targetName}' layer '${targetLayer}'`);
     const targetApp = this.artifactApp.get(targetName);
+    if (targetApp === 'system' || targetName.startsWith('FW_')) {
+      throw new MetadataError(`Extension '${meta.name}': Framework metadata '${targetName}' is read-only`);
+    }
     if (targetApp && targetApp !== appName && !this.dependsOnTransitively(appName, targetApp)) {
       throw new MetadataError(`Extension '${meta.name}': app '${appName}' must depend on '${targetApp}'`);
     }
@@ -280,6 +289,10 @@ export class MetadataRegistry {
         return this.functions as Map<string, AnyMeta>;
       case 'report':
         return this.reports as Map<string, AnyMeta>;
+      case 'view':
+        return this.views as Map<string, AnyMeta>;
+      case 'chart':
+        return this.charts as Map<string, AnyMeta>;
       default:
         throw new MetadataError(`Unsupported base kind '${kind}'`);
     }
@@ -288,11 +301,12 @@ export class MetadataRegistry {
   private normalizeArtifact(manifest: AppManifest, artifact: AnyMeta): AnyMeta {
     const meta = structuredClone(artifact) as AnyMeta;
     const models = manifest.models ?? [];
-    const defaultModel = models[0];
     (meta as any).app ??= manifest.name;
-    if ((meta as any).kind !== 'app' && !(meta as any).model && defaultModel) {
-      (meta as any).model = defaultModel.name;
-    }
+    // File-backed artifacts from older releases commonly omitted `model` when
+    // their manifest declared a single model. Keep that read compatibility;
+    // all creation APIs require an explicit app/model and a zero-model app has
+    // no value to infer here.
+    if (!(meta as any).model && models[0]) (meta as any).model = models[0].name;
     const model = models.find((m) => m.name === (meta as any).model);
     if (model) (meta as any).layer = model.layer;
     return meta;
@@ -341,6 +355,7 @@ export class MetadataRegistry {
       if (e.listFields) base.listFields = [...(base.listFields ?? []), ...e.listFields];
       if (e.filterFields) base.filterFields = [...new Set([...(base.filterFields ?? []), ...e.filterFields])];
       if (e.groups) base.groups = [...(base.groups ?? []), ...e.groups];
+      if (e.charts) base.charts = [...(base.charts ?? []), ...e.charts];
       if (e.actions) base.actions = [...(base.actions ?? []), ...e.actions];
     } else if (e.kind === 'menuExtension') {
       const base = this.menus.get(e.menu);
@@ -357,6 +372,7 @@ export class MetadataRegistry {
       if (e.forms) base.forms = [...(base.forms ?? []), ...e.forms];
       if (e.functions) base.functions = [...(base.functions ?? []), ...e.functions];
       if (e.reports) base.reports = [...(base.reports ?? []), ...e.reports];
+      if (e.views) base.views = [...(base.views ?? []), ...e.views];
     } else if (e.kind === 'dutyExtension') {
       const base = this.duties.get(e.duty);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown duty '${e.duty}'`);
@@ -472,6 +488,47 @@ export class MetadataRegistry {
       checkFields(form.filterFields, 'filterFields');
       for (const g of form.groups ?? []) checkFields(g.fields, 'group');
       for (const action of form.actions ?? []) this.validateFormAction(action, table, undefined, `Form '${form.name}'`);
+      for (const embedded of form.charts ?? []) {
+        const chart = this.charts.get(embedded.chart);
+        if (!chart) throw new MetadataError(`Form '${form.name}': unknown chart '${embedded.chart}'`);
+        const formApp = this.artifactApp.get(form.name);
+        const chartApp = this.artifactApp.get(chart.name);
+        if (formApp && chartApp && formApp !== chartApp && !this.dependsOnTransitively(formApp, chartApp)) {
+          throw new MetadataError(`Form '${form.name}': app '${formApp}' must depend on '${chartApp}' to embed '${chart.name}'`);
+        }
+        const view = this.views.get(chart.view)!;
+        const parameters = new Map((view?.parameters ?? []).map((parameter) => [parameter.name, parameter]));
+        const bound = new Set<string>();
+        for (const binding of embedded.parameterBindings ?? []) {
+          const parameter = parameters.get(binding.parameter);
+          if (!parameter) {
+            throw new MetadataError(`Form '${form.name}' chart '${chart.name}': unknown View parameter '${binding.parameter}'`);
+          }
+          if (bound.has(binding.parameter)) throw new MetadataError(`Form '${form.name}' chart '${chart.name}': duplicate binding '${binding.parameter}'`);
+          bound.add(binding.parameter);
+          if (binding.source === 'record') {
+            if (!binding.field || !fieldNames.has(binding.field)) {
+              throw new MetadataError(`Form '${form.name}' chart '${chart.name}': unknown record field '${binding.field ?? ''}'`);
+            }
+            const systemTypes: Record<string, string> = { id: 'int', createdAt: 'datetime', modifiedAt: 'datetime', createdBy: 'string', modifiedBy: 'string' };
+            const recordType = table.fields.find((field) => field.name === binding.field)?.type ?? systemTypes[binding.field];
+            const normalize = (type: string | undefined) => type === 'reference' || type === 'enum' ? 'int' : type;
+            const compatible = normalize(recordType) === parameter.type || (normalize(recordType) === 'int' && parameter.type === 'real');
+            if (!compatible) throw new MetadataError(`Form '${form.name}' chart '${chart.name}': field '${binding.field}' is incompatible with parameter '${parameter.name}' (${parameter.type})`);
+          } else if (binding.value === undefined) {
+            throw new MetadataError(`Form '${form.name}' chart '${chart.name}': literal binding '${binding.parameter}' requires a value`);
+          } else if (binding.value !== null) {
+            const literalType = typeof binding.value === 'number' ? (Number.isInteger(binding.value) ? 'int' : 'real') : typeof binding.value;
+            const compatible = literalType === parameter.type || (literalType === 'int' && parameter.type === 'real') || ((parameter.type === 'date' || parameter.type === 'datetime') && literalType === 'string');
+            if (!compatible) throw new MetadataError(`Form '${form.name}' chart '${chart.name}': literal binding '${binding.parameter}' is incompatible with parameter type '${parameter.type}'`);
+          }
+        }
+        for (const parameter of parameters.values()) {
+          if (parameter.required && !bound.has(parameter.name)) {
+            throw new MetadataError(`Form '${form.name}' chart '${chart.name}': required View parameter '${parameter.name}' must be bound`);
+          }
+        }
+      }
       for (const line of form.lines ?? []) {
         const lineTable = this.tables.get(line.table);
         if (!lineTable) {
@@ -530,6 +587,9 @@ export class MetadataRegistry {
       for (const name of priv.reports ?? []) {
         if (!this.reports.has(name)) throw new MetadataError(`Privilege '${priv.name}': unknown report '${name}'`);
       }
+      for (const name of priv.views ?? []) {
+        if (!this.views.has(name)) throw new MetadataError(`Privilege '${priv.name}': unknown view '${name}'`);
+      }
     }
     for (const duty of this.duties.values()) {
       for (const priv of duty.privileges) {
@@ -572,6 +632,26 @@ export class MetadataRegistry {
         this.validateReportBands(line.bands, lineFieldNames, `Report '${report.name}' lineSource '${line.table}'`);
       }
     }
+    for (const view of this.views.values()) this.validateView(view);
+    for (const chart of this.charts.values()) {
+      const view = this.views.get(chart.view);
+      if (!view) throw new MetadataError(`Chart '${chart.name}': unknown view '${chart.view}'`);
+      const chartApp = this.artifactApp.get(chart.name);
+      const viewApp = this.artifactApp.get(view.name);
+      if (chartApp && viewApp && chartApp !== viewApp && !this.dependsOnTransitively(chartApp, viewApp)) {
+        throw new MetadataError(`Chart '${chart.name}': app '${chartApp}' must depend on '${viewApp}' to use '${view.name}'`);
+      }
+      const columns = new Set(view.columns.map((column) => column.name));
+      if (chart.type !== 'kpi' && (!chart.dimension || !columns.has(chart.dimension))) {
+        throw new MetadataError(`Chart '${chart.name}': dimension must reference a View output column`);
+      }
+      for (const measure of chart.measures) {
+        if (!columns.has(measure.field)) throw new MetadataError(`Chart '${chart.name}': unknown measure '${measure.field}'`);
+      }
+      if (chart.type === 'kpi' && chart.measures.length !== 1) {
+        throw new MetadataError(`Chart '${chart.name}': KPI charts require exactly one measure`);
+      }
+    }
     for (const ext of [...this.extensionNames]) {
       void ext;
     }
@@ -584,6 +664,114 @@ export class MetadataRegistry {
           throw new MetadataError(`${context}: unknown field '${el.field}' in ${band.kind} band`);
         }
       }
+    }
+  }
+
+  private validateView(view: ViewMeta): void {
+    const aliases = new Map<string, TableMeta>();
+    const sourceTable = this.tables.get(view.source.table);
+    if (!sourceTable) throw new MetadataError(`View '${view.name}': unknown source table '${view.source.table}'`);
+    aliases.set(view.source.alias, sourceTable);
+    this.validateViewTableAccess(view, sourceTable.name);
+
+    const fieldForRef = (ref: string) => {
+      const [alias, field, ...rest] = ref.split('.');
+      if (!alias || !field || rest.length) throw new MetadataError(`View '${view.name}': invalid field reference '${ref}'`);
+      const table = aliases.get(alias);
+      if (!table) throw new MetadataError(`View '${view.name}': unknown alias '${alias}'`);
+      if (field === 'id') return { type: 'int' as const, field };
+      const meta = table.fields.find((candidate) => candidate.name === field);
+      if (!meta) throw new MetadataError(`View '${view.name}': unknown field '${ref}'`);
+      return meta;
+    };
+
+    for (const join of view.joins ?? []) {
+      if (aliases.has(join.alias)) throw new MetadataError(`View '${view.name}': duplicate alias '${join.alias}'`);
+      const table = this.tables.get(join.table);
+      if (!table) throw new MetadataError(`View '${view.name}': unknown join table '${join.table}'`);
+      aliases.set(join.alias, table);
+      this.validateViewTableAccess(view, table.name);
+      for (const condition of join.on) {
+        const left = fieldForRef(condition.left);
+        const right = fieldForRef(condition.right);
+        const numeric = new Set(['int', 'real', 'reference', 'enum', 'boolean']);
+        if (left.type !== right.type && !(numeric.has(left.type) && numeric.has(right.type))) {
+          throw new MetadataError(`View '${view.name}': join fields '${condition.left}' and '${condition.right}' have incompatible types`);
+        }
+      }
+    }
+
+    const parameters = new Map<string, NonNullable<ViewMeta['parameters']>[number]>();
+    for (const parameter of view.parameters ?? []) {
+      if (parameters.has(parameter.name)) throw new MetadataError(`View '${view.name}': duplicate parameter '${parameter.name}'`);
+      parameters.set(parameter.name, parameter);
+    }
+    for (const filter of view.filters ?? []) {
+      const field = fieldForRef(filter.ref);
+      const parameterRef = typeof filter.value === 'object' && filter.value !== null && !Array.isArray(filter.value) && 'parameter' in filter.value
+        ? filter.value.parameter
+        : undefined;
+      const parameter = parameterRef ? parameters.get(parameterRef) : undefined;
+      if (parameterRef && !parameter) {
+        throw new MetadataError(`View '${view.name}': unknown parameter '${parameterRef}'`);
+      }
+      const comparableType = (type: string) => type === 'reference' || type === 'enum' ? 'int' : type;
+      const fieldType = comparableType(field.type);
+      if (parameter && comparableType(parameter.type) !== fieldType && !(parameter.type === 'int' && fieldType === 'real')) {
+        throw new MetadataError(`View '${view.name}': parameter '${parameter.name}' type '${parameter.type}' is incompatible with '${filter.ref}' (${field.type})`);
+      }
+      const literals = parameter ? [] : Array.isArray(filter.value) ? filter.value : [filter.value];
+      for (const literal of literals) {
+        if (literal === null) continue;
+        const literalType = typeof literal === 'number' ? (Number.isInteger(literal) ? 'int' : 'real') : typeof literal;
+        const compatible = literalType === fieldType || (literalType === 'int' && fieldType === 'real') || ((fieldType === 'date' || fieldType === 'datetime') && literalType === 'string');
+        if (!compatible) throw new MetadataError(`View '${view.name}': filter value type '${literalType}' is incompatible with '${filter.ref}' (${field.type})`);
+      }
+      if (filter.operator === 'contains' && fieldType !== 'string') {
+        throw new MetadataError(`View '${view.name}': 'contains' requires a string field`);
+      }
+      if (filter.operator === 'in' && !(Array.isArray(filter.value) || (typeof filter.value === 'object' && filter.value !== null && 'parameter' in filter.value))) {
+        throw new MetadataError(`View '${view.name}': 'in' filter requires an array or parameter`);
+      }
+    }
+
+    const outputNames = new Set<string>();
+    const grouping = new Set(view.groupBy ?? []);
+    for (const ref of grouping) fieldForRef(ref);
+    const hasAggregate = view.columns.some((column) => column.expression.type === 'aggregate');
+    for (const column of view.columns) {
+      if (outputNames.has(column.name)) throw new MetadataError(`View '${view.name}': duplicate output column '${column.name}'`);
+      outputNames.add(column.name);
+      if (column.expression.type === 'field') {
+        fieldForRef(column.expression.ref);
+        if (hasAggregate && !grouping.has(column.expression.ref)) {
+          throw new MetadataError(`View '${view.name}': non-aggregate field '${column.expression.ref}' must be in groupBy`);
+        }
+      } else {
+        if (column.expression.fn !== 'count' && !column.expression.ref) {
+          throw new MetadataError(`View '${view.name}': aggregate '${column.expression.fn}' requires a field`);
+        }
+        if (column.expression.ref) {
+          const field = fieldForRef(column.expression.ref);
+          if (['sum', 'avg'].includes(column.expression.fn) && !['int', 'real'].includes(field.type)) {
+            throw new MetadataError(`View '${view.name}': aggregate '${column.expression.fn}' requires a numeric field`);
+          }
+        }
+      }
+    }
+    for (const order of view.orderBy ?? []) {
+      if (!outputNames.has(order.column)) throw new MetadataError(`View '${view.name}': unknown sort column '${order.column}'`);
+    }
+  }
+
+  private validateViewTableAccess(view: ViewMeta, tableName: string): void {
+    if (tableName.startsWith('FW_') || this.artifactApp.get(tableName) === 'system') {
+      throw new MetadataError(`View '${view.name}': protected table '${tableName}' cannot be queried`);
+    }
+    const viewApp = this.artifactApp.get(view.name) ?? view.app!;
+    const tableApp = this.artifactApp.get(tableName);
+    if (tableApp && tableApp !== viewApp && !this.dependsOnTransitively(viewApp, tableApp)) {
+      throw new MetadataError(`View '${view.name}': app '${viewApp}' must depend on '${tableApp}' to query '${tableName}'`);
     }
   }
 
@@ -726,6 +914,24 @@ export class MetadataRegistry {
     return [...this.reports.values()];
   }
 
+  getView(name: string): ViewMeta {
+    const view = this.views.get(name);
+    if (!view) throw new MetadataError(`Unknown view '${name}'`);
+    return view;
+  }
+
+  hasView(name: string): boolean { return this.views.has(name); }
+  allViews(): ViewMeta[] { return [...this.views.values()]; }
+
+  getChart(name: string): ChartMeta {
+    const chart = this.charts.get(name);
+    if (!chart) throw new MetadataError(`Unknown chart '${name}'`);
+    return chart;
+  }
+
+  hasChart(name: string): boolean { return this.charts.has(name); }
+  allCharts(): ChartMeta[] { return [...this.charts.values()]; }
+
   loadedApps(): AppManifest[] {
     return this.apps.map((a) => a.manifest);
   }
@@ -733,6 +939,10 @@ export class MetadataRegistry {
   /** Returns the app name that registered a given artifact. */
   appForArtifact(name: string): string | undefined {
     return this.artifactApp.get(name);
+  }
+
+  appDependsOn(appName: string, target: string): boolean {
+    return appName === target || this.dependsOnTransitively(appName, target);
   }
 
   /** Returns module directory names for an app. */
@@ -759,32 +969,5 @@ function readArtifacts(dir: string, kind: AnyMeta['kind'], out: AnyMeta[]): void
 }
 
 function normalizeManifest(manifest: AppManifest): AppManifest {
-  if (manifest.models && manifest.models.length > 0) return manifest;
-  if (manifest.name === 'system') {
-    return {
-      ...manifest,
-      models: [{ name: 'Framework', label: 'Framework', layer: 'SYS' }],
-    };
-  }
-  if (manifest.name === 'erp') {
-    return {
-      ...manifest,
-      models: [{ name: 'MiniERPApplication', label: 'Mini ERP Application', layer: 'SYS' }],
-    };
-  }
-  if (manifest.name === 'erp.credit') {
-    return {
-      ...manifest,
-      models: [{ name: 'MiniERPCredit', label: 'Mini ERP Credit', layer: 'DEV' }],
-    };
-  }
-  if (manifest.name === 'web') {
-    // implicit pseudo-app holding legacy app-less designer artifacts
-    return {
-      ...manifest,
-      models: [{ name: 'ClientCustom', label: 'Client Custom', layer: 'CUS' }],
-    };
-  }
-  // user apps start with no models — the user creates them in the Designer
-  return manifest;
+  return { ...manifest, models: [...(manifest.models ?? [])] };
 }

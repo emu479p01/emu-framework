@@ -13,6 +13,9 @@ export interface SecurityPolicy {
   accessibleForms(): Set<string> | 'all';
   canFunction(name: string): boolean;
   canReport(name: string): boolean;
+  canView(name: string): boolean;
+  /** Chart permission is inherited from its View privilege. */
+  canChart(name: string): boolean;
   canPrivilege(name: string): boolean;
   rowScope?(table: string): { field: string; value: string } | undefined;
 }
@@ -22,6 +25,8 @@ export const allowAll: SecurityPolicy = {
   accessibleForms: () => 'all',
   canFunction: () => true,
   canReport: () => true,
+  canView: () => true,
+  canChart: () => true,
   canPrivilege: () => true,
 };
 
@@ -35,6 +40,7 @@ export function buildRolePolicy(registry: MetadataRegistry, roleNames: string[])
   const forms = new Set<string>();
   const functions = new Set<string>();
   const reports = new Set<string>();
+  const views = new Set<string>();
   const privileges = new Set<string>();
 
   const applyPrivilege = (privName: string) => {
@@ -52,6 +58,7 @@ export function buildRolePolicy(registry: MetadataRegistry, roleNames: string[])
     for (const form of priv.forms ?? []) forms.add(form);
     for (const name of priv.functions ?? []) functions.add(name);
     for (const name of priv.reports ?? []) reports.add(name);
+    for (const name of priv.views ?? []) views.add(name);
   };
 
   for (const roleName of roleNames) {
@@ -69,6 +76,8 @@ export function buildRolePolicy(registry: MetadataRegistry, roleNames: string[])
     accessibleForms: () => forms,
     canFunction: (name) => functions.has(name),
     canReport: (name) => reports.has(name),
+    canView: (name) => views.has(name),
+    canChart: (name) => registry.hasChart(name) && views.has(registry.getChart(name).view),
     canPrivilege: (name) => privileges.has(name),
   };
 }

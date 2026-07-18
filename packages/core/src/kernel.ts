@@ -89,7 +89,7 @@ export function orderScriptsForExecution<T extends OrderableScript>(scripts: T[]
 }
 
 const WEB_KIND_ORDER = [
-  'app', 'enum', 'table', 'privilege', 'duty', 'role', 'script', 'function',
+  'app', 'enum', 'table', 'view', 'chart', 'privilege', 'duty', 'role', 'script', 'function',
   'tableExtension', 'enumExtension', 'form', 'formExtension',
   'menu', 'menuExtension', 'privilegeExtension', 'dutyExtension',
   'roleExtension', 'scriptExtension',
@@ -227,6 +227,7 @@ export class Kernel {
     const appArtifacts = new Map<string, AnyMeta[]>();
     const appLabels = new Map<string, string>();
     const appManifestByName = new Map<string, AppManifest>();
+    const errors: WebArtifactError[] = [];
 
     // file-app names from boot steps
     const fileAppNames = new Set<string>();
@@ -249,12 +250,16 @@ export class Kernel {
         appManifestByName.set((m as any).name, m as any);
         if ((m as any).label) appLabels.set((m as any).name, (m as any).label);
       } else {
+        if (!art.app) {
+          errors.push({ kind: art.kind, name: art.name, error: `${art.kind} '${art.name}': app is required` });
+          continue;
+        }
         regular.push(art);
       }
     }
 
     for (const art of regular) {
-      const target = art.app ?? 'web';
+      const target = art.app!;
       const group = appArtifacts.get(target) ?? [];
       group.push(art);
       appArtifacts.set(target, group);
@@ -301,7 +306,6 @@ export class Kernel {
     };
 
     const accepted = new Map<string, AnyMeta[]>();
-    const errors: WebArtifactError[] = [];
     const scriptsFor = (source: Map<string, AnyMeta[]>): (AnyMeta & { app?: string; code?: string; name: string })[] =>
       [...source.values()]
         .flat()
@@ -311,7 +315,7 @@ export class Kernel {
     while (remaining.length > 0) {
       const next: (AnyMeta & { app?: string })[] = [];
       for (const art of remaining) {
-        const target = art.app ?? 'web';
+        const target = art.app!;
         const cur = [...(accepted.get(target) ?? []), art];
         const candidate = new Map(accepted);
         candidate.set(target, cur);
@@ -325,7 +329,7 @@ export class Kernel {
       if (next.length === remaining.length) {
         // No progress — report remaining as errors
         for (const art of next) {
-          const target = art.app ?? 'web';
+          const target = art.app!;
           const cur = [...(accepted.get(target) ?? []), art];
           const candidate = new Map(accepted);
           candidate.set(target, cur);
@@ -367,7 +371,7 @@ export class Kernel {
     const manifests = final.loadedApps();
     const withLayer = (scriptsFor(accepted) as OrderableScript[]).map((s) => {
       if (s.layer) return s;
-      const manifest = manifests.find((m) => m.name === ((s as { app?: string }).app ?? 'web'));
+      const manifest = manifests.find((m) => m.name === (s as { app?: string }).app);
       const model = manifest?.models?.find((m) => m.name === (s as { model?: string }).model);
       return { ...s, layer: model?.layer ?? manifest?.models?.[0]?.layer ?? 'SYS' };
     });

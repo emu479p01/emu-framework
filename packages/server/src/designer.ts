@@ -46,6 +46,8 @@ const DESIGNER_KINDS = new Set([
   'scriptExtension',
   'function',
   'report',
+  'view',
+  'chart',
 ]);
 
 function loadStored(kernel: Kernel): MetadataArtifact[] {
@@ -109,8 +111,38 @@ export function registerDesignerRoutes(
     transaction();
   };
 
+  const assertExplicitPlacement = (artifact: MetadataArtifact): void => {
+    if (artifact.kind === 'app') return;
+    const placed = artifact as MetadataArtifact & { app?: string; model?: string };
+    if (!placed.app || !placed.model) {
+      throw Object.assign(
+        new Error(`Artifact '${artifact.name}' requires explicit app and model`),
+        { statusCode: 422 },
+      );
+    }
+  };
+
+  const assertArtifactTransition = (req: FastifyRequest, artifact: MetadataArtifact): void => {
+    const stored = loadStored(kernel).find((candidate) => candidate.name === artifact.name);
+    if (stored) {
+      assertScope(req, { kind: stored.kind, name: stored.name, app: 'app' in stored ? stored.app : undefined });
+      if (stored.kind !== artifact.kind) {
+        throw Object.assign(new Error(`Artifact '${artifact.name}' cannot change kind`), { statusCode: 422 });
+      }
+    }
+    if (artifact.kind === 'app') return;
+    const currentApp = stored && 'app' in stored ? stored.app : kernel.registry.appForArtifact(artifact.name);
+    if (currentApp && currentApp !== artifact.app) {
+      throw Object.assign(new Error(`Artifact '${artifact.name}' cannot move from app '${currentApp}' to '${artifact.app}'`), { statusCode: 422 });
+    }
+  };
+
   const assertChangeSetScope = (req: FastifyRequest, changeSet: MetadataChangeSet): void => {
     for (const operation of changeSet.operations) {
+      if (operation.op === 'upsert') {
+        assertExplicitPlacement(operation.artifact);
+        assertArtifactTransition(req, operation.artifact);
+      }
       const stored = loadStored(kernel).find((artifact) => artifact.name === operation.name);
       const artifact = operation.op === 'upsert' ? operation.artifact : stored;
       assertScope(req, { kind: operation.kind, name: operation.name, app: artifact && 'app' in artifact ? artifact.app : undefined });
@@ -125,9 +157,13 @@ export function registerDesignerRoutes(
   };
 
   const assertScope = (req: FastifyRequest, artifact: { kind?: string; name?: string; app?: string }): void => {
+    const appName = artifact.kind === 'app' ? artifact.name : artifact.app;
+    if (appName === 'system' || artifact.name?.startsWith('FW_')) {
+      throw Object.assign(new Error('Framework metadata is read-only'), { statusCode: 403 });
+    }
     if (!inScope(designerScope(req), artifact)) {
       throw Object.assign(
-        new Error(`No customize permission for app '${artifact.kind === 'app' ? artifact.name : (artifact.app ?? 'web')}'`),
+        new Error(`No customize permission for app '${artifact.kind === 'app' ? artifact.name : (artifact.app ?? 'unknown')}'`),
         { statusCode: 403 },
       );
     }
@@ -136,20 +172,58 @@ export function registerDesignerRoutes(
   app.get('/api/designer/artifacts', (req) => {
     requireDesigner(req);
     const scope = designerScope(req);
-    const rows = kernel
+    const safeTable = (item: ReturnType<typeof kernel.registry.allTables>[number]) => {
+      const secretFields = new Set(['passwordHash', 'password', 'tokenHash', 'token']);
+      return {
+        ...item,
+        ...(item.titleField && secretFields.has(item.titleField) ? { titleField: undefined } : {}),
+        fields: item.fields.filter((field) => !secretFields.has(field.name)),
+        indexes: item.indexes?.filter((index) => index.fields.every((field) => !secretFields.has(field))),
+      };
+    };
+    const safeArtifact = (artifact: AnyMeta): AnyMeta => artifact.kind === 'table'
+      ? safeTable(artifact) as AnyMeta
+      : artifact;
+    const storedRows = kernel
       .designerContext()
       .select('FW_WebArtifact')
       .toArray()
       .map((r) => ({
         kind: r.f.kind as string,
         name: r.f.name as string,
-        artifact: JSON.parse(r.f.json as string) as AnyMeta,
+        artifact: safeArtifact(JSON.parse(r.f.json as string) as AnyMeta),
         error: lastErrors.find((e) => e.name === r.f.name)?.error,
       }))
       .filter((r) => inScope(scope, { kind: r.kind, name: r.name, ...(r.artifact as { app?: string }) }));
+    const storedNames = new Set(storedRows.map((row) => row.name));
+    const systemRows = scope === 'all'
+      ? [
+          ...kernel.registry.allTables(), ...kernel.registry.allEnums(), ...kernel.registry.allForms(),
+          ...kernel.registry.allMenus(), ...kernel.registry.allPrivileges(), ...kernel.registry.allDuties(),
+          ...kernel.registry.allRoles(), ...kernel.registry.allScripts(), ...kernel.registry.allFunctions(),
+          ...kernel.registry.allReports(), ...kernel.registry.allViews(), ...kernel.registry.allCharts(),
+        ]
+          .filter((artifact) => kernel.registry.appForArtifact(artifact.name) === 'system' && !storedNames.has(artifact.name))
+          .map((artifact) => ({ kind: artifact.kind, name: artifact.name, artifact: safeArtifact(artifact) }))
+      : [];
+    const rows = [...storedRows, ...systemRows];
     return {
       artifacts: rows,
       apps: kernel.registry.loadedApps().filter((a) => scope === 'all' || scope.has(a.name)),
+      catalog: {
+        tables: kernel.registry.allTables().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })).map(safeTable),
+        enums: kernel.registry.allEnums().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+        forms: kernel.registry.allForms().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+        menus: kernel.registry.allMenus().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+        privileges: kernel.registry.allPrivileges().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+        duties: kernel.registry.allDuties().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+        roles: kernel.registry.allRoles().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+        scripts: kernel.registry.allScripts().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+        functions: kernel.registry.allFunctions().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+        reports: kernel.registry.allReports().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+        views: kernel.registry.allViews().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+        charts: kernel.registry.allCharts().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+      },
     };
   });
 
@@ -277,6 +351,7 @@ export function registerDesignerRoutes(
       const artifact = raw.kind === 'app'
         ? mergeAppManifest(stored.find((candidate) => candidate.kind === 'app' && candidate.name === raw.name), raw)
         : raw;
+      assertExplicitPlacement(artifact);
       if (incomingNames.has(artifact.name)) return reply.status(422).send({ error: `Duplicate artifact '${artifact.name}' in package` });
       incomingNames.add(artifact.name);
       const diagnostics = validateMetadataArtifact(artifact);
@@ -372,8 +447,12 @@ export function registerDesignerRoutes(
     '/api/designer/artifacts',
     (req, reply) => {
       requireDesigner(req);
-      const artifact = req.body;
+      const artifact = req.body?.kind === 'app' && !Array.isArray((req.body as { models?: unknown }).models)
+        ? { ...req.body, models: [] } as MetadataArtifact
+        : req.body;
       if (!artifact || typeof artifact !== 'object') return reply.status(400).send({ error: 'A metadata artifact is required' });
+      assertExplicitPlacement(artifact);
+      assertArtifactTransition(req, artifact);
       const { kind, name } = artifact;
       assertScope(req, { kind, name, app: 'app' in artifact ? artifact.app : undefined });
       if (!DESIGNER_KINDS.has(kind)) return reply.status(400).send({ error: `Unsupported kind '${kind}'` });
@@ -407,7 +486,14 @@ export function registerDesignerRoutes(
       if (!DESIGNER_KINDS.has(kind)) {
         return reply.status(400).send({ error: `Unsupported kind '${kind}'` });
       }
-      const artifact = { ...req.body, kind, name } as AnyMeta;
+      const artifact = {
+        ...req.body,
+        kind,
+        name,
+        ...(kind === 'app' && !Array.isArray((req.body as { models?: unknown })?.models) ? { models: [] } : {}),
+      } as AnyMeta;
+      assertExplicitPlacement(artifact as MetadataArtifact);
+      assertArtifactTransition(req, artifact as MetadataArtifact);
       const schemaDiagnostics = validateMetadataArtifact(artifact);
       if (schemaDiagnostics.length > 0) {
         return reply.status(422).send({ error: 'Artifact does not match the metadata schema', diagnostics: schemaDiagnostics });
@@ -520,6 +606,8 @@ export function registerDesignerRoutes(
       } else {
         manifest.models.push({ name: model, label: label ?? model, layer });
       }
+      const manifestDiagnostics = validateMetadataArtifact({ ...manifest, kind: 'app', name: appName });
+      if (manifestDiagnostics.length) return reply.status(422).send({ error: 'Model does not match the metadata schema', diagnostics: manifestDiagnostics });
 
       const all = ctx.select('FW_WebArtifact').toArray();
       const changedLayer = oldLayer && oldLayer !== layer;

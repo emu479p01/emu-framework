@@ -28,6 +28,8 @@ import { registerReportRoutes } from './reports.js';
 import { registerFontRoutes } from './fontManager.js';
 import { registerSystemMaintenanceRoutes } from './systemMaintenance.js';
 import { createIntegrationManager, registerIntegrationRoutes } from './integrationServices.js';
+import { registerUserSecurityRoutes } from './userSecurity.js';
+import { registerViewRoutes } from './views.js';
 
 export interface ServerOptions {
   dbPath?: string;
@@ -41,12 +43,17 @@ export interface ServerOptions {
   appTitle?: string;
   /** Deterministic first-setup code for automated tests. Production generates one. */
   setupCode?: string;
+  /** Maximum rows returned by a View CSV export. Default 100,000. */
+  viewCsvMaxRows?: number;
 }
 
 const COOKIE_NAME = 'nf_session';
 const SECURE_COOKIES = process.env.NODE_ENV === 'production' || process.env.EMU_SECURE_COOKIES === 'true';
 /** Auth/system tables are never exposed through the generic data API. */
-const PROTECTED_TABLES = new Set(['FW_Session', 'FW_WebArtifact']);
+const PROTECTED_TABLES = new Set([
+  'FW_User', 'FW_UserRole', 'FW_AppAccess', 'FW_Session', 'FW_WebArtifact',
+  'FW_Migration', 'FW_ViewToken', 'FW_ViewTokenScope',
+]);
 const SETUP_TTL_MS = 15 * 60 * 1000;
 const SETUP_MAX_FAILURES = 10;
 
@@ -175,29 +182,84 @@ function convertLegacyArtifact(row: { kind: string; name: string; json: string }
  * harvesting the model names their own artifacts reference — otherwise those
  * artifacts fail "unknown model" at boot and get skipped.
  */
+function migrationApplied(kernel: Kernel, migration: string): boolean {
+  return Boolean(kernel.db.prepare('SELECT 1 FROM "FW_Migration" WHERE migration=?').get(migration));
+}
+
+function markMigration(kernel: Kernel, migration: string): void {
+  kernel.db.prepare(`INSERT OR IGNORE INTO "FW_Migration" (createdAt,createdBy,modifiedAt,modifiedBy,migration,appliedAt) VALUES (CURRENT_TIMESTAMP,'migration',CURRENT_TIMESTAMP,'migration',?,CURRENT_TIMESTAMP)`).run(migration);
+}
+
 function migrateManifestModels(kernel: Kernel): void {
+  const migration = 'v0.1.1.0-explicit-models';
+  if (migrationApplied(kernel, migration)) return;
   if (!tableExists(kernel.designerDb, 'FW_WebArtifact')) return;
   const rows = kernel.designerDb.prepare('SELECT name, json FROM "FW_WebArtifact"').all() as { name: string; json: string }[];
-  const artifacts: { kind: string; name: string; app?: string; model?: string; layer?: string; models?: unknown[] }[] = [];
+  const artifacts: ({ kind: string; name: string; app?: string; model?: string; layer?: string; models?: Array<{ name: string; label?: string; layer: string }> } & { rowName: string })[] = [];
   for (const row of rows) {
-    try { artifacts.push(JSON.parse(row.json)); } catch { /* skipped at boot anyway */ }
+    try { artifacts.push({ ...JSON.parse(row.json), rowName: row.name }); } catch { /* skipped at boot anyway */ }
   }
   const update = kernel.designerDb.prepare('UPDATE "FW_WebArtifact" SET json = ?, modifiedAt = CURRENT_TIMESTAMP, modifiedBy = ? WHERE name = ?');
-  for (const manifest of artifacts) {
-    if (manifest.kind !== 'app') continue;
-    if (Array.isArray(manifest.models) && manifest.models.length > 0) continue;
-    const models = new Map<string, string>();
-    for (const art of artifacts) {
-      if (art.kind === 'app' || art.app !== manifest.name || !art.model) continue;
-      if (!models.has(art.model)) models.set(art.model, art.layer ?? 'CUS');
+  kernel.designerDb.transaction(() => {
+    for (const manifest of artifacts) {
+      if (manifest.kind !== 'app') continue;
+      const children = artifacts.filter((artifact) => artifact.kind !== 'app' && artifact.app === manifest.name);
+      const models = new Map<string, string>((manifest.models ?? []).map((model) => [model.name, model.layer]));
+      for (const artifact of children) if (artifact.model && !models.has(artifact.model)) models.set(artifact.model, artifact.layer ?? 'CUS');
+      const legacyDefaults: Record<string, { name: string; layer: string }> = {
+        erp: { name: 'MiniERPApplication', layer: 'SYS' },
+        'erp.credit': { name: 'MiniERPCredit', layer: 'DEV' },
+        web: { name: 'ClientCustom', layer: 'CUS' },
+      };
+      if (models.size === 0 && legacyDefaults[manifest.name]) {
+        const legacy = legacyDefaults[manifest.name]!;
+        models.set(legacy.name, legacy.layer);
+      }
+      if (models.size === 0) continue;
+      if (!manifest.models?.length) {
+        const { rowName: _rowName, ...wire } = manifest;
+        update.run(JSON.stringify({ ...wire, models: [...models.entries()].map(([name, layer]) => ({ name, label: name, layer })) }), 'migration', manifest.rowName);
+      }
+      if (models.size === 1) {
+        const [modelName, modelLayer] = [...models.entries()][0]!;
+        for (const child of children.filter((artifact) => !artifact.model)) {
+          const { rowName: _rowName, ...wire } = child;
+          update.run(JSON.stringify({ ...wire, model: modelName, layer: modelLayer }), 'migration', child.rowName);
+        }
+      }
     }
-    if (models.size === 0) continue;
-    const patched = {
-      ...manifest,
-      models: [...models.entries()].map(([name, layer]) => ({ name, label: name, layer })),
-    };
-    update.run(JSON.stringify(patched), 'migration', manifest.name);
-  }
+    const appLess = artifacts.filter((artifact) => artifact.kind !== 'app' && !artifact.app);
+    if (appLess.length) {
+      const modelName = 'ClientCustom';
+      for (const artifact of appLess) {
+        const { rowName: _rowName, ...wire } = artifact;
+        update.run(JSON.stringify({ ...wire, app: 'web', model: artifact.model ?? modelName, layer: artifact.layer ?? 'CUS' }), 'migration', artifact.rowName);
+      }
+      if (!artifacts.some((artifact) => artifact.kind === 'app' && artifact.name === 'web')) {
+        const manifest = { kind: 'app', name: 'web', label: 'Legacy Web', models: [{ name: modelName, label: 'Client Custom', layer: 'CUS' }] };
+        kernel.designerDb.prepare(`INSERT INTO "FW_WebArtifact" (createdAt,createdBy,modifiedAt,modifiedBy,kind,name,json) VALUES (CURRENT_TIMESTAMP,'migration',CURRENT_TIMESTAMP,'migration','app','web',?)`).run(JSON.stringify(manifest));
+      }
+    }
+  })();
+  markMigration(kernel, migration);
+}
+
+function migrateFrameworkUserCustomization(kernel: Kernel): void {
+  const migration = 'v0.1.1.0-framework-user-customize';
+  if (migrationApplied(kernel, migration)) return;
+  const apps = kernel.registry.loadedApps().filter((entry) => entry.name !== 'system').map((entry) => entry.name);
+  kernel.db.transaction(() => {
+    const users = kernel.db.prepare(`SELECT DISTINCT userId FROM "FW_UserRole" WHERE role='FW_FrameworkUser'`).all() as { userId: number }[];
+    const existing = kernel.db.prepare('SELECT id,canOpen FROM "FW_AppAccess" WHERE userId=? AND appName=?');
+    const insert = kernel.db.prepare(`INSERT INTO "FW_AppAccess" (createdAt,createdBy,modifiedAt,modifiedBy,userId,appName,canOpen,canCustomize) VALUES (CURRENT_TIMESTAMP,'migration',CURRENT_TIMESTAMP,'migration',?,?,0,1)`);
+    const update = kernel.db.prepare(`UPDATE "FW_AppAccess" SET canCustomize=1, modifiedAt=CURRENT_TIMESTAMP, modifiedBy='migration' WHERE id=?`);
+    for (const user of users) for (const appName of apps) {
+      const row = existing.get(user.userId, appName) as { id: number; canOpen: number } | undefined;
+      if (row) update.run(row.id);
+      else insert.run(user.userId, appName);
+    }
+    markMigration(kernel, migration);
+  })();
 }
 
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
@@ -223,6 +285,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   bootWebArtifacts(kernel);
   migrateLegacyRoleTables(kernel);
   migrateRoleValuesToNames(kernel);
+  migrateFrameworkUserCustomization(kernel);
 
   const initialCtx = kernel.context();
   const legacyAdmin = initialCtx.select('FW_User').whereEq({ username: 'admin' }).firstOnly();
@@ -322,19 +385,25 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const roles = rolesOf(username);
     if (roles.includes('FW_SystemAdminRole')) return allowAll;
     const base = buildRolePolicy(kernel.registry, roles);
-    // Framework users may maintain only their own account and password.
-    if (roles.includes('FW_FrameworkUser')) {
-      return {
-        ...base,
-        can: (table, op) => table === 'FW_User' && (op === 'read' || op === 'update'),
-        accessibleForms: () => new Set(['FW_UserForm']),
-        canFunction: () => false,
-        canReport: () => false,
-        canPrivilege: () => false,
-        rowScope: (table) => table === 'FW_User' ? { field: 'username', value: username } : undefined,
-      };
-    }
-    return base;
+    const access = appAccessOf(username);
+    const canOpenArtifact = (name: string) => {
+      const owner = kernel.appForArtifact(name);
+      return Boolean(owner && owner !== 'system' && access.openApps.has(owner));
+    };
+    const formAccess = base.accessibleForms();
+    return {
+      can: (table, op) => base.can(table, op) && canOpenArtifact(table),
+      accessibleForms: () => new Set(
+        (formAccess === 'all' ? kernel.registry.allForms().map((form) => form.name) : [...formAccess])
+          .filter(canOpenArtifact),
+      ),
+      canFunction: (name) => base.canFunction(name) && canOpenArtifact(name),
+      canReport: (name) => base.canReport(name) && canOpenArtifact(name),
+      canView: (name) => base.canView(name) && canOpenArtifact(name),
+      canChart: (name) => base.canChart(name) && canOpenArtifact(name),
+      canPrivilege: (name) => base.canPrivilege(name) && canOpenArtifact(name),
+      rowScope: base.rowScope,
+    };
   };
 
   const userCtx = (req: FastifyRequest): DataContext => {
@@ -343,9 +412,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   };
 
   const dataTable = (name: string, req?: FastifyRequest) => {
-    const user = req ? currentUser(req) : null;
-    const isAdmin = user !== null && rolesOf(user.username).includes('FW_SystemAdminRole');
-    if (!isAdmin && PROTECTED_TABLES.has(name)) {
+    void req;
+    if (PROTECTED_TABLES.has(name)) {
       throw Object.assign(new Error(`Unknown table '${name}'`), { statusCode: 404 });
     }
     if (!kernel.registry.hasTable(name)) {
@@ -480,35 +548,54 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const user = requireUser(req);
     const policy = policyOf(user.username);
     const formAccess = policy.accessibleForms();
-    const canOpen = (form: string) => formAccess === 'all' || formAccess.has(form);
+    const canOpen = (form: string) => {
+      const metadata = kernel.registry.allForms().find((entry) => entry.name === form);
+      return Boolean(
+        metadata
+        && !PROTECTED_TABLES.has(metadata.table)
+        && (formAccess === 'all' || formAccess.has(form))
+        && policy.can(metadata.table, 'read')
+        && (metadata.lines ?? []).every((line) => policy.can(line.table, 'read')),
+      );
+    };
     const canOpenReport = (name: string) => {
       const report = kernel.registry.allReports().find((entry) => entry.name === name);
       return Boolean(report && policy.canReport(name) && policy.can(report.dataSource, 'read'));
     };
     const canOpenFunction = (name: string) => policy.canFunction(name);
+    const canUseView = (name: string) => {
+      if (!policy.canView(name) || !kernel.registry.hasView(name)) return false;
+      const view = kernel.registry.getView(name);
+      return [view.source.table, ...(view.joins ?? []).map((join) => join.table)].every((table) => policy.can(table, 'read'));
+    };
     const userRoles = rolesOf(user.username);
     const isSystemAdmin = userRoles.includes('FW_SystemAdminRole');
 
-    const isSelfService = userRoles.includes('FW_FrameworkUser') && !isSystemAdmin;
-    const forms = kernel.registry.allForms().filter((f) => canOpen(f.name)).map((f) => {
+    const forms = kernel.registry.allForms().filter((f) => !PROTECTED_TABLES.has(f.table) && canOpen(f.name)).map((f) => {
       const secureAction = (action: NonNullable<typeof f.actions>[number]) => {
         const target = action.target ?? action.action;
         const type = action.type ?? 'function';
         const allowed = action.privilege ? policy.canPrivilege(action.privilege) : type === 'report' ? policy.canReport(target ?? '') : policy.canFunction(target ?? '');
         return { ...action, disabled: !allowed };
       };
-      const secured = { ...f, actions: f.actions?.map(secureAction), lines: f.lines?.map((line) => ({ ...line, actions: line.actions?.map(secureAction) })) };
-      if (!isSelfService || f.name !== 'FW_UserForm') return secured;
-      return { ...secured, groups: [{ label: 'Password', fields: ['password'] }], lines: [] };
+      return {
+        ...f,
+        actions: f.actions?.map(secureAction),
+        charts: f.charts?.filter((embedded) => {
+          try { return policy.canChart(embedded.chart) && canUseView(kernel.registry.getChart(embedded.chart).view); } catch { return false; }
+        }),
+        lines: f.lines?.map((line) => ({ ...line, actions: line.actions?.map(secureAction) })),
+      };
     });
     const usedTables = new Set(forms.flatMap((f) => [f.table, ...(f.lines ?? []).map((l) => l.table)]));
     const visibleTables = kernel.registry
       .allTables()
       .filter((t) => !PROTECTED_TABLES.has(t.name))
       .filter((t) => policy.can(t.name, 'read') || usedTables.has(t.name))
-      .map((t) => isSelfService && t.name === 'FW_User'
-        ? { ...t, fields: t.fields.map((f) => f.name === 'password' ? { ...f, allowEdit: true, allowEditOnCreate: false } : { ...f, allowEdit: false, allowEditOnCreate: false }) }
-        : t);
+      .map((t) => t);
+    const visibleEnums = new Set(
+      visibleTables.flatMap((table) => table.fields.filter((field) => field.type === 'enum' && field.enumName).map((field) => field.enumName!)),
+    );
 
     // Recursively filter menu items by security
     const filterItems = (
@@ -538,7 +625,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
     // Build per-app grouping
     const allMenus = kernel.registry.allMenus();
-    const isFrameworkUser = isSystemAdmin || userRoles.includes('FW_FrameworkUser');
     const isFrameworkAdmin = isSystemAdmin;
     const access = appAccessOf(user.username);
     const frameworkMenus: typeof allMenus = [];
@@ -558,14 +644,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     for (const menu of allMenus) {
       const appName = kernel.appForArtifact(menu.name);
       if (appName === 'system') {
-        if (isFrameworkUser) {
-          const systemItems = menu.items.filter((item) => {
-            if (item.route === '/system/tables' || item.route === '/system/maintenance' || item.route === '/system/fonts' || item.route === '/system/integrations/smtp') return isFrameworkAdmin;
-            return true;
-          });
-          const filtered = { ...menu, items: filterItems(systemItems, true) ?? [] };
-          if (filtered.items.length > 0) frameworkMenus.push(filtered);
-        }
+        const systemItems = menu.items.filter((item) => {
+          if (item.route === '/account/password') return true;
+          if (item.route === '/designer') return isFrameworkAdmin || access.customizeApps.size > 0;
+          return isFrameworkAdmin;
+        });
+        const filtered = { ...menu, items: filterItems(systemItems, true) ?? [] };
+        if (filtered.items.length > 0) frameworkMenus.push(filtered);
       } else if (appName && appMap.has(appName)) {
         const filtered = { ...menu, items: filterItems(menu.items) ?? [] };
         if (filtered.items.length > 0) {
@@ -583,18 +668,22 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return {
       branding: { title: options.appTitle ?? 'EmuFramework' },
       capabilities: {
-        designer: isFrameworkUser || access.customizeApps.size > 0,
+        designer: isFrameworkAdmin || access.customizeApps.size > 0,
         maintenance: isFrameworkAdmin,
         tableBrowser: isFrameworkAdmin,
+        securityAdmin: isFrameworkAdmin,
+        myAccount: true,
       },
       tables: visibleTables,
-      enums: kernel.registry.allEnums(),
+      enums: kernel.registry.allEnums().filter((entry) => visibleEnums.has(entry.name)),
       forms,
-      reports: kernel.registry.allReports().filter((r) => policy.canReport(r.name) && policy.can(r.dataSource, 'read')),
-      privileges: kernel.registry.allPrivileges(),
-      duties: kernel.registry.allDuties(),
-      roles: kernel.registry.allRoles(),
-      actions: [...kernel.actions.keys()].sort(),
+      reports: kernel.registry.allReports().filter((r) => !PROTECTED_TABLES.has(r.dataSource) && policy.canReport(r.name) && policy.can(r.dataSource, 'read')),
+      views: kernel.registry.allViews().filter((view) => canUseView(view.name)),
+      charts: kernel.registry.allCharts().filter((chart) => policy.canChart(chart.name) && canUseView(chart.view)),
+      privileges: isFrameworkAdmin ? kernel.registry.allPrivileges() : [],
+      duties: isFrameworkAdmin ? kernel.registry.allDuties() : [],
+      roles: isFrameworkAdmin ? kernel.registry.allRoles() : [],
+      actions: [...kernel.actions.keys()].filter((name) => policy.canFunction(name)).sort(),
       frameworkMenus,
       apps: [...appMap.values()].filter((a) => {
         if (a.menus.length === 0) return false;
@@ -613,7 +702,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const user = requireUser(req);
     const access = appAccessOf(user.username);
     const allowed =
-      rolesOf(user.username).some((r) => r === 'FW_SystemAdminRole' || r === 'FW_FrameworkUser') ||
+      rolesOf(user.username).includes('FW_SystemAdminRole') ||
       access.customizeApps.size > 0;
     if (!allowed) {
       throw Object.assign(new Error('Designer requires an administrator role'), { statusCode: 403 });
@@ -624,9 +713,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   /** Which apps this user may customize in the Designer ('all' for framework admins). */
   const designerScope = (req: FastifyRequest): 'all' | Set<string> => {
     const user = requireUser(req);
-    if (
-      rolesOf(user.username).some((r) => r === 'FW_SystemAdminRole' || r === 'FW_FrameworkUser')
-    ) {
+    if (rolesOf(user.username).includes('FW_SystemAdminRole')) {
       return 'all';
     }
     return appAccessOf(user.username).customizeApps;
@@ -642,6 +729,20 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   registerSystemMaintenanceRoutes(app, kernel, requireFrameworkAdmin);
   registerFontRoutes(app, kernel, requireFrameworkAdmin, requireUser);
   registerIntegrationRoutes(app, integrations, requireFrameworkAdmin);
+  registerUserSecurityRoutes(app, kernel, {
+    requireUser,
+    requireAdmin: requireFrameworkAdmin,
+    cookieName: COOKIE_NAME,
+    secureCookies: SECURE_COOKIES,
+  });
+  registerViewRoutes(app, kernel, {
+    userCtx,
+    requireAdmin: requireFrameworkAdmin,
+    csvMaxRows: (() => {
+      const configured = options.viewCsvMaxRows ?? Number(process.env.EMU_VIEW_CSV_MAX_ROWS ?? 100_000);
+      return Number.isFinite(configured) ? Math.max(1, Math.trunc(configured)) : 100_000;
+    })(),
+  });
 
   // ---- actions (named server-side operations, e.g. SalesOrderPost) ----
 
@@ -704,10 +805,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     (req) => {
       const table = dataTable(req.params.table, req);
       const ctx = userCtx(req);
-      if (rolesOf(ctx.session.user).includes('FW_FrameworkUser') && !rolesOf(ctx.session.user).includes('FW_SystemAdminRole') && table.name === 'FW_User') {
-        const fields = Object.keys(req.body ?? {});
-        if (fields.some((field) => field !== 'password')) throw new SecurityError('Framework users may change only their password');
-      }
       const rec = ctx.find(table.name, Number(req.params.id));
       if (!rec) throw Object.assign(new Error('Not found'), { statusCode: 404 });
       rec.setMany(writableBody(table.name, req.body, 'update'));

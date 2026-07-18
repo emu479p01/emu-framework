@@ -23,13 +23,11 @@ import {
   useMessage,
 } from 'naive-ui';
 import { useDesigner } from '../../stores/designer';
-import { useMeta } from '../../stores/meta';
 import { ApiError } from '../../api';
 import type { MetadataPackagePreview } from '../../api';
 import SimpleBuilder from './SimpleBuilder.vue';
 
 const designer = useDesigner();
-const meta = useMeta();
 const router = useRouter();
 const route = useRoute();
 const workspaceMode = ref(route.query.mode === 'advanced' ? 'advanced' : 'simple');
@@ -76,6 +74,8 @@ const filteredApps = computed(() => {
     (a) => a.name.toLowerCase().includes(q) || (a.label ?? '').toLowerCase().includes(q),
   );
 });
+const businessApps = computed(() => filteredApps.value.filter((app) => app.name !== 'system'));
+const frameworkApps = computed(() => filteredApps.value.filter((app) => app.name === 'system'));
 
 // ---- avatar ----
 function avatarLabel(name: string, label?: string): string {
@@ -90,6 +90,7 @@ function avatarColor(name: string): string {
 
 // ---- kebab menus ----
 function appMenuOptions(appName: string) {
+  if (appName === 'system') return [];
   const opts = [{ key: 'edit', label: 'Edit App' }];
   if (appName !== 'system') opts.push(
     { key: 'export', label: 'Export App' },
@@ -99,6 +100,7 @@ function appMenuOptions(appName: string) {
   return opts;
 }
 function modelMenuOptions(appName: string, modelName: string) {
+  if (appName === 'system') return [];
   const opts = [{ key: 'edit', label: 'Edit Model' }];
   if (appName !== 'system') opts.push(
     { key: 'export', label: 'Export Model' },
@@ -180,6 +182,8 @@ const KIND_META: Record<string, { icon: string; label: string }> = {
   privilege: { icon: '◈', label: 'Privilege' },
   duty: { icon: '◆', label: 'Duty' },
   role: { icon: '◉', label: 'Role' },
+  view: { icon: '▤', label: 'View' },
+  chart: { icon: '▥', label: 'Chart' },
   script: { icon: '⚡', label: 'Script' },
   function: { icon: 'ƒ', label: 'Function' },
   app: { icon: '⬡', label: 'App' },
@@ -258,6 +262,8 @@ const NEW_KINDS = [
   { key: 'duty', label: 'Duty' },
   { key: 'role', label: 'Role' },
   { key: 'report', label: 'Report' },
+  { key: 'view', label: 'View (query / data source)' },
+  { key: 'chart', label: 'Chart' },
   { type: 'divider' as const, key: 'd1' },
   { key: 'tableExtension', label: 'Table Extension' },
   { key: 'formExtension', label: 'Form Extension' },
@@ -275,7 +281,7 @@ const NEW_KINDS = [
 ];
 
 const KIND_ORDER = [
-  'table', 'enum', 'form', 'menu', 'privilege', 'duty', 'role', 'script', 'function', 'report',
+  'table', 'enum', 'form', 'menu', 'view', 'chart', 'privilege', 'duty', 'role', 'script', 'function', 'report',
   'tableExtension', 'enumExtension', 'formExtension', 'menuExtension',
   'privilegeExtension', 'dutyExtension', 'roleExtension', 'scriptExtension',
 ];
@@ -315,7 +321,7 @@ const grouped = computed(() =>
 
 // ---- customize existing tables ----
 const customizableTables = computed(() =>
-  (meta.meta?.tables ?? [])
+  designer.catalog.tables
     .filter((t) => !designer.get(t.name))
     .filter((t) => {
       if (!selectedApp.value) return true;
@@ -433,11 +439,11 @@ async function onReload() {
         </div>
       </div>
       <n-space>
-        <n-button secondary :loading="packageBusy" @click="choosePackage">Import Package</n-button>
+        <n-button v-if="selectedApp !== 'system'" secondary :loading="packageBusy" @click="choosePackage">Import Package</n-button>
         <n-button text @click="onReload" :loading="reloading">
           Sync from disk
         </n-button>
-        <n-dropdown trigger="click" :options="NEW_KINDS" @select="onNew">
+        <n-dropdown v-if="selectedApp !== 'system'" trigger="click" :options="NEW_KINDS" @select="onNew">
           <n-button type="primary" data-testid="designer-new">
             + New
           </n-button>
@@ -498,9 +504,10 @@ async function onReload() {
           description='No apps yet. Create one via + New → App.'
           style="padding: 48px 0"
         />
-        <div v-else class="card-grid">
+        <div v-if="businessApps.length" class="section-header"><span class="section-title">Business Apps</span></div>
+        <div v-if="businessApps.length" class="card-grid">
           <div
-            v-for="app in filteredApps"
+            v-for="app in businessApps"
             :key="app.name"
             class="app-card"
             @click="selectApp(app.name)"
@@ -524,10 +531,27 @@ async function onReload() {
             </div>
           </div>
         </div>
+        <div v-if="frameworkApps.length" class="section-header" style="margin-top:24px"><span class="section-title">Framework — Read-only</span></div>
+        <div v-if="frameworkApps.length" class="card-grid">
+          <div
+            v-for="app in frameworkApps"
+            :key="app.name"
+            class="app-card"
+            @click="selectApp(app.name)"
+          >
+            <div class="app-card-avatar" :style="{ background: avatarColor(app.name) }">{{ avatarLabel(app.name, app.label) }}</div>
+            <div class="app-card-body">
+              <div class="app-card-title">{{ app.label ?? app.name }}</div>
+              <div class="app-card-subtitle">{{ app.name }}</div>
+              <div class="app-card-meta">{{ (app.models ?? []).length }} model{{ (app.models ?? []).length !== 1 ? 's' : '' }} &nbsp;·&nbsp; {{ artifactCountForApp(app.name) }} artifact{{ artifactCountForApp(app.name) !== 1 ? 's' : '' }}</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- ═══════════════ Level 2: Model list ═══════════════ -->
       <div v-if="selectedApp && !selectedModel" class="designer-section">
+        <n-alert v-if="selectedApp === 'system'" type="info" title="Framework — Read-only" style="margin-bottom:14px">System Apps and Models are metadata for inspection only and are not a business security boundary.</n-alert>
         <div class="section-header">
           <span class="section-title">Models</span>
           <n-button
@@ -558,7 +582,7 @@ async function onReload() {
                 {{ artifactCountForModel(selectedApp, m.name) }} artifact{{ artifactCountForModel(selectedApp, m.name) !== 1 ? 's' : '' }}
               </div>
             </div>
-            <div class="app-card-action" @click.stop>
+            <div v-if="selectedApp !== 'system'" class="app-card-action" @click.stop>
               <n-dropdown trigger="click" :options="modelMenuOptions(selectedApp, m.name)" @select="(k: string) => handleModelMenu(selectedApp, m, k)">
                 <n-button text size="tiny" class="kebab-btn">⋯</n-button>
               </n-dropdown>

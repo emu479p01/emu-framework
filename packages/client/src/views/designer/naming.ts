@@ -1,12 +1,10 @@
 /** Naming rules shared by the Designer editors. */
 
-/** Artifact-name prefix for an app: system → FW, erp* → ERP, else uppercase alnum app name. */
+/** Artifact-name prefix mirrors the core rule: system → FW, otherwise the root App segment. */
 export function appPrefix(app: string): string {
   return app === 'system'
     ? 'FW'
-    : app.startsWith('erp')
-      ? 'ERP'
-      : app.replace(/[^a-z0-9]/gi, '').toUpperCase();
+    : app.split('.')[0]!.replace(/[^a-z0-9]/gi, '').toUpperCase();
 }
 
 /**

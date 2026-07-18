@@ -3,6 +3,7 @@ export function appJson(name: string, label: string, dependsOn: string[]): strin
     {
       name,
       label,
+      models: [],
       ...(dependsOn.length > 0 ? { dependsOn } : {}),
     },
     null,
@@ -14,7 +15,7 @@ export function appPackageJson(name: string): string {
   return JSON.stringify(
     {
       name: `@emu/app-${name}`,
-      version: '0.1.0.2',
+      version: '0.1.1.0',
       private: true,
       type: 'module',
       main: 'dist/logic.js',

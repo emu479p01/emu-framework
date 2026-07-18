@@ -27,18 +27,25 @@ export interface ChangeSetPreview {
   registryErrors: { kind: string; name: string; error: string }[];
   warnings?: { path: string; code: string; message: string }[];
 }
+export interface DesignerCatalog {
+  tables: Artifact[]; enums: Artifact[]; forms: Artifact[]; menus: Artifact[];
+  privileges: Artifact[]; duties: Artifact[]; roles: Artifact[]; scripts: Artifact[];
+  functions: Artifact[]; reports: Artifact[]; views: Artifact[]; charts: Artifact[];
+}
+const emptyCatalog = (): DesignerCatalog => ({ tables: [], enums: [], forms: [], menus: [], privileges: [], duties: [], roles: [], scripts: [], functions: [], reports: [], views: [], charts: [] });
 
 export const useDesigner = defineStore('designer', {
-  state: () => ({ artifacts: [] as WebArtifactEntry[], apps: [] as DesignerApp[], loaded: false }),
+  state: () => ({ artifacts: [] as WebArtifactEntry[], apps: [] as DesignerApp[], catalog: emptyCatalog(), loaded: false }),
   getters: {
     byKind: (s) => (kind: string) => s.artifacts.filter((a) => a.kind === kind),
     get: (s) => (name: string) => s.artifacts.find((a) => a.name === name),
   },
   actions: {
     async load() {
-      const res = await api.get<{ artifacts: WebArtifactEntry[]; apps: DesignerApp[] }>('/api/designer/artifacts');
+      const res = await api.get<{ artifacts: WebArtifactEntry[]; apps: DesignerApp[]; catalog?: DesignerCatalog }>('/api/designer/artifacts');
       this.artifacts = res.artifacts;
       this.apps = res.apps ?? [];
+      this.catalog = res.catalog ?? emptyCatalog();
       this.loaded = true;
     },
     async save(artifact: Artifact) {

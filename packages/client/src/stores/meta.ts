@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { api } from '../api';
 import type {
   AggregateMeta, DutyMeta, EnumMeta, FieldMeta, FormMeta, MenuItemMeta, MenuMeta,
-  PrivilegeMeta, ReportMeta, RoleMeta, TableMeta,
+  PrivilegeMeta, ReportMeta, RoleMeta, TableMeta, ViewMeta, ChartMeta,
 } from '@emu/core';
 
 export type { AggregateMeta, EnumMeta, FieldMeta, FormMeta, MenuMeta, ReportMeta, TableMeta };
@@ -12,8 +12,8 @@ export interface ModelEntry { name: string; label?: string; layer: string }
 export interface AppEntry { name: string; label: string; icon?: import('@emu/core').IconName; dependsOn?: string[]; models?: ModelEntry[]; modules: string[]; menus: MenuMeta[] }
 export interface Metadata {
   branding: { title: string };
-  capabilities: { designer: boolean; maintenance: boolean; tableBrowser: boolean };
-  tables: TableMeta[]; enums: EnumMeta[]; forms: FormMeta[]; reports: ReportMeta[];
+  capabilities: { designer: boolean; maintenance: boolean; tableBrowser: boolean; securityAdmin: boolean; myAccount: boolean };
+  tables: TableMeta[]; enums: EnumMeta[]; forms: FormMeta[]; reports: ReportMeta[]; views: ViewMeta[]; charts: ChartMeta[];
   privileges: SecurityMeta[]; duties: SecurityMeta[]; roles: SecurityMeta[];
   actions: string[];
   frameworkMenus: MenuMeta[]; apps: AppEntry[];
@@ -27,6 +27,8 @@ export const useMeta = defineStore('meta', {
     menus: (state) => state.meta?.apps.flatMap((app) => app.menus) ?? [],
     table: (state) => (name: string) => state.meta?.tables.find((table) => table.name === name),
     form: (state) => (name: string) => state.meta?.forms.find((form) => form.name === name),
+    view: (state) => (name: string) => state.meta?.views.find((view) => view.name === name),
+    chart: (state) => (name: string) => state.meta?.charts.find((chart) => chart.name === name),
     enumOf: (state) => (name: string) => state.meta?.enums.find((entry) => entry.name === name),
     reportsFor: (state) => (tableName: string) => (state.meta?.reports ?? []).filter((report) => report.dataSource === tableName),
   },

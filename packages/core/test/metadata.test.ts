@@ -196,6 +196,45 @@ describe('MetadataRegistry', () => {
     expect(() => registry2.registerApp(testManifest('a'),[ref, badTo])).toThrow(/copyFields 'to' unknown\/invalid field/);
   });
 
+  it('validates View grouping, typed filters, App dependencies, and protected tables', () => {
+    const aggregateWithoutGrouping = new MetadataRegistry();
+    expect(() => aggregateWithoutGrouping.registerApp(testManifest('testapp'), [
+      salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable,
+      {
+        kind: 'view', name: 'TESTAPP_BadGrouping', source: { table: 'TESTAPP_SalesTable', alias: 's' },
+        columns: [
+          { name: 'salesId', expression: { type: 'field', ref: 's.salesId' } },
+          { name: 'total', expression: { type: 'aggregate', fn: 'sum', ref: 's.totalAmount' } },
+        ],
+      },
+    ])).toThrow(/must be in groupBy/);
+
+    const wrongParameterType = new MetadataRegistry();
+    expect(() => wrongParameterType.registerApp(testManifest('testapp'), [
+      salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable,
+      {
+        kind: 'view', name: 'TESTAPP_BadParameter', source: { table: 'TESTAPP_CustTable', alias: 'c' },
+        parameters: [{ name: 'minimum', type: 'real' }],
+        filters: [{ ref: 'c.name', operator: 'eq', value: { parameter: 'minimum' } }],
+        columns: [{ name: 'name', expression: { type: 'field', ref: 'c.name' } }],
+      },
+    ])).toThrow(/incompatible/);
+
+    const crossApp = new MetadataRegistry();
+    crossApp.registerApp(testManifest('base'), [{ kind: 'table', name: 'BASE_Record', fields: [{ name: 'name', type: 'string' }] }]);
+    expect(() => crossApp.registerApp(testManifest('consumer'), [{
+      kind: 'view', name: 'CONSUMER_Records', source: { table: 'BASE_Record', alias: 'b' },
+      columns: [{ name: 'name', expression: { type: 'field', ref: 'b.name' } }],
+    }])).toThrow(/must depend on 'base'/);
+
+    const protectedRegistry = new MetadataRegistry();
+    protectedRegistry.registerApp(testManifest('system', 'SYS'), [{ kind: 'table', name: 'FW_Secret', fields: [{ name: 'value', type: 'string' }] }]);
+    expect(() => protectedRegistry.registerApp({ ...testManifest('consumer'), dependsOn: ['system'] }, [{
+      kind: 'view', name: 'CONSUMER_Secrets', source: { table: 'FW_Secret', alias: 's' },
+      columns: [{ name: 'value', expression: { type: 'field', ref: 's.value' } }],
+    }])).toThrow(/protected table/);
+  });
+
   it('validates dynamic lookup filters and form filter columns', () => {
     const registry = new MetadataRegistry();
     const category: TableMeta = { kind: 'table', name: 'A_Category', fields: [{ name: 'status', type: 'string' }] };
