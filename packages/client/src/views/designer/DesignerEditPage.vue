@@ -17,12 +17,14 @@ import {
   useMessage,
 } from 'naive-ui';
 import { useDesigner, type Artifact } from '../../stores/designer';
-import { useMeta } from '../../stores/meta';
 import { ApiError } from '../../api';
 import FieldsEditor, { type EditableField } from './FieldsEditor.vue';
 import IndexesEditor, { type EditableIndex } from './IndexesEditor.vue';
 import MenuItemsEditor, { type EditableMenuItem } from './MenuItemsEditor.vue';
 import ActionsEditor from './ActionsEditor.vue';
+import ViewEditor from './ViewEditor.vue';
+import ChartEditor from './ChartEditor.vue';
+import FormChartsEditor from './FormChartsEditor.vue';
 import type { FormAction } from '@emu/core';
 import { ICON_OPTIONS } from '../../navigation';
 import { appPrefix, deriveExtensionName, EXT_TARGET_FIELD } from './naming';
@@ -31,11 +33,11 @@ const props = defineProps<{ kind: string; name?: string }>();
 const route = useRoute();
 const router = useRouter();
 const designer = useDesigner();
-const meta = useMeta();
 const message = useMessage();
 
 const isNew = computed(() => props.name === undefined);
 const isExtension = computed(() => props.kind.endsWith('Extension'));
+const isSystemArtifact = computed(() => selectedApp.value === 'system' || artifact.value.app === 'system' || artifact.value.name.startsWith('FW_'));
 const busy = ref(false);
 const saveError = ref('');
 const jsonText = ref('');
@@ -45,7 +47,7 @@ const activeTab = ref('design');
 const DESIGN_KINDS = new Set([
   'table', 'enum', 'form', 'menu', 'script', 'function', 'app',
   'tableExtension', 'formExtension', 'menuExtension', 'enumExtension',
-  'privilege', 'duty', 'role',
+  'privilege', 'duty', 'role', 'view', 'chart',
   'privilegeExtension', 'dutyExtension', 'roleExtension', 'scriptExtension',
 ]);
 
@@ -77,9 +79,9 @@ function blank(kind: string): Artifact {
     case 'enumExtension':
       return { kind, name: '', enum: (route.query.target as string) ?? '', values: [] };
     case 'privilege':
-      return { kind, name: '', label: '', tablePermissions: [], forms: [] };
+      return { kind, name: '', label: '', tablePermissions: [], forms: [], views: [] };
     case 'privilegeExtension':
-      return { kind, name: '', privilege: (route.query.target as string) ?? '', tablePermissions: [], forms: [] };
+      return { kind, name: '', privilege: (route.query.target as string) ?? '', tablePermissions: [], forms: [], views: [] };
     case 'duty':
       return { kind, name: '', label: '', privileges: [] };
     case 'dutyExtension':
@@ -91,11 +93,15 @@ function blank(kind: string): Artifact {
     case 'scriptExtension':
       return { kind, name: '', script: (route.query.target as string) ?? '', code: '// extension script\n' };
     case 'app':
-      return { kind, name: '', label: '' };
+      return { kind, name: '', label: '', models: [] };
     case 'script':
       return { kind, name: '', label: '', code: '// register events, hooks, and actions\n// kernel.actions.set("MyAction", (ctx, args) => { ... });\n// kernel.events.on("MyTable", "onInserting", (e) => { ... });\n// kernel.hooks.register("MyTable", { validateWrite(rec) { ... } });\n' };
     case 'function':
       return { kind, name: '', label: '', executionMode: 'transactional', code: '// Function body — invoked as (ctx, args, kernel, services).\n// Choose Async integration mode to use await services.http or services.email.\n// return { ok: true, count: ctx.select("MyTable").count() };\n' };
+    case 'view':
+      return { kind, name: '', label: '', source: { table: '', alias: 't' }, joins: [], columns: [{ name: 'id', expression: { type: 'field', ref: 't.id' } }], parameters: [], filters: [], groupBy: [], orderBy: [] };
+    case 'chart':
+      return { kind, name: '', label: '', type: 'bar', view: '', dimension: '', measures: [{ field: '', label: '' }], legend: true, stacked: false };
     default:
       return { kind, name: '' };
   }
@@ -115,9 +121,9 @@ async function load() {
   jsonText.value = JSON.stringify(artifact.value, null, 2);
   activeTab.value = DESIGN_KINDS.has(props.kind) ? 'design' : 'json';
 
-  // Set default app for new tables: first non-system, non-web file app
+  // Select the first business App only as a UI convenience; no Model is inferred.
   if (isNew.value) {
-    const defaultApp = designer.apps.find((a) => a.name !== 'system' && a.name !== 'web' && !a.name.startsWith('_web'));
+    const defaultApp = designer.apps.find((a) => a.name !== 'system');
     if (!selectedApp.value && defaultApp) selectedApp.value = defaultApp.name;
     const app = designer.apps.find((a) => a.name === selectedApp.value);
     if (!selectedModel.value) selectedModel.value = app?.models?.[0]?.name ?? '';
@@ -192,15 +198,14 @@ watch([selectedApp, selectedModel], () => {
 
 const menuOptions = computed(() => {
   if (!selectedApp.value) return [];
-  const appEntry = meta.apps.find((a) => a.name === selectedApp.value);
-  const menus = appEntry?.menus ?? [];
+  const menus = designer.catalog.menus.filter((menu) => menu.app === selectedApp.value);
   return [
     ...menus.map((m) => ({ label: `${m.label ?? m.name} (${selectedApp.value})`, value: m.name })),
     { label: `(new menu for ${selectedApp.value})`, value: '!new' },
   ];
 });
 const allMenuOptions = computed(() =>
-  (meta.meta?.apps ?? []).flatMap((a) => a.menus.map((m) => ({ label: `${m.label ?? m.name} (${a.name})`, value: m.name }))),
+  designer.catalog.menus.map((menu) => ({ label: `${String(menu.label ?? menu.name)} (${String(menu.app ?? '')})`, value: menu.name })),
 );
 
 const LAYER_ORDER = ['SYS', 'ISV', 'LOC', 'DEV', 'CUS'];
@@ -219,13 +224,13 @@ function canExtendTarget(target: { app?: string; layer?: string }): boolean {
 function extensionOptions(items: { name: string; label?: string; app?: string; layer?: string }[]) {
   return items.filter(canExtendTarget).map((item) => ({ label: item.label ?? item.name, value: item.name }));
 }
-const extensionTableOptions = computed(() => extensionOptions(meta.meta?.tables ?? []));
-const extensionFormOptions = computed(() => extensionOptions(meta.meta?.forms ?? []));
-const extensionMenuOptions = computed(() => extensionOptions(meta.meta?.apps.flatMap((app) => app.menus) ?? []));
-const extensionEnumOptions = computed(() => extensionOptions(meta.meta?.enums ?? []));
-const extensionPrivilegeOptions = computed(() => extensionOptions(meta.meta?.privileges ?? []));
-const extensionDutyOptions = computed(() => extensionOptions(meta.meta?.duties ?? []));
-const extensionRoleOptions = computed(() => extensionOptions(meta.meta?.roles ?? []));
+const extensionTableOptions = computed(() => extensionOptions(designer.catalog.tables as any));
+const extensionFormOptions = computed(() => extensionOptions(designer.catalog.forms as any));
+const extensionMenuOptions = computed(() => extensionOptions(designer.catalog.menus as any));
+const extensionEnumOptions = computed(() => extensionOptions(designer.catalog.enums as any));
+const extensionPrivilegeOptions = computed(() => extensionOptions(designer.catalog.privileges as any));
+const extensionDutyOptions = computed(() => extensionOptions(designer.catalog.duties as any));
+const extensionRoleOptions = computed(() => extensionOptions(designer.catalog.roles as any));
 const extensionScriptOptions = computed(() => extensionOptions(designer.artifacts.filter((entry) => entry.kind === 'script').map((entry) => entry.artifact as any)));
 const legacyExtensionWarning = computed(() => {
   if (!isExtension.value || isNew.value) return '';
@@ -235,27 +240,30 @@ const legacyExtensionWarning = computed(() => {
 });
 
 const tableOptions = computed(() =>
-  (meta.meta?.tables ?? []).map((t) => ({ label: t.name, value: t.name })),
+  designer.catalog.tables.map((t) => ({ label: String(t.label ?? t.name), value: t.name })),
 );
 const formTableName = computed(() => {
   if (artifact.value.table) return artifact.value.table as string;
-  const form = meta.form((artifact.value.form as string) ?? '');
-  return form?.table ?? '';
+  const form = designer.catalog.forms.find((entry) => entry.name === (artifact.value.form as string));
+  return String(form?.table ?? '');
 });
 const fieldOptionsForFormTable = computed(() => {
-  const t = meta.table(formTableName.value);
-  return (t?.fields ?? []).map((f) => ({ label: f.name, value: f.name }));
+  const table = designer.catalog.tables.find((entry) => entry.name === formTableName.value);
+  return ((table?.fields ?? []) as any[]).map((field) => ({ label: field.name, value: field.name }));
 });
 function fieldOptionsFor(tableName: string) {
-  return (meta.table(tableName)?.fields ?? []).map((f) => ({ label: f.name, value: f.name }));
+  const table = designer.catalog.tables.find((entry) => entry.name === tableName);
+  return ((table?.fields ?? []) as any[]).map((field) => ({ label: field.name, value: field.name }));
 }
 function numericFieldOptionsFor(tableName: string) {
-  return (meta.table(tableName)?.fields ?? [])
+  const table = designer.catalog.tables.find((entry) => entry.name === tableName);
+  return ((table?.fields ?? []) as any[])
     .filter((f) => f.type === 'int' || f.type === 'real')
     .map((f) => ({ label: f.name, value: f.name }));
 }
 function referenceFieldOptionsFor(tableName: string) {
-  return (meta.table(tableName)?.fields ?? [])
+  const table = designer.catalog.tables.find((entry) => entry.name === tableName);
+  return ((table?.fields ?? []) as any[])
     .filter((f) => f.type === 'reference')
     .map((f) => ({ label: f.name, value: f.name }));
 }
@@ -267,25 +275,26 @@ function onLineRefFieldChange(line: EditableLine) {
 }
 function actionsForLine(line: EditableLine): FormAction[] { if (!line.actions) line.actions = []; return line.actions; }
 const formOptions = computed(() =>
-  (meta.meta?.forms ?? []).map((f) => ({ label: f.name, value: f.name })),
+  designer.catalog.forms.map((f) => ({ label: String(f.label ?? f.name), value: f.name })),
 );
 const enumOptions = computed(() =>
-  (meta.meta?.enums ?? []).map((e) => ({ label: e.name, value: e.name })),
+  designer.catalog.enums.map((e) => ({ label: String(e.label ?? e.name), value: e.name })),
 );
 const privilegeOptions = computed(() =>
-  (meta.meta?.privileges ?? []).map((p) => ({ label: p.name, value: p.name })),
+  designer.catalog.privileges.map((p) => ({ label: String(p.label ?? p.name), value: p.name })),
 );
 const dutyOptions = computed(() =>
-  (meta.meta?.duties ?? []).map((d) => ({ label: d.name, value: d.name })),
+  designer.catalog.duties.map((d) => ({ label: String(d.label ?? d.name), value: d.name })),
 );
 const roleOptions = computed(() =>
-  (meta.meta?.roles ?? []).map((r) => ({ label: r.name, value: r.name })),
+  designer.catalog.roles.map((r) => ({ label: String(r.label ?? r.name), value: r.name })),
 );
 const scriptOptions = computed(() =>
   designer.artifacts.filter((a) => a.kind === 'script').map((s) => ({ label: s.name, value: s.name })),
 );
-const reportOptions = computed(() => (meta.meta?.reports ?? []).map((report) => ({ label: report.label ?? report.name, value: report.name })));
-const functionOptions = computed(() => (meta.meta?.actions ?? []).map((name) => ({ label: name, value: name })));
+const reportOptions = computed(() => designer.catalog.reports.map((report) => ({ label: String(report.label ?? report.name), value: report.name })));
+const viewOptions = computed(() => designer.catalog.views.map((view) => ({ label: String(view.label ?? view.name), value: view.name })));
+const functionOptions = computed(() => designer.catalog.functions.map((item) => ({ label: String(item.label ?? item.name), value: item.name })));
 
 async function save() {
   busy.value = true;
@@ -354,8 +363,8 @@ async function save() {
           if (!items.some((i) => i.form === formName)) {
             items.push({ label: (art.label as string) || art.name, form: formName });
           }
-          const menuArt: any = { kind: 'menu', name: menuName, label: meta.apps.find((a) => a.name === selectedApp.value)?.label ?? selectedApp.value, items };
-          if (selectedApp.value && selectedApp.value !== 'web') menuArt.app = selectedApp.value;
+          const menuArt: any = { kind: 'menu', name: menuName, label: designer.apps.find((a) => a.name === selectedApp.value)?.label ?? selectedApp.value, items };
+          menuArt.app = selectedApp.value;
           menuArt.model = selectedModel.value;
           menuArt.layer = selectedLayer.value;
           await designer.save(menuArt);
@@ -386,8 +395,8 @@ async function save() {
     if (props.kind === 'tableExtension') {
       const fieldNames = ((art.fields as { name: string }[]) ?? []).map((f) => f.name).filter(Boolean);
       if (fieldNames.length > 0) {
-        const targetForms = (meta.meta?.forms ?? []).filter(
-          (f) => f.table === art.table && (f.groups?.length ?? 0) > 0,
+        const targetForms = designer.catalog.forms.filter(
+          (f) => f.table === art.table && Array.isArray(f.groups) && f.groups.length > 0,
         );
         for (const f of targetForms) {
           const extName = deriveExtensionName(selectedApp.value, selectedModel.value, f.name);
@@ -456,6 +465,10 @@ const selectedForms = computed({
   get: () => (artifact.value.forms ?? []) as string[],
   set: (v: string[]) => { artifact.value.forms = v; },
 });
+const selectedViews = computed({
+  get: () => (artifact.value.views ?? []) as string[],
+  set: (value: string[]) => { artifact.value.views = value; },
+});
 const selectedPrivileges = computed({
   get: () => (artifact.value.privileges ?? []) as string[],
   set: (v: string[]) => { artifact.value.privileges = v; },
@@ -491,12 +504,13 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
       <h2 style="margin: 0">{{ isNew ? `New ${kind}` : `${kind}: ${name}` }}</h2>
       <n-space>
         <n-button @click="back">Back</n-button>
-        <n-button type="primary" :loading="busy" data-testid="designer-save" @click="save">Save</n-button>
+        <n-button type="primary" :loading="busy" :disabled="isSystemArtifact" data-testid="designer-save" @click="save">Save</n-button>
       </n-space>
     </n-space>
 
     <n-alert v-if="saveError" type="error" title="Object could not be saved" closable style="margin-bottom:16px;white-space:pre-line" @close="saveError=''">{{ saveError }}</n-alert>
     <n-alert v-if="legacyExtensionWarning" type="warning" title="Legacy extension name" style="margin-bottom:16px">{{ legacyExtensionWarning }}</n-alert>
+    <n-alert v-if="isSystemArtifact" type="info" title="Framework — Read-only" style="margin-bottom:16px">System metadata can be inspected by a System Administrator, but cannot be edited, deleted, imported, exported, or extended.</n-alert>
     <n-tabs v-model:value="activeTab" type="line">
       <n-tab-pane v-if="DESIGN_KINDS.has(kind)" name="design" tab="Design">
         <n-form label-placement="top" style="max-width: 960px">
@@ -657,6 +671,15 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
               </n-space>
             </n-card>
 
+            <n-card v-if="kind === 'view'" size="small" title="Declarative query">
+              <n-alert type="info" style="margin-bottom:12px">Views use validated metadata, equality joins, bound parameters, filters and aggregates. Raw SQL is not accepted.</n-alert>
+              <ViewEditor :artifact="artifact" :tables="designer.catalog.tables" />
+            </n-card>
+
+            <n-card v-if="kind === 'chart'" size="small" title="Chart definition">
+              <ChartEditor :artifact="artifact" :views="designer.catalog.views" />
+            </n-card>
+
             <!-- Fields (table / tableExtension) -->
             <n-card v-if="kind === 'table' || kind === 'tableExtension'" size="small" title="Fields">
               <FieldsEditor :fields="tableFields" />
@@ -705,6 +728,10 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
               <n-card size="small" title="Form header actions">
                 <p style="color:var(--n-text-color-3);font-size:13px;margin-top:0">Reusable Function, Report, or Record Picker buttons shown at the top of the form.</p>
                 <ActionsEditor :actions="formActions" :record-table="formTableName" />
+              </n-card>
+
+              <n-card size="small" title="Embedded charts">
+                <FormChartsEditor :artifact="artifact" :charts="designer.catalog.charts" :views="designer.catalog.views" :fields="fieldOptionsForFormTable" />
               </n-card>
 
               <!-- Line grids (master-detail) -->
@@ -784,6 +811,9 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
               <n-button size="small" style="margin-top: 8px" @click="addTablePermission">+ Add table</n-button>
               <n-form-item label="Forms" style="margin-top: 12px">
                 <n-select v-model:value="selectedForms" :options="formOptions" multiple filterable />
+              </n-form-item>
+              <n-form-item label="Views">
+                <n-select v-model:value="selectedViews" :options="viewOptions" multiple filterable />
               </n-form-item>
             </n-card>
 

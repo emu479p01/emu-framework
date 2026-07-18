@@ -45,6 +45,8 @@ describe('FW_AppAccess enforcement', () => {
 
     const designer = await app.inject({ method: 'GET', url: '/api/designer/artifacts', headers: bob });
     expect(designer.statusCode).toBe(403);
+    const direct = await app.inject({ method: 'GET', url: '/api/data/ERP_SalesTable', headers: bob });
+    expect(direct.statusCode).toBe(403);
   });
 
   it('canOpen grants app visibility', async () => {
@@ -117,10 +119,12 @@ describe('FW_AppAccess enforcement', () => {
     expect(designer.statusCode).toBe(200);
   });
 
-  it('FW_UserForm carries the app-access line grid', async () => {
+  it('uses the dedicated security API and does not expose generic security forms', async () => {
     const admin = await loginAs('admin', 'Admin-password-123');
     const meta = await app.inject({ method: 'GET', url: '/api/metadata', headers: admin });
-    const userForm = meta.json().forms.find((f: { name: string }) => f.name === 'FW_UserForm');
-    expect(userForm.lines.some((l: { table: string }) => l.table === 'FW_AppAccess')).toBe(true);
+    expect(meta.json().forms.some((f: { name: string }) => f.name === 'FW_UserForm')).toBe(false);
+    const users = await app.inject({ method: 'GET', url: '/api/system/security/users', headers: admin });
+    expect(users.statusCode).toBe(200);
+    expect(users.json().data.some((user: { username: string }) => user.username === 'bob')).toBe(true);
   });
 });

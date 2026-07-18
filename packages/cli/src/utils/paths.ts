@@ -42,6 +42,7 @@ export interface AppInfo {
   name: string;
   label: string;
   dependsOn: string[];
+  models: { name: string; label?: string; layer: string }[];
 }
 
 export function readAppJson(root: string, appName: string): AppInfo | null {
@@ -53,6 +54,7 @@ export function readAppJson(root: string, appName: string): AppInfo | null {
       name: raw.name ?? appName,
       label: raw.label ?? appName,
       dependsOn: raw.dependsOn ?? [],
+      models: raw.models ?? [],
     };
   } catch {
     return null;

@@ -110,5 +110,5 @@ function createApp(root: string, name: string, label: string, dependsOn: string[
   }
   p.log.message(`  ${pc.dim('Metadata:')} apps/${name}/metadata/`);
   p.log.message(`  ${pc.dim('Logic:')}    apps/${name}/src/logic.ts`);
-  p.log.message(`  ${pc.dim('Next:')}     pnpm emu add object ${name} table`);
+  p.log.message(`  ${pc.dim('Next:')}     pnpm emu add model ${name} <ModelName> --layer CUS`);
 }

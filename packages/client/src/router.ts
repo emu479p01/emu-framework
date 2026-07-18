@@ -15,6 +15,8 @@ const SmtpSettingsPage = () => import('./views/SmtpSettingsPage.vue');
 const ActionPage = () => import('./views/ActionPage.vue');
 const TableBrowserPage = () => import('./views/TableBrowserPage.vue');
 const ReportLaunchPage = () => import('./views/ReportLaunchPage.vue');
+const ChangePasswordPage = () => import('./views/ChangePasswordPage.vue');
+const SecurityUsersPage = () => import('./views/SecurityUsersPage.vue');
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -46,6 +48,8 @@ export const router = createRouter({
     { path: '/system/fonts', component: FontManagerPage, meta: { capability: 'maintenance' } },
     { path: '/system/integrations/smtp', component: SmtpSettingsPage, meta: { capability: 'maintenance' } },
     { path: '/system/tables', component: TableBrowserPage, meta: { capability: 'tableBrowser' } },
+    { path: '/system/security/users', component: SecurityUsersPage, meta: { capability: 'securityAdmin' } },
+    { path: '/account/password', component: ChangePasswordPage, meta: { capability: 'myAccount' } },
     { path: '/action/:name', component: ActionPage, props: true },
     { path: '/report/:name', component: ReportLaunchPage, props: true },
   ],

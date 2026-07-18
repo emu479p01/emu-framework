@@ -16,7 +16,7 @@ import { findProjectRoot } from '../utils/paths.js';
 
 const kindDirectories: Record<string, string> = {
   table: 'tables', enum: 'enums', form: 'forms', menu: 'menus', privilege: 'privileges', duty: 'duties', role: 'roles',
-  script: 'scripts', report: 'reports', tableExtension: 'tableExtensions', enumExtension: 'enumExtensions',
+  script: 'scripts', report: 'reports', view: 'views', chart: 'charts', tableExtension: 'tableExtensions', enumExtension: 'enumExtensions',
   formExtension: 'formExtensions', menuExtension: 'menuExtensions', privilegeExtension: 'privilegeExtensions',
   dutyExtension: 'dutyExtensions', roleExtension: 'roleExtensions', scriptExtension: 'scriptExtensions',
 };

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NAlert, NButton, NCard, NCheckbox, NFormItem, NInput, NSelect, NSpace } from 'naive-ui';
 import { computed } from 'vue';
-import { useMeta } from '../../stores/meta';
+import { useDesigner } from '../../stores/designer';
 
 export interface EditableField {
   name: string;
@@ -16,10 +16,11 @@ export interface EditableField {
 }
 
 const props = defineProps<{ fields: EditableField[] }>();
-const meta = useMeta();
+const designer = useDesigner();
 
 function fieldOptionsFor(tableName: string) {
-  return (meta.table(tableName)?.fields ?? []).map((f) => ({ label: f.name, value: f.name }));
+  const table = designer.catalog.tables.find((item) => item.name === tableName);
+  return ((table?.fields ?? []) as EditableField[]).map((f) => ({ label: f.name, value: f.name }));
 }
 function addCopyField(field: EditableField) {
   if (!field.reference) return;
@@ -53,10 +54,10 @@ const TYPE_OPTIONS = ['string', 'int', 'real', 'boolean', 'date', 'datetime', 'e
 );
 
 const enumOptions = computed(() =>
-  (meta.meta?.enums ?? []).map((e) => ({ label: e.name, value: e.name })),
+  designer.catalog.enums.map((e) => ({ label: e.name, value: e.name })),
 );
 const tableOptions = computed(() =>
-  (meta.meta?.tables ?? []).map((t) => ({ label: t.name, value: t.name })),
+  designer.catalog.tables.map((t) => ({ label: t.name, value: t.name })),
 );
 
 function addField() {

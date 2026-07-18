@@ -54,11 +54,45 @@ const systemWebArtifact: TableMeta = {
   indexes: [{ name: 'NameIdx', fields: ['name'], unique: true }],
 };
 
+const systemMigration: TableMeta = {
+  kind: 'table', name: 'FW_Migration', app: 'system', model: 'Framework', layer: 'SYS',
+  fields: [
+    { name: 'migration', type: 'string', mandatory: true, readOnly: true },
+    { name: 'appliedAt', type: 'datetime', mandatory: true, readOnly: true },
+  ],
+  indexes: [{ name: 'MigrationIdx', fields: ['migration'], unique: true }],
+};
+
+const systemViewToken: TableMeta = {
+  kind: 'table', name: 'FW_ViewToken', app: 'system', model: 'Framework', layer: 'SYS',
+  fields: [
+    { name: 'name', type: 'string', mandatory: true, maxLength: 120 },
+    { name: 'tokenHash', type: 'string', mandatory: true, readOnly: true },
+    { name: 'enabled', type: 'boolean', default: true },
+    { name: 'expiresAt', type: 'datetime' },
+    { name: 'lastUsedAt', type: 'datetime', readOnly: true },
+    { name: 'revokedAt', type: 'datetime', readOnly: true },
+  ],
+  indexes: [{ name: 'ViewTokenHashIdx', fields: ['tokenHash'], unique: true }],
+};
+
+const systemViewTokenScope: TableMeta = {
+  kind: 'table', name: 'FW_ViewTokenScope', app: 'system', model: 'Framework', layer: 'SYS',
+  fields: [
+    { name: 'tokenId', type: 'reference', mandatory: true, reference: { table: 'FW_ViewToken', onDelete: 'cascade' } },
+    { name: 'viewName', type: 'string', mandatory: true },
+  ],
+  indexes: [{ name: 'ViewTokenScopeIdx', fields: ['tokenId', 'viewName'], unique: true }],
+};
+
 export function registerSystemApp(kernel: Kernel): void {
   kernel.registerApp({ name: 'system', label: 'System', models: [{ name: 'Framework', label: 'Framework', layer: 'SYS' }] }, [
     systemUser,
     systemSession,
     systemWebArtifact,
+    systemMigration,
+    systemViewToken,
+    systemViewTokenScope,
   ]);
 }
 

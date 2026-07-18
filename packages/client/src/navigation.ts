@@ -71,7 +71,7 @@ export function itemToOption(item: MenuItemMeta, parentKey: string, appName: str
 }
 
 export function buildNavigationOptions(input: {
-  isFrameworkUser: boolean;
+  isFrameworkUser?: boolean;
   settingsLabel: string;
   frameworkMenus: MenuMeta[];
   apps: NavigationApp[];
@@ -82,7 +82,7 @@ export function buildNavigationOptions(input: {
     label: () => h('span', { title: app.label }, app.label), key: `app-${app.name}`, icon: renderAppIcon(app),
     children: app.menus.flatMap((menu) => menu.items.map((item) => itemToOption(item, `app-${app.name}`, app.name, input.onNavigate))),
   })));
-  if (input.isFrameworkUser && input.frameworkMenus.length) {
+  if (input.frameworkMenus.length) {
     options.push({
       label: () => h('span', { title: input.settingsLabel }, input.settingsLabel), key: 'framework-settings', icon: renderIcon('settings', input.settingsLabel),
       children: input.frameworkMenus.flatMap((menu) => menu.items.map((item) => itemToOption(item, `fw-${menu.name}`, 'system', input.onNavigate))),

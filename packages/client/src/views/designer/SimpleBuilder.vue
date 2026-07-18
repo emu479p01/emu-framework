@@ -18,14 +18,15 @@ const busy = ref(false);
 const preview = ref<ChangeSetPreview | null>(null);
 const showReview = ref(false);
 const model = reactive({
-  appName: '', appLabel: '', appIcon: 'app' as IconName, entityName: '', entityLabel: '', pageLabel: '', navigationLabel: '', navigationIcon: 'table' as IconName,
+  appName: '', appLabel: '', appIcon: 'app' as IconName, modelName: '', modelLabel: '', modelLayer: '' as string, entityName: '', entityLabel: '', pageLabel: '', navigationLabel: '', navigationIcon: 'table' as IconName,
   fields: [{ name: 'name', label: 'Name', type: 'string', mandatory: true }],
 });
 const fieldTypes = ['string', 'int', 'real', 'boolean', 'date', 'datetime'].map((value) => ({ label: value, value }));
 const prefix = computed(() => model.appName.trim().replace(/[^A-Za-z0-9]/g, '_').toUpperCase());
 const entity = computed(() => model.entityName.trim().replace(/[^A-Za-z0-9_]/g, ''));
-const ready = computed(() => model.appName.trim() && model.appLabel.trim() && model.entityName.trim() && model.entityLabel.trim() && model.fields.length > 0 && model.fields.every((field) => field.name.trim()));
-function next() { if (step.value < 5) step.value += 1; else review(); }
+const layerOptions = ['SYS','ISV','LOC','DEV','CUS'].map((value) => ({ label: value, value }));
+const ready = computed(() => model.appName.trim() && model.appLabel.trim() && model.modelName.trim() && model.modelLayer && model.entityName.trim() && model.entityLabel.trim() && model.fields.length > 0 && model.fields.every((field) => field.name.trim()));
+function next() { if (step.value < 6) step.value += 1; else review(); }
 function back() { if (step.value > 1) step.value -= 1; }
 function addField() { model.fields.push({ name: '', label: '', type: 'string', mandatory: false }); }
 function removeField(index: number) { if (model.fields.length > 1) model.fields.splice(index, 1); }
@@ -34,9 +35,9 @@ function artifacts() {
   const tableName = `${prefix.value}_${entity.value}`;
   const formName = `${tableName}Form`;
   const menuName = `${prefix.value}_MainMenu`;
-  const common = { app: model.appName, model: 'Customizations', layer: 'CUS' };
+  const common = { app: model.appName, model: model.modelName, layer: model.modelLayer };
   return [
-    { kind: 'app', name: model.appName, label: model.appLabel, icon: model.appIcon, models: [{ name: 'Customizations', label: 'Customizations', layer: 'CUS' }] },
+    { kind: 'app', name: model.appName, label: model.appLabel, icon: model.appIcon, models: [{ name: model.modelName, label: model.modelLabel || model.modelName, layer: model.modelLayer }] },
     { kind: 'table', name: tableName, ...common, label: model.entityLabel, titleField: model.fields[0].name, fields: model.fields.map((field) => ({ name: field.name, label: field.label || field.name, type: field.type, mandatory: field.mandatory || undefined })) },
     { kind: 'form', name: formName, ...common, label: model.pageLabel || model.entityLabel, table: tableName, listFields: model.fields.map((field) => field.name), groups: [{ label: 'Details', fields: model.fields.map((field) => field.name) }] },
     { kind: 'menu', name: menuName, ...common, label: 'Navigation', items: [{ label: model.navigationLabel || model.entityLabel, icon: model.navigationIcon, form: formName }] },
@@ -76,7 +77,7 @@ async function apply() {
     <div class="builder-heading"><div><h1>Build an app</h1><p>Describe the business data you need. EmuFramework creates the page and navigation for you.</p></div></div>
     <n-card>
       <n-steps :current="step" size="small" class="steps">
-        <n-step title="App" /><n-step title="Entity" /><n-step title="Fields" /><n-step title="Page" /><n-step title="Navigation" />
+        <n-step title="App" /><n-step title="Model" /><n-step title="Entity" /><n-step title="Fields" /><n-step title="Page" /><n-step title="Navigation" />
       </n-steps>
       <div class="step-body">
         <template v-if="step === 1">
@@ -84,10 +85,14 @@ async function apply() {
           <div class="two-col"><n-form-item label="Internal name" required><n-input v-model:value="model.appName" placeholder="service" data-testid="builder-app-name" /></n-form-item><n-form-item label="Display name" required><n-input v-model:value="model.appLabel" placeholder="Service Management" /></n-form-item><n-form-item label="App icon"><n-select v-model:value="model.appIcon" :options="ICON_OPTIONS" /></n-form-item></div>
         </template>
         <template v-else-if="step === 2">
+          <h2>Create the app's first model</h2><p class="help">A Model groups development metadata and its layer. It is not a security boundary.</p>
+          <div class="two-col"><n-form-item label="Model name" required><n-input v-model:value="model.modelName" placeholder="Operations" /></n-form-item><n-form-item label="Display name"><n-input v-model:value="model.modelLabel" placeholder="Operations" /></n-form-item><n-form-item label="Layer" required><n-select v-model:value="model.modelLayer" :options="layerOptions" placeholder="Choose a layer" /></n-form-item></div>
+        </template>
+        <template v-else-if="step === 3">
           <h2>What do you want to manage?</h2><p class="help">An entity is a business concept such as Customer, Asset, or Work Order.</p>
           <div class="two-col"><n-form-item label="Entity name" required><n-input v-model:value="model.entityName" placeholder="WorkOrder" /></n-form-item><n-form-item label="Display name" required><n-input v-model:value="model.entityLabel" placeholder="Work orders" /></n-form-item></div>
         </template>
-        <template v-else-if="step === 3">
+        <template v-else-if="step === 4">
           <h2>Add the information people will enter</h2><p class="help">The first field is used to identify records in lookups.</p>
           <div class="field-list" v-for="(field, index) in model.fields" :key="index">
             <n-input v-model:value="field.name" placeholder="fieldName" /><n-input v-model:value="field.label" placeholder="Label" />
@@ -95,17 +100,17 @@ async function apply() {
             <n-button quaternary type="error" :disabled="model.fields.length === 1" @click="removeField(index)" :aria-label="`Remove field ${index + 1}`">×</n-button>
           </div><n-button secondary @click="addField">+ Add field</n-button>
         </template>
-        <template v-else-if="step === 4">
+        <template v-else-if="step === 5">
           <h2>Name the page</h2><p class="help">The page includes a searchable list and a create/edit form.</p>
           <n-form-item label="Page title"><n-input v-model:value="model.pageLabel" :placeholder="model.entityLabel || 'Work orders'" /></n-form-item>
         </template>
         <template v-else>
           <h2>Add it to navigation</h2><p class="help">This is the label people select in the sidebar.</p>
           <div class="two-col"><n-form-item label="Navigation label"><n-input v-model:value="model.navigationLabel" :placeholder="model.entityLabel || 'Work orders'" /></n-form-item><n-form-item label="Navigation icon"><n-select v-model:value="model.navigationIcon" :options="ICON_OPTIONS" /></n-form-item></div>
-          <n-alert type="info">The app will use safe Customizations defaults. Technical settings remain available in Advanced mode.</n-alert>
+          <n-alert type="info">App controls access and navigation. Model groups metadata for development; it does not grant security permissions.</n-alert>
         </template>
       </div>
-      <n-space justify="space-between"><n-button :disabled="step === 1" @click="back">Back</n-button><n-button type="primary" :loading="busy" @click="next">{{ step === 5 ? 'Review app' : 'Continue' }}</n-button></n-space>
+      <n-space justify="space-between"><n-button :disabled="step === 1" @click="back">Back</n-button><n-button type="primary" :loading="busy" @click="next">{{ step === 6 ? 'Review app' : 'Continue' }}</n-button></n-space>
     </n-card>
     <n-modal v-model:show="showReview" preset="card" title="Review changes" style="width:min(680px,calc(100vw - 32px))">
       <n-alert type="success" style="margin-bottom:16px">Validation passed. Nothing changes until you confirm.</n-alert>

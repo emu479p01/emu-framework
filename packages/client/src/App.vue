@@ -31,7 +31,6 @@ const themeOverrides: GlobalThemeOverrides = {
 
 const menuOptions = computed<NavMenuOption[]>(() => {
   return buildNavigationOptions({
-    isFrameworkUser: session.isFrameworkUser,
     settingsLabel: t('nav.settings'),
     frameworkMenus: meta.frameworkMenus,
     apps: meta.apps,
@@ -64,11 +63,16 @@ const breadcrumb = computed(() => {
   if (route.path.startsWith('/system/maintenance')) return 'System Maintenance';
   if (route.path.startsWith('/system/fonts')) return 'Report Fonts';
   if (route.path.startsWith('/system/integrations/smtp')) return 'SMTP Settings';
+  if (route.path.startsWith('/system/security/users')) return 'Users & Security';
+  if (route.path.startsWith('/account/password')) return 'Change Password';
   const form = meta.form(String(route.params.formName ?? ''));
   return form?.label ?? form?.name ?? t('home.title');
 });
-const userOptions = [{ key: 'logout', label: t('auth.logout') }];
-async function onUserAction(key: string) { if (key === 'logout') { await session.logout(); router.push('/login'); } }
+const userOptions = [{ key: 'account', label: 'Change password' }, { key: 'logout', label: t('auth.logout') }];
+async function onUserAction(key: string) {
+  if (key === 'account') router.push('/account/password');
+  if (key === 'logout') { await session.logout(); router.push('/login'); }
+}
 function updateViewport() {
   mobile.value = window.innerWidth < 900;
   if (!mobile.value) drawerOpen.value = false;

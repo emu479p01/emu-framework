@@ -19,6 +19,7 @@ import FieldControl from '../components/FieldControl.vue';
 import LineGrid from '../components/LineGrid.vue';
 import { applyIfBlank } from '../utils/applyDefaults';
 import ActionDialog from '../components/ActionDialog.vue';
+import EmbeddedChart from '../components/EmbeddedChart.vue';
 import type { FormAction } from '@emu/core';
 
 const props = defineProps<{ formName: string; id: string; appName?: string }>();
@@ -176,6 +177,10 @@ function remove() {
           </n-grid>
         </n-card>
 
+        <div v-if="form.charts?.length" class="chart-grid">
+          <EmbeddedChart v-for="embedded in form.charts" :key="embedded.chart" :class="embedded.width === 'half' ? 'half' : 'full'" :embed="embedded" :record="record" :is-new="isNew" />
+        </div>
+
         <template v-if="!isNew">
           <LineGrid
             v-for="line in form.lines ?? []"
@@ -192,5 +197,5 @@ function remove() {
 </template>
 
 <style scoped>
-.form-page{max-width:1440px;margin:0 auto}.form-actionbar{position:sticky;top:12px;z-index:4;display:flex;justify-content:space-between;align-items:center;gap:20px;margin:0 0 24px;padding:18px 20px;background:rgba(255,255,255,.96);backdrop-filter:blur(8px);border:1px solid var(--emu-border);border-radius:12px;box-shadow:var(--emu-shadow-sm)}.form-actionbar h1{font-size:25px;margin:0}.form-actionbar p{margin:5px 0 0;color:var(--emu-muted);font-size:12px}.form-page :deep(.n-card__content){padding:20px}.form-page :deep(.n-form-item){margin-bottom:18px}.error-list{margin:4px 0;padding-left:20px}@media(max-width:700px){.form-actionbar{position:static;display:block;margin:0 0 16px;padding:16px}.form-actionbar h1{font-size:21px;overflow-wrap:anywhere}.form-actionbar>.n-space{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:14px}.form-actionbar>.n-space :deep(.n-button){width:100%;min-height:44px}.form-page :deep(.n-card__content){padding:16px}.form-page :deep(.n-card-header){flex-wrap:wrap}.form-page :deep(.n-card-header__extra){margin-left:0}}
+.form-page{max-width:1440px;margin:0 auto}.form-actionbar{position:sticky;top:12px;z-index:4;display:flex;justify-content:space-between;align-items:center;gap:20px;margin:0 0 24px;padding:18px 20px;background:rgba(255,255,255,.96);backdrop-filter:blur(8px);border:1px solid var(--emu-border);border-radius:12px;box-shadow:var(--emu-shadow-sm)}.form-actionbar h1{font-size:25px;margin:0}.form-actionbar p{margin:5px 0 0;color:var(--emu-muted);font-size:12px}.form-page :deep(.n-card__content){padding:20px}.form-page :deep(.n-form-item){margin-bottom:18px}.error-list{margin:4px 0;padding-left:20px}.chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.chart-grid .full{grid-column:1/-1}@media(max-width:700px){.form-actionbar{position:static;display:block;margin:0 0 16px;padding:16px}.form-actionbar h1{font-size:21px;overflow-wrap:anywhere}.form-actionbar>.n-space{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:14px}.form-actionbar>.n-space :deep(.n-button){width:100%;min-height:44px}.form-page :deep(.n-card__content){padding:16px}.form-page :deep(.n-card-header){flex-wrap:wrap}.form-page :deep(.n-card-header__extra){margin-left:0}.chart-grid{grid-template-columns:1fr}}
 </style>

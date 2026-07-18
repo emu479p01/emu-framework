@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { findProjectRoot, listAppNames, readAppJson } from '../utils/paths.js';
 
-const META_DIRS = ['tables', 'enums', 'forms', 'menus', 'privileges', 'duties', 'roles'];
+const META_DIRS = ['tables', 'enums', 'forms', 'menus', 'views', 'charts', 'privileges', 'duties', 'roles', 'functions', 'reports'];
 
 export const listCommand = defineCommand({
   meta: {
