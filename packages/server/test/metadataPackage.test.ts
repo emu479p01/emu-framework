@@ -73,7 +73,7 @@ describe('metadata package API', () => {
   });
 
   it('accepts metadata packages larger than the old 1 MB default', async () => {
-    const large = createMetadataPackage('0.1.2.0', { type: 'app', app: 'sales' }, [
+    const large = createMetadataPackage('0.1.3.0', { type: 'app', app: 'sales' }, [
       { kind: 'app', name: 'sales', label: `Sales ${'x'.repeat(1024 * 1024)}`, models: [{ name: 'Core', layer: 'CUS' }] } as MetadataArtifact,
     ]);
     const payload = Buffer.from(JSON.stringify(large));

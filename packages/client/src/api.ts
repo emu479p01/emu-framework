@@ -77,12 +77,27 @@ export interface MetadataPackagePreview {
   };
 }
 
+export interface AppDataOverview {
+  apps: { name: string; label: string; tables: { name: string; label: string; rows: number }[]; totalRows: number; lastOperation: { createdAt: string; action: string } | null }[];
+}
+
+export interface AppDataPreview {
+  previewId: string; expiresAt: string; app: string; frameworkVersion: string; exportedAt: string;
+  tables: { name: string; currentRows: number; incomingRows: number }[]; warnings: string[];
+}
+
+export interface BackupPreview {
+  previewId: string; expiresAt: string;
+  manifest: { frameworkVersion: string; createdAt: string; components: ('data'|'designer'|'fonts')[]; files: { name: string; bytes: number }[] };
+  components: ('data'|'designer'|'fonts')[]; warnings: string[];
+}
+
 export const api = {
   get: <T>(url: string) => request<T>('GET', url),
   post: <T>(url: string, body?: unknown) => request<T>('POST', url, body),
   put: <T>(url: string, body?: unknown) => request<T>('PUT', url, body),
   patch: <T>(url: string, body?: unknown) => request<T>('PATCH', url, body),
-  delete: <T>(url: string) => request<T>('DELETE', url),
+  delete: <T>(url: string, body?: unknown) => request<T>('DELETE', url, body),
 
   list: (table: string, params: Record<string, string | number> = {}) => {
     const qs = new URLSearchParams(
@@ -124,5 +139,13 @@ export const api = {
     return requestForm<{ ok: boolean; manifest: { frameworkVersion: string; createdAt: string; files: { name: string; bytes: number }[] } }>(
       '/api/system/backup/validate', form,
     );
+  },
+  appDataPreview: (app: string, file: File) => {
+    const form = new FormData(); form.append('file', file);
+    return requestForm<AppDataPreview>(`/api/system/app-data/${encodeURIComponent(app)}/import/preview`, form);
+  },
+  backupRestorePreview: (file: File) => {
+    const form = new FormData(); form.append('file', file);
+    return requestForm<BackupPreview>('/api/system/backup/restore/preview', form);
   },
 };

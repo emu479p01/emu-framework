@@ -98,3 +98,12 @@ export function findActiveKey(options: NavMenuOption[], formName: string, path: 
     if (found) return found;
   }
 }
+
+export function findNavigationKeyPath(options: NavMenuOption[], key: string, path: string[] = []): string[] | undefined {
+  for (const option of options) {
+    const next = [...path, String(option.key)];
+    if (option.key === key) return next;
+    const found = findNavigationKeyPath((option.children ?? []) as NavMenuOption[], key, next);
+    if (found) return found;
+  }
+}

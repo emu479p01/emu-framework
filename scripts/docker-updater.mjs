@@ -1,6 +1,7 @@
 import http from 'node:http';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { copyFile, cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 const token = process.env.EMU_UPDATER_TOKEN;
 const imageRepository = process.env.EMU_IMAGE_REPOSITORY ?? 'ghcr.io/emu479p01/emu-framework';
@@ -74,16 +75,60 @@ async function update({ jobId, version }) {
   }
 }
 
+async function replaceFile(source, target) {
+  const temporary = `${target}.restore-new`;
+  await copyFile(source, temporary); await rename(temporary, target);
+  await rm(`${target}-wal`, { force: true }); await rm(`${target}-shm`, { force: true });
+}
+
+async function restore({ jobId, stagePath, components }) {
+  if (!Array.isArray(components) || components.some((item) => !['data', 'designer', 'fonts'].includes(item))) throw new Error('Invalid restore components');
+  if (typeof stagePath !== 'string' || !stagePath.startsWith('/data/') || stagePath.includes('..')) throw new Error('Invalid restore stage path');
+  const restoreState = process.env.EMU_RESTORE_STATE_PATH ?? '/data/restore-status.json';
+  const setRestoreStatus = async (status, error) => {
+    const state = JSON.parse(await readFile(restoreState, 'utf8'));
+    if (state.id !== jobId) throw new Error('Restore job no longer matches shared state');
+    state.status = status; state.updatedAt = new Date().toISOString(); if (error) state.error = String(error).slice(0, 500);
+    await writeFile(restoreState, JSON.stringify(state, null, 2));
+  };
+  const recovery = `/data/pre-restore-${jobId}`;
+  await setRestoreStatus('running'); await mkdir(recovery, { recursive: true });
+  await docker('POST', `/containers/${appContainer}/stop?t=30`).catch(() => undefined);
+  try {
+    if (components.includes('data')) { if (existsSync('/data/data.db')) await copyFile('/data/data.db', join(recovery, 'data.db')); await replaceFile(join(stagePath, 'data.db'), '/data/data.db'); }
+    if (components.includes('designer')) { if (existsSync('/data/designer.db')) await copyFile('/data/designer.db', join(recovery, 'designer.db')); await replaceFile(join(stagePath, 'designer.db'), '/data/designer.db'); }
+    if (components.includes('fonts')) {
+      if (existsSync('/data/fonts')) await cp('/data/fonts', join(recovery, 'fonts'), { recursive: true });
+      await rm('/data/fonts', { recursive: true, force: true });
+      if (existsSync(join(stagePath, 'fonts'))) await cp(join(stagePath, 'fonts'), '/data/fonts', { recursive: true }); else await mkdir('/data/fonts', { recursive: true });
+    }
+    await setRestoreStatus('restarting'); await docker('POST', `/containers/${appContainer}/start`); await waitHealthy(appContainer);
+    await setRestoreStatus('succeeded'); await rm(stagePath, { recursive: true, force: true }); await rm(recovery, { recursive: true, force: true });
+  } catch (error) {
+    await docker('POST', `/containers/${appContainer}/stop?t=30`).catch(() => undefined);
+    if (components.includes('data') && existsSync(join(recovery, 'data.db'))) await replaceFile(join(recovery, 'data.db'), '/data/data.db');
+    if (components.includes('designer') && existsSync(join(recovery, 'designer.db'))) await replaceFile(join(recovery, 'designer.db'), '/data/designer.db');
+    if (components.includes('fonts')) { await rm('/data/fonts', { recursive: true, force: true }); if (existsSync(join(recovery, 'fonts'))) await cp(join(recovery, 'fonts'), '/data/fonts', { recursive: true }); }
+    await docker('POST', `/containers/${appContainer}/start`).catch(() => undefined); await setRestoreStatus('failed', error instanceof Error ? error.message : error);
+  }
+}
+
 let busy = false;
 http.createServer(async (request, response) => {
-  if (request.method !== 'POST' || request.url !== '/update') { response.writeHead(404).end(); return; }
+  if (request.method !== 'POST' || !['/update', '/restore'].includes(request.url ?? '')) { response.writeHead(404).end(); return; }
   if (request.headers.authorization !== `Bearer ${token}`) { response.writeHead(401).end(); return; }
   if (busy) { response.writeHead(409).end(); return; }
   const chunks = []; for await (const chunk of request) chunks.push(chunk);
   try {
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    if (!body.jobId || !body.version || Object.keys(body).some((key) => !['jobId', 'version', 'backupPath'].includes(key))) throw new Error('Invalid update request');
-    busy = true; void update(body).finally(() => { busy = false; });
+    if (!body.jobId) throw new Error('Invalid job request');
+    if (request.url === '/update') {
+      if (!body.version || Object.keys(body).some((key) => !['jobId', 'version', 'backupPath'].includes(key))) throw new Error('Invalid update request');
+      busy = true; void update(body).finally(() => { busy = false; });
+    } else {
+      if (!body.stagePath || !body.components || Object.keys(body).some((key) => !['jobId', 'stagePath', 'components'].includes(key))) throw new Error('Invalid restore request');
+      busy = true; void restore(body).finally(() => { busy = false; });
+    }
     response.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ accepted: true }));
   } catch (error) { response.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: error instanceof Error ? error.message : 'Invalid request' })); }
 }).listen(3400, '0.0.0.0');
