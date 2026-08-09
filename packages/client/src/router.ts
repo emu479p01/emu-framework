@@ -10,6 +10,7 @@ const DesignerPage = () => import('./views/designer/DesignerPage.vue');
 const DesignerEditPage = () => import('./views/designer/DesignerEditPage.vue');
 const ReportEditPage = () => import('./views/report-designer/ReportEditPage.vue');
 const SystemMaintenancePage = () => import('./views/SystemMaintenancePage.vue');
+const AppDataManagementPage = () => import('./views/AppDataManagementPage.vue');
 const FontManagerPage = () => import('./views/FontManagerPage.vue');
 const SmtpSettingsPage = () => import('./views/SmtpSettingsPage.vue');
 const ActionPage = () => import('./views/ActionPage.vue');
@@ -45,6 +46,7 @@ export const router = createRouter({
     { path: '/designer/new/:kind', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind }), meta: { capability: 'designer' } },
     { path: '/designer/:kind/:name', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind, name: r.params.name }), meta: { capability: 'designer' } },
     { path: '/system/maintenance', component: SystemMaintenancePage, meta: { capability: 'maintenance' } },
+    { path: '/system/app-data', component: AppDataManagementPage, meta: { capability: 'maintenance' } },
     { path: '/system/fonts', component: FontManagerPage, meta: { capability: 'maintenance' } },
     { path: '/system/integrations/smtp', component: SmtpSettingsPage, meta: { capability: 'maintenance' } },
     { path: '/system/tables', component: TableBrowserPage, meta: { capability: 'tableBrowser' } },

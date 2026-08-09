@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   NButton, NConfigProvider, NDialogProvider, NDrawer, NDrawerContent, NDropdown,
@@ -9,7 +9,7 @@ import {
 import { useSession } from './stores/session';
 import { useMeta } from './stores/meta';
 import { t } from './i18n';
-import { buildNavigationOptions, findActiveKey, type NavMenuOption } from './navigation';
+import { buildNavigationOptions, findActiveKey, findNavigationKeyPath, type NavMenuOption } from './navigation';
 
 const session = useSession();
 const meta = useMeta();
@@ -19,6 +19,7 @@ const mobile = ref(false);
 const drawerOpen = ref(false);
 const siderCollapsed = ref(false);
 const selectedNavRoot = ref<string | null>(null);
+const desktopExpandedKeys = ref<string[]>([]);
 const themeOverrides: GlobalThemeOverrides = {
   common: {
     primaryColor: '#4f46e5', primaryColorHover: '#4338ca', primaryColorPressed: '#3730a3',
@@ -56,11 +57,32 @@ const desktopPanelTitle = computed(() => {
   const appName = String(selectedNavRoot.value ?? '').replace(/^app-/, '');
   return meta.apps.find((app) => app.name === appName)?.label ?? appName;
 });
-function selectNavRoot(key: string) { selectedNavRoot.value = selectedNavRoot.value === key ? null : key; }
+function restoreDesktopExpansion(rootKey: string) {
+  const root = menuOptions.value.find((option) => option.key === rootKey);
+  if (!root) { desktopExpandedKeys.value = []; return; }
+  const activePath = activeNavRoot.value === rootKey ? findNavigationKeyPath((root.children ?? []) as NavMenuOption[], activeKey.value) : undefined;
+  if (activePath?.length) { desktopExpandedKeys.value = activePath.slice(0, -1); return; }
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`emu-nav:${rootKey}`) ?? '[]') as string[];
+    desktopExpandedKeys.value = saved.filter((key) => findNavigationKeyPath((root.children ?? []) as NavMenuOption[], key));
+  } catch { desktopExpandedKeys.value = []; }
+}
+function selectNavRoot(key: string) {
+  if (selectedNavRoot.value === key) { selectedNavRoot.value = null; desktopExpandedKeys.value = []; return; }
+  selectedNavRoot.value = key; restoreDesktopExpansion(key);
+}
+function updateDesktopExpansion(keys: Array<string | number>) {
+  const normalized = keys.map(String); const newlyOpened = normalized.find((key) => !desktopExpandedKeys.value.includes(key));
+  if (newlyOpened) desktopExpandedKeys.value = (findNavigationKeyPath(desktopChildren.value, newlyOpened) ?? [newlyOpened]);
+  else desktopExpandedKeys.value = desktopExpandedKeys.value.filter((key) => normalized.includes(key));
+  if (selectedNavRoot.value) sessionStorage.setItem(`emu-nav:${selectedNavRoot.value}`, JSON.stringify(desktopExpandedKeys.value));
+}
+watch(activeKey, () => { if (selectedNavRoot.value && activeNavRoot.value === selectedNavRoot.value) restoreDesktopExpansion(selectedNavRoot.value); });
 const breadcrumb = computed(() => {
   if (route.path === '/') return t('home.title');
   if (route.path.startsWith('/designer')) return t('designer.title');
   if (route.path.startsWith('/system/maintenance')) return 'System Maintenance';
+  if (route.path.startsWith('/system/app-data')) return 'App Data Management';
   if (route.path.startsWith('/system/fonts')) return 'Report Fonts';
   if (route.path.startsWith('/system/integrations/smtp')) return 'SMTP Settings';
   if (route.path.startsWith('/system/security/users')) return 'Users & Security';
@@ -104,7 +126,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', updateViewport); wi
           <div v-if="!mobile && desktopChildren.length" class="nav-overlay-backdrop" :style="{ left: siderCollapsed ? '72px' : '264px' }" @click="selectedNavRoot = null"></div>
           <aside v-if="!mobile && desktopChildren.length" class="nav-panel" :style="{ left: siderCollapsed ? '72px' : '264px' }" aria-label="Secondary navigation">
             <div class="nav-panel-header"><strong>{{ desktopPanelTitle }}</strong><n-button quaternary circle size="small" aria-label="Close submenu" @click="selectedNavRoot = null">×</n-button></div>
-            <n-menu class="nav-panel-menu" :options="desktopChildren" :value="activeKey" :default-expanded-keys="desktopChildren.map((item) => item.key as string)" />
+            <n-menu class="nav-panel-menu" :options="desktopChildren" :value="activeKey" :expanded-keys="desktopExpandedKeys" @update:expanded-keys="updateDesktopExpansion" />
           </aside>
           <n-drawer v-model:show="drawerOpen" placement="left" :width="280">
             <n-drawer-content :title="meta.meta?.branding.title ?? 'EmuFramework'" closable body-content-style="padding:0">
@@ -138,7 +160,7 @@ body { margin:0; color:var(--emu-text); background:var(--emu-bg); font-family:In
 .main-layout > .n-layout-scroll-container{display:flex;flex-direction:column}
 .app-sider { background:linear-gradient(180deg,#111827 0%,#172033 100%)!important; }
 .brand { height:68px; display:flex; align-items:center; gap:11px; padding:0 20px; font-weight:750; font-size:16px; overflow:hidden; white-space:nowrap; color:#fff;letter-spacing:-.02em;border-bottom:1px solid rgba(255,255,255,.08) }
-.brand img{filter:drop-shadow(0 4px 10px rgba(99,102,241,.35))}.sider-navigation{height:calc(100vh - 68px);display:flex;flex-direction:column;min-height:0}.app-menu{padding:12px 8px;overflow:auto;flex:1;min-height:0}.app-menu:not(.n-menu--collapsed) .n-menu-item-content{border-radius:8px;padding-left:10px!important}.app-menu.n-menu--collapsed .n-menu-item-content{border-radius:8px;padding-left:12px!important;padding-right:12px}.app-menu .n-menu-item-content-header{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nav-icon{width:24px;height:24px;display:inline-grid;place-items:center;flex:0 0 24px}.nav-monogram{border-radius:7px;background:rgba(99,102,241,.24);color:#c7d2fe;font-size:12px;font-weight:800}.n-menu--collapsed .nav-icon{width:32px;height:32px}.n-menu--collapsed .nav-monogram{border-radius:9px}.nav-overlay-backdrop{position:fixed;inset:0 0 0 auto;right:0;background:rgba(15,23,42,.16);z-index:8}.nav-panel{position:fixed;top:0;bottom:0;width:304px;background:#fff;box-shadow:8px 0 32px rgba(15,23,42,.2);z-index:9;transition:left .2s ease}.nav-panel-header{height:68px;padding:0 14px 0 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--emu-border);font-size:15px}.nav-panel-menu{height:calc(100vh - 68px);overflow:auto;padding:12px 8px}.nav-panel-menu .n-menu-item-content{border-radius:8px}
+.brand img{filter:drop-shadow(0 4px 10px rgba(99,102,241,.35))}.sider-navigation{height:calc(100vh - 68px);display:flex;flex-direction:column;min-height:0}.app-menu{padding:12px 8px;overflow:auto;flex:1;min-height:0}.app-menu:not(.n-menu--collapsed) .n-menu-item-content{border-radius:8px;padding-left:10px!important}.app-menu.n-menu--collapsed .n-menu-item-content{border-radius:8px;padding-left:12px!important;padding-right:12px}.app-menu .n-menu-item-content-header{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nav-icon{width:24px;height:24px;display:inline-grid;place-items:center;flex:0 0 24px;transform:none!important}.nav-icon svg{display:block;transform:none!important;transform-origin:center}.root-menu .n-menu-item-content,.root-menu .n-menu-item-content__icon{transform:none!important}.nav-monogram{border-radius:7px;background:rgba(99,102,241,.24);color:#c7d2fe;font-size:12px;font-weight:800}.n-menu--collapsed .nav-icon{width:32px;height:32px}.n-menu--collapsed .nav-monogram{border-radius:9px}.nav-overlay-backdrop{position:fixed;inset:0 0 0 auto;right:0;background:rgba(15,23,42,.16);z-index:8}.nav-panel{position:fixed;top:0;bottom:0;width:min(380px,calc(100vw - 104px));background:#fff;box-shadow:8px 0 32px rgba(15,23,42,.2);z-index:9;transition:left .2s ease}.nav-panel-header{height:68px;padding:0 14px 0 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--emu-border);font-size:15px}.nav-panel-menu{height:calc(100vh - 68px);overflow:auto;padding:12px 8px}.nav-panel-menu .n-menu-item-content{border-radius:8px}
 .brand.compact { justify-content:center; padding:0; }
 .topbar { height:68px; flex:0 0 68px; padding:0 28px; display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.92);backdrop-filter:blur(12px);box-shadow:0 1px 0 rgba(15,23,42,.06); }
 .page-context { flex:1; min-width:0; }

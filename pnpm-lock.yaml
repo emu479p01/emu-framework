@@ -144,6 +144,9 @@ importers:
       '@fastify/static':
         specifier: ^7.0.4
         version: 7.0.4
+      better-sqlite3:
+        specifier: ^12.11.1
+        version: 12.11.1
       csv-parse:
         specifier: ^5.5.6
         version: 5.6.0
@@ -166,6 +169,9 @@ importers:
         specifier: ^0.3.11
         version: 0.3.11
     devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.11
+        version: 7.6.13
       '@types/node':
         specifier: ^20.14.0
         version: 20.19.43

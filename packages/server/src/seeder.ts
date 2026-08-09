@@ -45,6 +45,7 @@ export function seedDesignerDb(kernel: Kernel): void {
       { label: 'Users & Security', icon: 'users', route: '/system/security/users' },
       { label: 'Designer', icon: 'wrench', route: '/designer' },
       { label: 'System Maintenance', icon: 'database', route: '/system/maintenance' },
+      { label: 'App Data Management', icon: 'table', route: '/system/app-data' },
       { label: 'Report Fonts', icon: 'file', route: '/system/fonts' },
       { label: 'SMTP Settings', icon: 'settings', route: '/system/integrations/smtp' },
       { label: 'Table Browser', icon: 'table', route: '/system/tables' },

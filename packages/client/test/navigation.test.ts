@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MenuMeta } from '@emu/core';
-import { buildNavigationOptions, findActiveKey, iconForItem, type NavMenuOption } from '../src/navigation';
+import { buildNavigationOptions, findActiveKey, findNavigationKeyPath, iconForItem, type NavMenuOption } from '../src/navigation';
 
 function allOptions(options: NavMenuOption[]): NavMenuOption[] {
   return options.flatMap((option) => [option, ...allOptions((option.children ?? []) as NavMenuOption[])]);
@@ -29,6 +29,8 @@ describe('sidebar navigation', () => {
     expect(allOptions(options).every((option) => typeof option.icon === 'function')).toBe(true);
     expect(findActiveKey(options, 'SALES_OrderForm', '/')).toContain('SALES_OrderForm');
     expect(findActiveKey(options, '', '/system/maintenance')).toContain('/system/maintenance');
+    const active = findActiveKey(options, 'SALES_OrderForm', '/')!;
+    expect(findNavigationKeyPath(options, active)).toEqual(['app-sales', 'app-sales:Sales', active]);
   });
 
   it('maps an action item to the server-action route', () => {

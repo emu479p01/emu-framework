@@ -27,6 +27,7 @@ import { buildFilteredQuery, registerImportExportRoutes } from './importExport.j
 import { registerReportRoutes } from './reports.js';
 import { registerFontRoutes } from './fontManager.js';
 import { registerSystemMaintenanceRoutes } from './systemMaintenance.js';
+import { registerAppDataManagementRoutes } from './appDataManagement.js';
 import { createIntegrationManager, registerIntegrationRoutes } from './integrationServices.js';
 import { registerUserSecurityRoutes } from './userSecurity.js';
 import { registerViewRoutes } from './views.js';
@@ -727,6 +728,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return user.username;
   };
   registerSystemMaintenanceRoutes(app, kernel, requireFrameworkAdmin);
+  registerAppDataManagementRoutes(app, kernel, requireFrameworkAdmin);
   registerFontRoutes(app, kernel, requireFrameworkAdmin, requireUser);
   registerIntegrationRoutes(app, integrations, requireFrameworkAdmin);
   registerUserSecurityRoutes(app, kernel, {
