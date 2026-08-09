@@ -5,6 +5,16 @@ import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server.js';
 import { completeTestSetup, TEST_SETUP_CODE } from './setupHelper.js';
 
+function multipartPackage(payload: Buffer, filename = 'sales.emuapp.json') {
+  const boundary = `----EmuPackage${Date.now()}${Math.random()}`;
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: application/json\r\n\r\n`),
+    payload,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  return { boundary, body };
+}
+
 describe('metadata packages', () => {
   it('round-trips a checksummed package and rejects tampering', () => {
     const artifact = { kind: 'app', name: 'sales', models: [{ name: 'Core', layer: 'CUS' }] } as MetadataArtifact;
@@ -52,11 +62,7 @@ describe('metadata package API', () => {
     const changed = createMetadataPackage('0.0.0.9', original.scope, original.artifacts.map((artifact) =>
       artifact.name === 'SALES_Thing' ? { ...artifact, label: 'Imported things' } : artifact,
     ));
-    const boundary = `----EmuPackage${Date.now()}`;
-    const body = Buffer.concat([
-      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="sales.emuapp.json"\r\nContent-Type: application/json\r\n\r\n`),
-      Buffer.from(JSON.stringify(changed)), Buffer.from(`\r\n--${boundary}--\r\n`),
-    ]);
+    const { boundary, body } = multipartPackage(Buffer.from(JSON.stringify(changed)));
     const preview = await app.inject({ method: 'POST', url: '/api/designer/packages/import/preview',
       headers: { ...auth, 'content-type': `multipart/form-data; boundary=${boundary}` }, payload: body });
     expect(preview.statusCode).toBe(200);
@@ -64,5 +70,26 @@ describe('metadata package API', () => {
     const applied = await app.inject({ method: 'POST', url: '/api/designer/change-sets/apply', headers: auth,
       payload: { previewId: preview.json().previewId, confirmation: true } });
     expect(applied.statusCode).toBe(200);
+  });
+
+  it('accepts metadata packages larger than the old 1 MB default', async () => {
+    const large = createMetadataPackage('0.1.2.0', { type: 'app', app: 'sales' }, [
+      { kind: 'app', name: 'sales', label: `Sales ${'x'.repeat(1024 * 1024)}`, models: [{ name: 'Core', layer: 'CUS' }] } as MetadataArtifact,
+    ]);
+    const payload = Buffer.from(JSON.stringify(large));
+    expect(payload.length).toBeGreaterThan(1024 * 1024);
+    const { boundary, body } = multipartPackage(payload);
+    const response = await app.inject({ method: 'POST', url: '/api/designer/packages/import/preview',
+      headers: { ...auth, 'content-type': `multipart/form-data; boundary=${boundary}` }, payload: body });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().package.artifactCount).toBe(1);
+  });
+
+  it('rejects metadata packages larger than 20 MB with a clear 413 response', async () => {
+    const { boundary, body } = multipartPackage(Buffer.alloc(20 * 1024 * 1024 + 1, 0x78));
+    const response = await app.inject({ method: 'POST', url: '/api/designer/packages/import/preview',
+      headers: { ...auth, 'content-type': `multipart/form-data; boundary=${boundary}` }, payload: body });
+    expect(response.statusCode).toBe(413);
+    expect(response.json()).toEqual({ error: 'Package is too large (maximum 20 MB)' });
   });
 });

@@ -4,13 +4,19 @@
 
 EmuFramework is a metadata-driven TypeScript framework for building business applications. It includes a browser-based Designer, generated forms and lists, role-based security, SQLite storage, reporting, import/export, and Docker deployment.
 
-Current framework version: **0.1.1.0 (Beta)**
+Current framework version: **0.1.2.0 (Beta)**
 
 ## Quick start on Windows
 
 1. Download and extract the [latest release](https://github.com/emu479p01/emu-framework/releases).
 2. Double-click `RunApp.cmd`.
 3. On first run, open the setup page and enter the one-time code printed by the server or Docker logs. Choose the administrator username and a password of at least 12 characters.
+
+## v0.1.2.0 mobile usability and package portability
+
+- Form controls use a mobile-safe 16px input size so iPhone Safari no longer zooms the page automatically when a field receives focus, while manual pinch-to-zoom remains available.
+- App and Settings icons stay centered when the desktop sidebar is collapsed.
+- App and Model metadata packages up to 20 MB can be imported, allowing packages exported by the framework to be imported again after they grow beyond the previous 1 MB default.
 
 ## v0.1.1.0 security, analytics, and explicit Models
 
