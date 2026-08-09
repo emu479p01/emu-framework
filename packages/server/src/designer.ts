@@ -20,6 +20,9 @@ import { randomUUID } from 'node:crypto';
 import { createMetadataPackage, mergeAppManifest, parseMetadataPackage } from './metadataPackage.js';
 import { missingReportFonts } from './fontManager.js';
 
+const MAX_METADATA_PACKAGE_BYTES = 20 * 1024 * 1024;
+const METADATA_PACKAGE_TOO_LARGE = 'Package is too large (maximum 20 MB)';
+
 /**
  * Web Designer API — CRUD over runtime metadata artifacts stored in
  * FW_WebArtifact. Every change revalidates and rebuilds the registry via
@@ -326,12 +329,13 @@ export function registerDesignerRoutes(
 
   app.post('/api/designer/packages/import/preview', async (req, reply) => {
     const actor = requireDesigner(req);
-    const file = await req.file();
+    const file = await req.file({ limits: { fileSize: MAX_METADATA_PACKAGE_BYTES }, throwFileSizeLimit: false });
     if (!file) return reply.status(400).send({ error: 'No package uploaded' });
-    if (file.file.truncated) return reply.status(413).send({ error: 'Package is too large' });
+    const buffer = await file.toBuffer();
+    if (file.file.truncated) return reply.status(413).send({ error: METADATA_PACKAGE_TOO_LARGE });
     let parsed: unknown;
     try {
-      parsed = JSON.parse((await file.toBuffer()).toString('utf8'));
+      parsed = JSON.parse(buffer.toString('utf8'));
     } catch {
       return reply.status(400).send({ error: 'Package is not valid JSON' });
     }
