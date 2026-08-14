@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue';
-import { NButton, NCard, NDataTable, NSpace, useMessage, type DataTableColumns } from 'naive-ui';
+import { NButton, NCard, NSpace, useDialog, useMessage, type DataTableColumns } from 'naive-ui';
 import { api, ApiError, type Row } from '../api';
 import { useMeta } from '../stores/meta';
 import FieldControl from './FieldControl.vue';
 import { applyIfBlank } from '../utils/applyDefaults';
 import ActionDialog from './ActionDialog.vue';
+import BusinessDataTable from './BusinessDataTable.vue';
 import type { FormAction } from '@emu/core';
 
 const props = defineProps<{
@@ -16,6 +17,7 @@ const props = defineProps<{
 
 const meta = useMeta();
 const message = useMessage();
+const dialog = useDialog();
 
 const rows = ref<Row[]>([]);
 /** row id currently in edit mode; 0 = new unsaved row */
@@ -76,9 +78,9 @@ function displayValue(row: Row, fieldName: string): string {
 async function saveDraft() {
   try {
     if (editingId.value === 0) {
-      await api.post(`/api/data/${props.line.table}`, draft.value);
+      await api.post(`/api/data/${props.line.table}`, writableDraft(true));
     } else {
-      await api.patch(`/api/data/${props.line.table}/${editingId.value}`, draft.value);
+      await api.patch(`/api/data/${props.line.table}/${editingId.value}`, writableDraft(false));
     }
     editingId.value = null;
     await load();
@@ -86,6 +88,24 @@ async function saveDraft() {
     if (err instanceof ApiError) message.error(err.message);
     else throw err;
   }
+}
+
+function writableDraft(createMode: boolean): Record<string, unknown> {
+  const allowed = new Set(fields.value.filter((field) => !field.readOnly && (createMode ? field.allowEditOnCreate !== false : field.allowEdit !== false)).map((field) => field.name));
+  if (createMode) allowed.add(props.line.refField);
+  return Object.fromEntries(Object.entries(draft.value).filter(([key]) => allowed.has(key)));
+}
+
+function confirmSave() {
+  const missing = fields.value.filter((field) => field.mandatory && !field.readOnly && (draft.value[field.name] === undefined || draft.value[field.name] === null || draft.value[field.name] === ''));
+  if (missing.length) { message.warning(`Complete required fields: ${missing.map((field) => field.label ?? field.name).join(', ')}`); return; }
+  const creating = editingId.value === 0;
+  dialog.warning({
+    title: creating ? 'Confirm add line' : 'Confirm save line',
+    content: creating ? 'Add this line record?' : `Save changes to line #${editingId.value}?`,
+    positiveText: creating ? 'Add' : 'Save', negativeText: 'Cancel',
+    onPositiveClick: saveDraft,
+  });
 }
 
 async function removeRow(row: Row) {
@@ -96,6 +116,12 @@ async function removeRow(row: Row) {
     if (err instanceof ApiError) message.error(err.message);
     else throw err;
   }
+}
+
+function confirmRemove(row: Row) {
+  const titleField = table.value?.titleField;
+  const identity = titleField && row[titleField] != null ? String(row[titleField]) : `#${row.id}`;
+  dialog.warning({ title: 'Confirm delete line', content: `Delete line ${identity}?`, positiveText: 'Delete', negativeText: 'Cancel', onPositiveClick: () => removeRow(row) });
 }
 
 const columns = computed<DataTableColumns<Row>>(() => [
@@ -128,14 +154,14 @@ const columns = computed<DataTableColumns<Row>>(() => [
     render: (row: Row) => {
       if (isEditing(row)) {
         return h(NSpace, {}, () => [
-          h(NButton, { size: 'small', type: 'primary', onClick: saveDraft }, () => 'Save'),
+          h(NButton, { size: 'small', type: 'primary', onClick: confirmSave }, () => 'Save'),
           h(NButton, { size: 'small', onClick: () => (editingId.value = null) }, () => 'Cancel'),
         ]);
       }
       return h(NSpace, {}, () => [
         ...(props.line.actions ?? []).map((action) => h(NButton, { size: 'small', onClick: () => launchAction(action, row) }, () => action.label)),
         h(NButton, { size: 'small', onClick: () => startEdit(row) }, () => 'Edit'),
-        h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => removeRow(row) }, () => 'Del'),
+        h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => confirmRemove(row) }, () => 'Del'),
       ]);
     },
   },
@@ -167,7 +193,7 @@ const aggregateResults = computed(() =>
         <n-button size="small" data-testid="add-line" @click="startEdit(null)">Add line</n-button>
       </n-space>
     </template>
-    <n-data-table class="line-desktop-table" :columns="columns" :data="displayRows" :row-key="(r: Row) => r.id" size="small" />
+    <BusinessDataTable class="line-desktop-table" :columns="columns" :data="displayRows" :row-key="(r: Row) => r.id" size="small" />
     <div class="line-mobile-list">
       <div v-for="row in displayRows" :key="row.id" class="line-mobile-card">
         <div v-for="field in fields" :key="field.name" class="line-mobile-field">
@@ -185,13 +211,13 @@ const aggregateResults = computed(() =>
         </div>
         <div class="line-mobile-actions">
           <template v-if="isEditing(row)">
-            <n-button type="primary" @click="saveDraft">Save</n-button>
+            <n-button type="primary" @click="confirmSave">Save</n-button>
             <n-button @click="editingId = null">Cancel</n-button>
           </template>
           <template v-else>
             <n-button v-for="action in line.actions ?? []" :key="action.target ?? action.action" @click="launchAction(action, row)">{{ action.label }}</n-button>
             <n-button @click="startEdit(row)">Edit</n-button>
-            <n-button quaternary type="error" @click="removeRow(row)">Delete</n-button>
+            <n-button quaternary type="error" @click="confirmRemove(row)">Delete</n-button>
           </template>
         </div>
       </div>

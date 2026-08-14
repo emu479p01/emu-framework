@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { AnyMeta, Kernel } from '@emu/core';
 import { buildServer } from '../src/server.js';
-import { buildDocDefinition, formatReportFieldValue, reportFontForText } from '../src/reports.js';
+import { buildDocDefinition, formatReportFieldValue, reportFontForText, reportTextRuns } from '../src/reports.js';
 import { THAI_REPORT_FONT } from '../src/fontManager.js';
 import { applyErpSample } from './fixtures/erpSample.js';
 import { completeTestSetup, TEST_SETUP_CODE } from './setupHelper.js';
@@ -108,6 +108,9 @@ describe('report PDF rendering', () => {
     expect(reportFontForText('โฟมล้างหน้า', 'Roboto', new Set(['Roboto', THAI_REPORT_FONT]))).toBe(THAI_REPORT_FONT);
     expect(reportFontForText('Thai ไทย mixed', 'Roboto', new Set(['Roboto', THAI_REPORT_FONT]))).toBe(THAI_REPORT_FONT);
     expect(reportFontForText('English only', 'Roboto', new Set(['Roboto', THAI_REPORT_FONT]))).toBe('Roboto');
+    expect(reportTextRuns('Thai ไทย mixed', 'Roboto', 'Roboto', new Set(['Roboto', THAI_REPORT_FONT]))).toEqual([
+      { text: 'Thai ', font: 'Roboto' }, { text: 'ไทย', font: THAI_REPORT_FONT }, { text: ' mixed', font: 'Roboto' },
+    ]);
   });
 
   it('masks the stored Google Fonts API key and lists the offline default font', async () => {

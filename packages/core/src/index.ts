@@ -1,4 +1,4 @@
-export const CORE_VERSION = '0.1.3.0';
+export const CORE_VERSION = '0.1.4.0';
 
 export {
   Kernel,
@@ -22,7 +22,7 @@ export * from './metadata/types.js';
 export * from './metadata/schema.js';
 export * from './metadata/changeSet.js';
 export * from './metadata/workspace.js';
-export { MetadataRegistry, MetadataError } from './metadata/registry.js';
+export { MetadataRegistry, MetadataError, normalizeLegacyArtifact } from './metadata/registry.js';
 export { syncSchema, type SyncResult } from './db/schemaSync.js';
 export { DataContext, type SessionInfo } from './data/context.js';
 export { Record, type FieldValue } from './data/record.js';

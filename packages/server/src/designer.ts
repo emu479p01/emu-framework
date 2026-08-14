@@ -51,6 +51,9 @@ const DESIGNER_KINDS = new Set([
   'report',
   'view',
   'chart',
+  'viewExtension',
+  'chartExtension',
+  'functionExtension',
 ]);
 
 function loadStored(kernel: Kernel): MetadataArtifact[] {
@@ -175,6 +178,11 @@ export function registerDesignerRoutes(
   app.get('/api/designer/artifacts', (req) => {
     requireDesigner(req);
     const scope = designerScope(req);
+    const readableCatalogItem = (artifact: { name: string; app?: string }): boolean => {
+      const artifactApp = artifact.app ?? kernel.registry.appForArtifact(artifact.name);
+      if (inScope(scope, { name: artifact.name, app: artifactApp })) return true;
+      return scope !== 'all' && Boolean(artifactApp) && [...scope].some((sourceApp) => kernel.registry.appDependsOn(sourceApp, artifactApp!));
+    };
     const safeTable = (item: ReturnType<typeof kernel.registry.allTables>[number]) => {
       const secretFields = new Set(['passwordHash', 'password', 'tokenHash', 'token']);
       return {
@@ -214,21 +222,58 @@ export function registerDesignerRoutes(
       artifacts: rows,
       apps: kernel.registry.loadedApps().filter((a) => scope === 'all' || scope.has(a.name)),
       catalog: {
-        tables: kernel.registry.allTables().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })).map(safeTable),
-        enums: kernel.registry.allEnums().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
-        forms: kernel.registry.allForms().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
-        menus: kernel.registry.allMenus().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
-        privileges: kernel.registry.allPrivileges().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
-        duties: kernel.registry.allDuties().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
-        roles: kernel.registry.allRoles().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
-        scripts: kernel.registry.allScripts().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
-        functions: kernel.registry.allFunctions().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
-        reports: kernel.registry.allReports().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
-        views: kernel.registry.allViews().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
-        charts: kernel.registry.allCharts().filter((item) => inScope(scope, { name: item.name, app: kernel.registry.appForArtifact(item.name) })),
+        tables: kernel.registry.allTables().filter(readableCatalogItem).map(safeTable),
+        enums: kernel.registry.allEnums().filter(readableCatalogItem),
+        forms: kernel.registry.allForms().filter(readableCatalogItem),
+        menus: kernel.registry.allMenus().filter(readableCatalogItem),
+        privileges: kernel.registry.allPrivileges().filter(readableCatalogItem),
+        duties: kernel.registry.allDuties().filter(readableCatalogItem),
+        roles: kernel.registry.allRoles().filter(readableCatalogItem),
+        scripts: kernel.registry.allScripts().filter(readableCatalogItem),
+        functions: kernel.registry.allFunctions().filter(readableCatalogItem),
+        reports: kernel.registry.allReports().filter(readableCatalogItem),
+        views: kernel.registry.allViews().filter(readableCatalogItem),
+        charts: kernel.registry.allCharts().filter(readableCatalogItem),
       },
     };
   });
+
+  app.get<{ Params: { kind: string; name: string }; Querystring: { app?: string; model?: string } }>(
+    '/api/designer/customization/:kind/:name',
+    (req, reply) => {
+      requireDesigner(req);
+      const { kind, name } = req.params;
+      const targetApp = kernel.registry.appForArtifact(name);
+      const sourceApp = req.query.app;
+      const scope = designerScope(req);
+      const mayRead = scope === 'all'
+        || Boolean(sourceApp && scope.has(sourceApp) && targetApp && kernel.registry.appDependsOn(sourceApp, targetApp));
+      if (!mayRead) return reply.status(403).send({ error: `No customization access to '${name}'` });
+      const effective = kind === 'table' ? kernel.registry.getTable(name)
+        : kind === 'enum' ? kernel.registry.getEnum(name)
+        : kind === 'form' ? kernel.registry.getForm(name)
+        : kind === 'report' ? kernel.registry.getReport(name)
+        : kind === 'view' ? kernel.registry.getView(name)
+        : kind === 'chart' ? kernel.registry.getChart(name)
+        : kind === 'menu' ? kernel.registry.allMenus().find((item) => item.name === name)
+        : kind === 'privilege' ? kernel.registry.getPrivilege(name)
+        : kind === 'duty' ? kernel.registry.getDuty(name)
+        : kind === 'role' ? kernel.registry.getRole(name)
+        : kind === 'script' ? kernel.registry.getScript(name)
+        : kind === 'function' ? kernel.registry.getFunction(name)
+        : undefined;
+      if (!effective) return reply.status(404).send({ error: `Unknown ${kind} '${name}'` });
+      const layers = kernel.registry.customizationLayers(kind, name).map((artifact: any) => ({
+        artifact,
+        artifactName: artifact.name,
+        app: artifact.app,
+        model: artifact.model,
+        layer: artifact.layer ?? 'SYS',
+        editable: artifact.app === sourceApp && (!req.query.model || artifact.model === req.query.model),
+      }));
+      return { target: { kind, name, app: targetApp }, layers, effective, warnings: kernel.registry.warnings() };
+    },
+  );
 
   app.get('/api/designer/capabilities', (req) => {
     requireDesigner(req);

@@ -9,17 +9,18 @@ import {
   scaffoldTableExtension,
   scaffoldFormExtension,
   scaffoldMenuExtension,
+  scaffoldGenericExtension,
 } from '../scaffold/extension.js';
 import type { IndexDef } from '../scaffold/object.js';
 import { canonicalExtensionName, LAYER_ORDER, type LayerType } from '@emu/core';
 
-type ExtKind = 'tableExtension' | 'formExtension' | 'menuExtension';
-const EXTS: ExtKind[] = ['tableExtension', 'formExtension', 'menuExtension'];
+type ExtKind = 'tableExtension' | 'formExtension' | 'menuExtension' | 'viewExtension' | 'chartExtension' | 'functionExtension';
+const EXTS: ExtKind[] = ['tableExtension', 'formExtension', 'menuExtension', 'viewExtension', 'chartExtension', 'functionExtension'];
 
 export const addExtensionCommand = defineCommand({
   meta: {
     name: 'extension',
-    description: 'Scaffold a metadata extension (tableExtension, formExtension, menuExtension)',
+    description: `Scaffold a metadata extension (${EXTS.join(', ')})`,
   },
   args: {
     app: {
@@ -47,7 +48,7 @@ export const addExtensionCommand = defineCommand({
       process.exit(1);
     }
 
-    requireInteractive('Extensions use an interactive wizard — run from a real terminal, use the Web Designer, or create the JSON by hand under metadata/.../{tableExtensions,formExtensions,menuExtensions}/');
+    requireInteractive('Extensions use an interactive wizard — run from a real terminal, use the Web Designer, or create the JSON in the matching metadata extension directory.');
 
     console.log('');
     p.intro(pc.cyan(`Add ${kind} to ${args.app}`));
@@ -65,9 +66,21 @@ export const addExtensionCommand = defineCommand({
       case 'tableExtension': await addTableExt(root, appDir, allTargets, args.app, model, sourceLayer); break;
       case 'formExtension': await addFormExt(root, appDir, allTargets, args.app, model, sourceLayer); break;
       case 'menuExtension': await addMenuExt(root, appDir, allTargets, args.app, model, sourceLayer); break;
+      case 'viewExtension': await addGenericExt(root, appDir, allTargets, args.app, model, sourceLayer, kind, 'views'); break;
+      case 'chartExtension': await addGenericExt(root, appDir, allTargets, args.app, model, sourceLayer, kind, 'charts'); break;
+      case 'functionExtension': await addGenericExt(root, appDir, allTargets, args.app, model, sourceLayer, kind, 'functions'); break;
     }
   },
 });
+
+async function addGenericExt(root: string, appDir: string, targetApps: string[], app: string, model: string, sourceLayer: LayerType, kind: 'viewExtension' | 'chartExtension' | 'functionExtension', targetDir: string) {
+  const targets = listFromApps(root, targetApps, targetDir, sourceLayer);
+  const target = await p.select({ message: `Base ${kind.replace('Extension', '')} to extend`, options: targets.map((value) => ({ value, label: value })) }) as string;
+  if (p.isCancel(target)) process.exit(0);
+  const name = canonicalExtensionName(app, model, target);
+  const filepath = scaffoldGenericExtension(appDir, { app, model, layer: sourceLayer, kind, name, target });
+  p.outro(pc.green(`Created ${filepath}`));
+}
 
 const EXT_FIELD_TYPES = [
   { value: 'string', label: 'string' },

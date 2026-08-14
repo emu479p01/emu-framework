@@ -29,8 +29,8 @@ describe('deriveExtensionName', () => {
 describe('EXT_TARGET_FIELD', () => {
   it('covers all extension kinds', () => {
     expect(Object.keys(EXT_TARGET_FIELD).sort()).toEqual([
-      'dutyExtension', 'enumExtension', 'formExtension', 'menuExtension',
-      'privilegeExtension', 'roleExtension', 'scriptExtension', 'tableExtension',
+      'chartExtension', 'dutyExtension', 'enumExtension', 'formExtension', 'functionExtension', 'menuExtension',
+      'privilegeExtension', 'roleExtension', 'scriptExtension', 'tableExtension', 'viewExtension',
     ]);
   });
 });

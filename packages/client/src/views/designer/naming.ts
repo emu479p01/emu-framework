@@ -25,4 +25,7 @@ export const EXT_TARGET_FIELD: Record<string, string> = {
   dutyExtension: 'duty',
   roleExtension: 'role',
   scriptExtension: 'script',
+  viewExtension: 'view',
+  chartExtension: 'chart',
+  functionExtension: 'function',
 };

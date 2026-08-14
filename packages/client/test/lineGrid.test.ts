@@ -1,7 +1,7 @@
 import { defineComponent } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { NConfigProvider, NMessageProvider } from 'naive-ui';
+import { NConfigProvider, NDialogProvider, NMessageProvider } from 'naive-ui';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import LineGrid from '../src/components/LineGrid.vue';
 import { api } from '../src/api';
@@ -14,6 +14,14 @@ function button(wrapper: ReturnType<typeof mount>, label: string) {
   const found = wrapper.findAll('button').find((entry) => entry.text().trim() === label);
   if (!found) throw new Error(`Button '${label}' was not rendered`);
   return found;
+}
+
+async function confirm(label: string) {
+  await flushPromises();
+  const found = [...document.body.querySelectorAll('button')].filter((entry) => entry.textContent?.trim() === label).at(-1) as HTMLButtonElement | undefined;
+  if (!found) throw new Error(`Confirmation '${label}' was not rendered`);
+  found.click();
+  await flushPromises();
 }
 
 describe('LineGrid responsive cards', () => {
@@ -36,9 +44,9 @@ describe('LineGrid responsive cards', () => {
     const post = vi.spyOn(api, 'post').mockResolvedValue({});
     const remove = vi.spyOn(api, 'delete').mockResolvedValue({});
     const Host = defineComponent({
-      components: { LineGrid, NConfigProvider, NMessageProvider },
+      components: { LineGrid, NConfigProvider, NDialogProvider, NMessageProvider },
       setup: () => ({ line }),
-      template: '<n-config-provider><n-message-provider><LineGrid :line="line" :header-id="1" /></n-message-provider></n-config-provider>',
+      template: '<n-config-provider><n-dialog-provider><n-message-provider><LineGrid :line="line" :header-id="1" /></n-message-provider></n-dialog-provider></n-config-provider>',
     });
     const wrapper = mount(Host, {
       global: {
@@ -58,16 +66,16 @@ describe('LineGrid responsive cards', () => {
     expect(button(wrapper, 'Save').exists()).toBe(true);
     expect(button(wrapper, 'Cancel').exists()).toBe(true);
     await button(wrapper, 'Save').trigger('click');
-    await flushPromises();
+    await confirm('Save');
     expect(patch).toHaveBeenCalledWith('/api/data/TEST_Line/7', expect.objectContaining({ item: 'โฟมล้างหน้า' }));
 
     await wrapper.get('[data-testid="add-line"]').trigger('click');
     await button(wrapper, 'Save').trigger('click');
-    await flushPromises();
+    await confirm('Add');
     expect(post).toHaveBeenCalledWith('/api/data/TEST_Line', expect.objectContaining({ headerId: 1 }));
 
     await button(wrapper, 'Delete').trigger('click');
-    await flushPromises();
+    await confirm('Delete');
     expect(remove).toHaveBeenCalledWith('/api/data/TEST_Line/7');
   });
 });

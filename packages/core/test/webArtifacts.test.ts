@@ -217,6 +217,27 @@ describe('Kernel.applyWebArtifacts', () => {
     expect(result).toEqual({ count: 0, got: 42 });
   });
 
+  it('wraps Functions with deterministic Chain of Command extensions', () => {
+    const kernel = bootKernel();
+    const errors = kernel.applyWebArtifacts([
+      { kind: 'app', name: 'fnapp', models: [{ name: 'Sys', layer: 'SYS' }, { name: 'Cus', layer: 'CUS' }] } as unknown as AnyMeta,
+      { kind: 'function', name: 'FNAPP_Answer', app: 'fnapp', model: 'Sys', code: 'return args.value;' } as unknown as AnyMeta,
+      { kind: 'functionExtension', name: 'FNAPP_Cus_FNAPP_Answer_Extension', app: 'fnapp', model: 'Cus', function: 'FNAPP_Answer', code: 'return next({ ...args, value: args.value + 1 }) * 2;' } as unknown as AnyMeta,
+    ]);
+    expect(errors).toEqual([]);
+    expect(kernel.actions.get('FNAPP_Answer')!(kernel.context(), { value: 4 })).toBe(10);
+  });
+
+  it('rejects Function extensions that do not call next exactly once', () => {
+    const kernel = bootKernel();
+    expect(kernel.applyWebArtifacts([
+      { kind: 'app', name: 'fnapp', models: [{ name: 'Sys', layer: 'SYS' }, { name: 'Cus', layer: 'CUS' }] } as unknown as AnyMeta,
+      { kind: 'function', name: 'FNAPP_Answer', app: 'fnapp', model: 'Sys', code: 'return 1;' } as unknown as AnyMeta,
+      { kind: 'functionExtension', name: 'FNAPP_Cus_FNAPP_Answer_Extension', app: 'fnapp', model: 'Cus', function: 'FNAPP_Answer', code: 'return 2;' } as unknown as AnyMeta,
+    ])).toEqual([]);
+    expect(() => kernel.actions.get('FNAPP_Answer')!(kernel.context(), {})).toThrow(/must call next/);
+  });
+
   it('function in a higher layer overrides the same name in a lower layer', () => {
     const kernel = bootKernel();
     const errors = kernel.applyWebArtifacts([

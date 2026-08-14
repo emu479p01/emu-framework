@@ -58,6 +58,9 @@ const META_DIRS: { dir: string; kind: AnyMeta['kind'] }[] = [
   { dir: 'reports', kind: 'report' },
   { dir: 'views', kind: 'view' },
   { dir: 'charts', kind: 'chart' },
+  { dir: 'viewExtensions', kind: 'viewExtension' },
+  { dir: 'chartExtensions', kind: 'chartExtension' },
+  { dir: 'functionExtensions', kind: 'functionExtension' },
 ];
 
 const KNOWN_META_KINDS = new Set(META_DIRS.map((d) => d.dir));
@@ -83,6 +86,7 @@ export class MetadataRegistry {
   private extensionNames = new Set<string>();
   private extensionTargets = new Set<string>();
   private warningMessages: string[] = [];
+  private artifactSources: AnyMeta[] = [];
   /** Maps artifact name → app name for grouping in metadata API */
   private artifactApp = new Map<string, string>();
   /** Maps app name → list of module directory names */
@@ -140,8 +144,13 @@ export class MetadataRegistry {
       }
     }
     const normalizedManifest = normalizeManifest(manifest);
+    const legacyNormalized = artifacts.map((artifact) => normalizeLegacyArtifact(artifact));
+    for (const artifact of legacyNormalized) {
+      const diagnostics = validateMetadataArtifact(artifact);
+      if (diagnostics.length) throw new MetadataError(`${artifact.kind} '${artifact.name}': ${diagnostics.map((item) => `${item.path} ${item.message}`).join('; ')}`);
+    }
     this.appManifests.set(normalizedManifest.name, normalizedManifest);
-    const normalizedArtifacts = this.orderArtifacts(artifacts.map((a) => this.normalizeArtifact(normalizedManifest, a)));
+    const normalizedArtifacts = this.orderArtifacts(legacyNormalized.map((a) => this.normalizeArtifact(normalizedManifest, a)));
     for (const meta of normalizedArtifacts) {
       this.addArtifact(normalizedManifest.name, meta);
     }
@@ -155,7 +164,12 @@ export class MetadataRegistry {
       throw new MetadataError(`Cannot add web artifacts: app '${appName}' is not loaded`);
     }
     const manifest = this.appManifests.get(appName)!;
-    for (const meta of this.orderArtifacts(artifacts.map((artifact) => this.normalizeArtifact(manifest, artifact)))) {
+    const legacyNormalized = artifacts.map((artifact) => normalizeLegacyArtifact(artifact));
+    for (const artifact of legacyNormalized) {
+      const diagnostics = validateMetadataArtifact(artifact);
+      if (diagnostics.length) throw new MetadataError(`${artifact.kind} '${artifact.name}': ${diagnostics.map((item) => `${item.path} ${item.message}`).join('; ')}`);
+    }
+    for (const meta of this.orderArtifacts(legacyNormalized.map((artifact) => this.normalizeArtifact(manifest, artifact)))) {
       this.addArtifact(appName, meta);
     }
     this.validate();
@@ -174,6 +188,7 @@ export class MetadataRegistry {
     const meta = structuredClone(artifact);
     this.validatePlacement(appName, meta);
     this.validateNaming(appName, meta);
+    this.artifactSources.push(structuredClone(meta));
     if (EXTENSION_KINDS.has(meta.kind)) {
       if (this.extensionNames.has(meta.name)) {
         throw new MetadataError(`Duplicate extension '${meta.name}' (app '${appName}')`);
@@ -215,9 +230,9 @@ export class MetadataRegistry {
 
   private validateExtension(appName: string, meta: AnyMeta): void {
     const ext = meta as any;
-    const field = ({ tableExtension: 'table', formExtension: 'form', menuExtension: 'menu', enumExtension: 'enum', privilegeExtension: 'privilege', dutyExtension: 'duty', roleExtension: 'role', scriptExtension: 'script' } as Record<string, string>)[meta.kind];
+    const field = ({ tableExtension: 'table', formExtension: 'form', menuExtension: 'menu', enumExtension: 'enum', privilegeExtension: 'privilege', dutyExtension: 'duty', roleExtension: 'role', scriptExtension: 'script', viewExtension: 'view', chartExtension: 'chart', functionExtension: 'function' } as Record<string, string>)[meta.kind];
     const targetName = ext[field];
-    const target = field === 'table' ? this.tables.get(targetName) : field === 'form' ? this.forms.get(targetName) : field === 'menu' ? this.menus.get(targetName) : field === 'enum' ? this.enums.get(targetName) : field === 'privilege' ? this.privileges.get(targetName) : field === 'duty' ? this.duties.get(targetName) : field === 'role' ? this.roles.get(targetName) : this.scripts.get(targetName);
+    const target = field === 'table' ? this.tables.get(targetName) : field === 'form' ? this.forms.get(targetName) : field === 'menu' ? this.menus.get(targetName) : field === 'enum' ? this.enums.get(targetName) : field === 'privilege' ? this.privileges.get(targetName) : field === 'duty' ? this.duties.get(targetName) : field === 'role' ? this.roles.get(targetName) : field === 'view' ? this.views.get(targetName) : field === 'chart' ? this.charts.get(targetName) : field === 'function' ? this.functions.get(targetName) : this.scripts.get(targetName);
     if (!target) throw new MetadataError(`Extension '${meta.name}': unknown ${field} '${targetName}'`);
     const sourceLayer = ext.layer ?? DEFAULT_LAYER;
     const targetLayer = (target as any).layer ?? DEFAULT_LAYER;
@@ -250,6 +265,16 @@ export class MetadataRegistry {
   }
 
   warnings(): string[] { return [...this.warningMessages]; }
+
+  /** Raw ordered metadata layers for the Designer; returned objects are never effective/mutated artifacts. */
+  customizationLayers(kind: string, targetName: string): AnyMeta[] {
+    const targetField = ({ table: 'table', enum: 'enum', form: 'form', menu: 'menu', privilege: 'privilege', duty: 'duty', role: 'role', script: 'script', view: 'view', chart: 'chart', function: 'function' } as Record<string, string>)[kind];
+    const extensionKind = `${kind}Extension`;
+    return this.artifactSources
+      .filter((artifact: any) => (artifact.kind === kind && artifact.name === targetName) || (artifact.kind === extensionKind && artifact[targetField] === targetName))
+      .sort((a: any, b: any) => LAYER_ORDER.indexOf(a.layer ?? DEFAULT_LAYER) - LAYER_ORDER.indexOf(b.layer ?? DEFAULT_LAYER) || a.name.localeCompare(b.name))
+      .map((artifact) => structuredClone(artifact));
+  }
 
   private addBase(appName: string, meta: AnyMeta, map: Map<string, AnyMeta>): void {
     const existing = map.get(meta.name);
@@ -299,7 +324,7 @@ export class MetadataRegistry {
   }
 
   private normalizeArtifact(manifest: AppManifest, artifact: AnyMeta): AnyMeta {
-    const meta = structuredClone(artifact) as AnyMeta;
+    const meta = normalizeLegacyArtifact(artifact);
     const models = manifest.models ?? [];
     (meta as any).app ??= manifest.name;
     // File-backed artifacts from older releases commonly omitted `model` when
@@ -349,6 +374,18 @@ export class MetadataRegistry {
         base.fields.push(field);
       }
       base.indexes = [...(base.indexes ?? []), ...(e.indexes ?? [])];
+      for (const override of e.fieldOverrides ?? []) {
+        const field = base.fields.find((candidate: any) => candidate.name === override.field);
+        if (!field) throw new MetadataError(`Extension '${e.name}': unknown field '${override.field}' on '${e.table}'`);
+        for (const key of ['label', 'readOnly', 'allowEdit', 'allowEditOnCreate'] as const) {
+          if (override[key] !== undefined) (field as any)[key] = override[key];
+        }
+        if (field.readOnly) {
+          delete field.mandatory;
+          delete field.allowEdit;
+          delete field.allowEditOnCreate;
+        }
+      }
     } else if (e.kind === 'formExtension') {
       const base = this.forms.get(e.form);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown form '${e.form}'`);
@@ -357,34 +394,81 @@ export class MetadataRegistry {
       if (e.groups) base.groups = [...(base.groups ?? []), ...e.groups];
       if (e.charts) base.charts = [...(base.charts ?? []), ...e.charts];
       if (e.actions) base.actions = [...(base.actions ?? []), ...e.actions];
+      if (e.lines) base.lines = [...(base.lines ?? []), ...e.lines];
+      const elements = [...(base.groups ?? []), ...(base.charts ?? []), ...(base.actions ?? []), ...(base.lines ?? [])] as any[];
+      for (const override of e.elementOverrides ?? []) {
+        const element = elements.find((candidate) => candidate.id === override.targetId);
+        if (!element) throw new MetadataError(`Extension '${e.name}': unknown form element '${override.targetId}'`);
+        for (const key of ['label', 'hidden', 'order'] as const) if (override[key] !== undefined) element[key] = override[key];
+      }
+      base.groups = sortPresented(base.groups);
+      base.charts = sortPresented(base.charts);
+      base.actions = sortPresented(base.actions);
+      base.lines = sortPresented(base.lines);
     } else if (e.kind === 'menuExtension') {
       const base = this.menus.get(e.menu);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown menu '${e.menu}'`);
       base.items.push(...e.items);
+      for (const override of e.itemOverrides ?? []) {
+        const item = findMenuItem(base.items, override.targetId);
+        if (!item) throw new MetadataError(`Extension '${e.name}': unknown menu item '${override.targetId}'`);
+        for (const key of ['label', 'icon', 'hidden', 'order'] as const) if (override[key] !== undefined) (item as any)[key] = override[key];
+      }
+      sortMenuItems(base.items);
     } else if (e.kind === 'enumExtension') {
       const base = this.enums.get(e.enum);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown enum '${e.enum}'`);
       base.values.push(...e.values);
+      for (const override of e.valueOverrides ?? []) {
+        const value = base.values.find((candidate) => candidate.name === override.name);
+        if (!value) throw new MetadataError(`Extension '${e.name}': unknown enum value '${override.name}'`);
+        value.label = override.label;
+      }
     } else if (e.kind === 'privilegeExtension') {
       const base = this.privileges.get(e.privilege);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown privilege '${e.privilege}'`);
-      if (e.tablePermissions) base.tablePermissions = [...(base.tablePermissions ?? []), ...e.tablePermissions];
-      if (e.forms) base.forms = [...(base.forms ?? []), ...e.forms];
-      if (e.functions) base.functions = [...(base.functions ?? []), ...e.functions];
-      if (e.reports) base.reports = [...(base.reports ?? []), ...e.reports];
-      if (e.views) base.views = [...(base.views ?? []), ...e.views];
+      if (e.tablePermissions) base.tablePermissions = mergeTablePermissions(base.tablePermissions ?? [], e.tablePermissions);
+      if (e.forms) base.forms = unique([...(base.forms ?? []), ...e.forms]);
+      if (e.functions) base.functions = unique([...(base.functions ?? []), ...e.functions]);
+      if (e.reports) base.reports = unique([...(base.reports ?? []), ...e.reports]);
+      if (e.views) base.views = unique([...(base.views ?? []), ...e.views]);
     } else if (e.kind === 'dutyExtension') {
       const base = this.duties.get(e.duty);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown duty '${e.duty}'`);
-      if (e.privileges) base.privileges = [...base.privileges, ...e.privileges];
+      if (e.privileges) base.privileges = unique([...base.privileges, ...e.privileges]);
     } else if (e.kind === 'roleExtension') {
       const base = this.roles.get(e.role);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown role '${e.role}'`);
-      if (e.duties) base.duties = [...(base.duties ?? []), ...e.duties];
-      if (e.privileges) base.privileges = [...(base.privileges ?? []), ...e.privileges];
+      if (e.duties) base.duties = unique([...(base.duties ?? []), ...e.duties]);
+      if (e.privileges) base.privileges = unique([...(base.privileges ?? []), ...e.privileges]);
     } else if (e.kind === 'scriptExtension') {
       const base = this.scripts.get(e.script);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown script '${e.script}'`);
+    } else if (e.kind === 'viewExtension') {
+      const base = this.views.get(e.view);
+      if (!base) throw new MetadataError(`Extension '${e.name}': unknown view '${e.view}'`);
+      base.joins = [...(base.joins ?? []), ...(e.joins ?? [])];
+      base.columns = [...base.columns, ...(e.columns ?? [])];
+      base.filters = [...(base.filters ?? []), ...(e.filters ?? [])];
+      base.orderBy = [...(base.orderBy ?? []), ...(e.orderBy ?? [])];
+      for (const override of e.columnOverrides ?? []) {
+        const column = base.columns.find((candidate) => candidate.name === override.column);
+        if (!column) throw new MetadataError(`Extension '${e.name}': unknown view column '${override.column}'`);
+        column.label = override.label;
+      }
+    } else if (e.kind === 'chartExtension') {
+      const base = this.charts.get(e.chart);
+      if (!base) throw new MetadataError(`Extension '${e.name}': unknown chart '${e.chart}'`);
+      base.measures = [...base.measures, ...(e.measures ?? [])];
+      for (const key of ['label', 'legend', 'stacked'] as const) if (e[key] !== undefined) (base as any)[key] = e[key];
+      for (const override of e.measureOverrides ?? []) {
+        const measure = base.measures.find((candidate) => candidate.field === override.field);
+        if (!measure) throw new MetadataError(`Extension '${e.name}': unknown chart measure '${override.field}'`);
+        if (override.label !== undefined) measure.label = override.label;
+        if (override.color !== undefined) measure.color = override.color;
+      }
+    } else if (e.kind === 'functionExtension') {
+      if (!this.functions.has(e.function)) throw new MetadataError(`Extension '${e.name}': unknown function '${e.function}'`);
     }
   }
 
@@ -956,7 +1040,8 @@ function readArtifacts(dir: string, kind: AnyMeta['kind'], out: AnyMeta[]): void
   if (!existsSync(dir)) return;
   for (const file of readdirSync(dir)) {
     if (!file.endsWith('.json')) continue;
-    const meta = JSON.parse(readFileSync(join(dir, file), 'utf-8')) as AnyMeta;
+    const parsed = JSON.parse(readFileSync(join(dir, file), 'utf-8')) as AnyMeta;
+    const meta = normalizeLegacyArtifact(parsed);
     if (meta.kind !== kind) {
       throw new MetadataError(`${file}: expected kind '${kind}', got '${meta.kind}'`);
     }
@@ -970,4 +1055,78 @@ function readArtifacts(dir: string, kind: AnyMeta['kind'], out: AnyMeta[]): void
 
 function normalizeManifest(manifest: AppManifest): AppManifest {
   return { ...manifest, models: [...(manifest.models ?? [])] };
+}
+
+function unique<T>(items: T[]): T[] { return [...new Set(items)]; }
+
+function mergeTablePermissions(base: any[], additions: any[]): any[] {
+  const merged = new Map(base.map((permission) => [permission.table, { ...permission }]));
+  for (const permission of additions) {
+    const current = merged.get(permission.table) ?? { table: permission.table };
+    for (const operation of ['read', 'create', 'update', 'delete']) {
+      if (permission[operation]) current[operation] = true;
+    }
+    merged.set(permission.table, current);
+  }
+  return [...merged.values()];
+}
+
+function sortPresented<T extends { order?: number }>(items: T[] | undefined): T[] | undefined {
+  return items?.map((item, index) => ({ item, index })).sort((a, b) => (a.item.order ?? a.index) - (b.item.order ?? b.index)).map(({ item }) => item);
+}
+
+function findMenuItem(items: MenuItemMeta[], id: string): MenuItemMeta | undefined {
+  for (const item of items) {
+    if (item.id === id) return item;
+    const nested = item.items ? findMenuItem(item.items, id) : undefined;
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+function sortMenuItems(items: MenuItemMeta[]): void {
+  const sorted = sortPresented(items) ?? [];
+  items.splice(0, items.length, ...sorted);
+  for (const item of items) if (item.items) sortMenuItems(item.items);
+}
+
+function stablePart(value: string): string {
+  return value.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'item';
+}
+
+function assignStableIds(items: Array<Record<string, any>>, prefix: string, semantic: (item: Record<string, any>) => string): void {
+  const used = new Set<string>();
+  for (const item of items) {
+    let id = item.id || `${prefix}-${stablePart(semantic(item))}`;
+    const root = id;
+    let suffix = 2;
+    while (used.has(id)) id = `${root}-${suffix++}`;
+    item.id = id;
+    used.add(id);
+  }
+}
+
+/** Normalize v0.1.3.x metadata in memory. Server migrations persist the same shape for web artifacts. */
+export function normalizeLegacyArtifact<T extends AnyMeta>(artifact: T): T {
+  const meta = structuredClone(artifact) as any;
+  if (meta.kind === 'table' || meta.kind === 'tableExtension') {
+    for (const field of meta.fields ?? []) {
+      if (field.type === 'enum' || field.readOnly) delete field.mandatory;
+      if (field.readOnly) { delete field.allowEdit; delete field.allowEditOnCreate; }
+    }
+  }
+  if (meta.kind === 'form' || meta.kind === 'formExtension') {
+    assignStableIds(meta.groups ?? [], 'group', (item) => item.label || (item.fields ?? []).join('-'));
+    assignStableIds(meta.actions ?? [], 'action', (item) => item.target || item.action || item.label);
+    assignStableIds(meta.lines ?? [], 'line', (item) => `${item.table}-${item.refField}`);
+    assignStableIds(meta.charts ?? [], 'chart', (item) => item.chart);
+  }
+  if (meta.kind === 'menu' || meta.kind === 'menuExtension') {
+    const walk = (items: any[], prefix: string) => {
+      assignStableIds(items, prefix, (item) => item.target?.name || item.form || item.route || item.action || item.label);
+      for (const item of items) if (item.items) walk(item.items, `${prefix}-${stablePart(item.id)}`);
+    };
+    walk(meta.items ?? [], 'menu');
+  }
+  return meta as T;
 }

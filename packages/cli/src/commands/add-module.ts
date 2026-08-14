@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { findProjectRoot, getAppDir } from '../utils/paths.js';
 
-const META_DIRS = ['tables', 'enums', 'forms', 'menus', 'views', 'charts', 'privileges', 'duties', 'roles', 'functions', 'reports'];
+const META_DIRS = ['tables', 'enums', 'forms', 'menus', 'views', 'charts', 'privileges', 'duties', 'roles', 'functions', 'reports', 'tableExtensions', 'enumExtensions', 'formExtensions', 'menuExtensions', 'privilegeExtensions', 'dutyExtensions', 'roleExtensions', 'scriptExtensions', 'viewExtensions', 'chartExtensions', 'functionExtensions'];
 
 export const addModuleCommand = defineCommand({
   meta: {

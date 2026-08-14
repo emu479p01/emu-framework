@@ -45,7 +45,8 @@ const groups = computed(() => {
   if (!form.value || !table.value) return [];
   return (
     form.value.groups ?? [{ label: undefined, fields: table.value.fields.map((f) => f.name) }]
-  ).map((g) => ({
+  ).filter((g) => !g.hidden).map((g) => ({
+    id: g.id,
     label: g.label,
     fields: g.fields
       .map((n) => table.value!.fields.find((f) => f.name === n))
@@ -72,8 +73,12 @@ async function save() {
   if (validationErrors.value.length) return;
   busy.value = true;
   try {
+    const payload = Object.fromEntries(table.value.fields
+      .filter((field) => !field.readOnly && (isNew.value ? field.allowEditOnCreate !== false : field.allowEdit !== false))
+      .filter((field) => Object.prototype.hasOwnProperty.call(record.value, field.name))
+      .map((field) => [field.name, record.value[field.name]]));
     if (isNew.value) {
-      const created = await api.post<Row>(`/api/data/${table.value.name}`, record.value);
+      const created = await api.post<Row>(`/api/data/${table.value.name}`, payload);
       message.success('Created');
       record.value = created;
       original.value = JSON.stringify(created);
@@ -81,7 +86,7 @@ async function save() {
     } else {
       record.value = await api.patch<Row>(
         `/api/data/${table.value.name}/${props.id}`,
-        record.value,
+        payload,
       );
       message.success('Saved');
     }
@@ -134,7 +139,7 @@ function remove() {
       </h1><p>{{ dirty ? 'Unsaved changes' : 'All changes saved' }}</p></div>
       <n-space>
         <n-button
-          v-for="act in (form.actions ?? []).filter((action) => !isNew || action.showOnCreate)"
+          v-for="act in (form.actions ?? []).filter((action) => !action.hidden && (!isNew || action.showOnCreate))"
           :key="act.target ?? act.action"
           :loading="busy"
           :disabled="act.disabled"
@@ -159,7 +164,7 @@ function remove() {
 
     <n-form label-placement="top">
       <n-space vertical :size="16">
-        <n-card v-for="(group, gi) in groups" :key="gi" :title="group.label" size="small">
+        <n-card v-for="(group, gi) in groups" :key="group.id ?? gi" :title="group.label" size="small">
           <n-grid cols="1 700:2" responsive="self" :x-gap="24">
             <n-grid-item v-for="field in group.fields" :key="field.name">
               <n-form-item :label="field.label ?? field.name" :required="field.mandatory">
@@ -177,14 +182,14 @@ function remove() {
           </n-grid>
         </n-card>
 
-        <div v-if="form.charts?.length" class="chart-grid">
-          <EmbeddedChart v-for="embedded in form.charts" :key="embedded.chart" :class="embedded.width === 'half' ? 'half' : 'full'" :embed="embedded" :record="record" :is-new="isNew" />
+        <div v-if="form.charts?.some((chart) => !chart.hidden)" class="chart-grid">
+          <EmbeddedChart v-for="embedded in (form.charts ?? []).filter((chart) => !chart.hidden)" :key="embedded.id ?? embedded.chart" :class="embedded.width === 'half' ? 'half' : 'full'" :embed="embedded" :record="record" :is-new="isNew" />
         </div>
 
         <template v-if="!isNew">
           <LineGrid
-            v-for="line in form.lines ?? []"
-            :key="line.table"
+            v-for="line in (form.lines ?? []).filter((entry) => !entry.hidden)"
+            :key="line.id ?? line.table"
             :line="line"
             :header-id="Number(id)"
             :header-record="record"

@@ -16,7 +16,7 @@ import {
   NTabPane,
   useMessage,
 } from 'naive-ui';
-import { useDesigner, type Artifact } from '../../stores/designer';
+import { useDesigner, type Artifact, type CustomizationChain } from '../../stores/designer';
 import { ApiError } from '../../api';
 import FieldsEditor, { type EditableField } from './FieldsEditor.vue';
 import IndexesEditor, { type EditableIndex } from './IndexesEditor.vue';
@@ -42,6 +42,7 @@ const busy = ref(false);
 const saveError = ref('');
 const jsonText = ref('');
 const activeTab = ref('design');
+const customizationChain = ref<CustomizationChain | null>(null);
 
 /** Kinds with a structured editor; others are edited as raw JSON. */
 const DESIGN_KINDS = new Set([
@@ -49,6 +50,7 @@ const DESIGN_KINDS = new Set([
   'tableExtension', 'formExtension', 'menuExtension', 'enumExtension',
   'privilege', 'duty', 'role', 'view', 'chart',
   'privilegeExtension', 'dutyExtension', 'roleExtension', 'scriptExtension',
+  'functionExtension', 'viewExtension', 'chartExtension',
 ]);
 
 // Table creation conveniences
@@ -92,6 +94,12 @@ function blank(kind: string): Artifact {
       return { kind, name: '', role: (route.query.target as string) ?? '', duties: [], privileges: [] };
     case 'scriptExtension':
       return { kind, name: '', script: (route.query.target as string) ?? '', code: '// extension script\n' };
+    case 'viewExtension':
+      return { kind, name: '', view: (route.query.target as string) ?? '', joins: [], columns: [], filters: [], orderBy: [], columnOverrides: [] };
+    case 'chartExtension':
+      return { kind, name: '', chart: (route.query.target as string) ?? '', measures: [], measureOverrides: [] };
+    case 'functionExtension':
+      return { kind, name: '', function: (route.query.target as string) ?? '', code: '// Chain of Command extension\nreturn next(args);\n' };
     case 'app':
       return { kind, name: '', label: '', models: [] };
     case 'script':
@@ -231,13 +239,27 @@ const extensionEnumOptions = computed(() => extensionOptions(designer.catalog.en
 const extensionPrivilegeOptions = computed(() => extensionOptions(designer.catalog.privileges as any));
 const extensionDutyOptions = computed(() => extensionOptions(designer.catalog.duties as any));
 const extensionRoleOptions = computed(() => extensionOptions(designer.catalog.roles as any));
-const extensionScriptOptions = computed(() => extensionOptions(designer.artifacts.filter((entry) => entry.kind === 'script').map((entry) => entry.artifact as any)));
+const extensionScriptOptions = computed(() => extensionOptions(designer.catalog.scripts as any));
+const extensionViewOptions = computed(() => extensionOptions(designer.catalog.views as any));
+const extensionChartOptions = computed(() => extensionOptions(designer.catalog.charts as any));
+const extensionFunctionOptions = computed(() => extensionOptions(designer.catalog.functions as any));
 const legacyExtensionWarning = computed(() => {
   if (!isExtension.value || isNew.value) return '';
   const target = artifact.value[EXT_TARGET_FIELD[props.kind]] as string | undefined;
   const expected = deriveExtensionName(selectedApp.value, selectedModel.value, target ?? '');
   return expected && artifact.value.name !== expected ? `Legacy extension name. New objects use '${expected}'. This object remains supported and is not renamed automatically.` : '';
 });
+
+watch(
+  [selectedApp, selectedModel, () => (EXT_TARGET_FIELD[props.kind] ? artifact.value[EXT_TARGET_FIELD[props.kind]] : undefined)],
+  async ([app, model, target]) => {
+    customizationChain.value = null;
+    if (!isExtension.value || !app || !model || !target) return;
+    try { customizationChain.value = await designer.customization(props.kind.replace(/Extension$/, ''), String(target), String(app), String(model)); }
+    catch { customizationChain.value = null; }
+  },
+  { immediate: true },
+);
 
 const tableOptions = computed(() =>
   designer.catalog.tables.map((t) => ({ label: String(t.label ?? t.name), value: t.name })),
@@ -593,6 +615,25 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
                   <n-select v-model:value="(artifact.script as string)" :options="extensionScriptOptions" style="min-width: 260px" filterable />
                 </n-form-item>
               </n-space>
+              <n-space v-if="kind === 'viewExtension'" :size="24" style="margin-top: 8px">
+                <n-form-item label="View" required><n-select v-model:value="(artifact.view as string)" :options="extensionViewOptions" style="min-width:260px" filterable /></n-form-item>
+              </n-space>
+              <n-space v-if="kind === 'chartExtension'" :size="24" style="margin-top: 8px">
+                <n-form-item label="Chart" required><n-select v-model:value="(artifact.chart as string)" :options="extensionChartOptions" style="min-width:260px" filterable /></n-form-item>
+              </n-space>
+              <n-space v-if="kind === 'functionExtension'" :size="24" style="margin-top: 8px">
+                <n-form-item label="Function" required><n-select v-model:value="(artifact.function as string)" :options="extensionFunctionOptions" style="min-width:260px" filterable /></n-form-item>
+              </n-space>
+            </n-card>
+
+            <n-card v-if="isExtension && customizationChain" size="small" title="Inherited layers (read-only)">
+              <n-space vertical>
+                <n-alert type="info">Only the current Layer delta is saved. Inherited metadata below is read-only.</n-alert>
+                <div v-for="entry in customizationChain.layers.filter((layer) => !layer.editable)" :key="entry.artifactName" class="inherited-layer">
+                  <strong>{{ entry.layer }} · {{ entry.app }} / {{ entry.model }} · {{ entry.artifactName }}</strong>
+                  <pre>{{ JSON.stringify(entry.artifact, null, 2) }}</pre>
+                </div>
+              </n-space>
             </n-card>
 
             <!-- Script editor -->
@@ -620,25 +661,25 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
             </n-card>
 
             <!-- Function editor -->
-            <n-card v-if="kind === 'function'" size="small" title="Function">
+            <n-card v-if="kind === 'function' || kind === 'functionExtension'" size="small" title="Function">
               <n-space vertical>
                 <n-alert type="warning" title="High-risk executable code">
                   Functions run on the server. AI and MCP change sets cannot create or update functions.
                 </n-alert>
                 <n-form-item>
                   <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0">
-                    Write the function body. It receives <b>ctx</b>, <b>args</b>, <b>kernel</b>, and <b>services</b>,
+                    Write the function body. It receives <b>ctx</b>, <b>args</b>, <b>kernel</b>, and <b>services</b><template v-if="kind === 'functionExtension'"> plus <b>next</b></template>,
                     registered as an action under this artifact's name, and callable from form/menu
                     Function targets or <b>POST /api/action/&lt;name&gt;</b>. The return value becomes the response.
                   </p>
                 </n-form-item>
-                <n-form-item label="Execution mode">
+                <n-form-item v-if="kind === 'function'" label="Execution mode">
                   <n-select v-model:value="(artifact.executionMode as string)" :options="[
                     { label: 'Transactional — synchronous and atomic', value: 'transactional' },
                     { label: 'Async integration — supports await, HTTP and email', value: 'async' },
                   ]" />
                 </n-form-item>
-                <n-alert v-if="artifact.executionMode === 'async'" type="info">
+                <n-alert v-if="kind === 'function' && artifact.executionMode === 'async'" type="info">
                   Async functions do not keep one database transaction open while waiting for the network.
                 </n-alert>
                 <n-form-item label="Code">
@@ -669,6 +710,10 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
                   </p>
                 </n-form-item>
               </n-space>
+            </n-card>
+
+            <n-card v-if="kind === 'viewExtension' || kind === 'chartExtension'" size="small" title="Extension delta">
+              <n-alert type="info" style="margin-bottom:12px">Use the JSON tab to edit additive columns/measures and presentation overrides. Structural properties of the inherited artifact are not accepted by the schema.</n-alert>
             </n-card>
 
             <n-card v-if="kind === 'view'" size="small" title="Declarative query">
@@ -845,5 +890,6 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
 </template>
 
 <style scoped>
+.inherited-layer{border:1px solid var(--emu-border);border-radius:8px;padding:10px;background:#f8fafc}.inherited-layer pre{max-height:240px;margin:8px 0 0;padding:10px;overflow:auto;background:#111827;color:#e5e7eb;border-radius:6px;font-size:11px;white-space:pre-wrap}
 @media(max-width:700px){.designer-edit-heading{display:block!important}.designer-edit-heading h2{font-size:21px;overflow-wrap:anywhere}.designer-edit-heading>.n-space{display:grid!important;grid-template-columns:1fr 1fr;margin-top:12px}.designer-edit-heading :deep(.n-button){width:100%;min-height:44px}.designer-edit :deep(.n-card__content){padding:14px}.designer-edit :deep(.n-space:not(.n-space--vertical)){flex-wrap:wrap!important;width:100%}.designer-edit :deep(.n-form-item){width:100%!important;min-width:0!important}.designer-edit :deep(.n-select),.designer-edit :deep(.n-input),.designer-edit :deep(.n-input-number){width:100%!important;min-width:0!important;max-width:100%}.designer-edit :deep(.n-table){display:block;max-width:100%;overflow-x:auto}.designer-edit :deep(.n-table table){min-width:560px}.designer-edit :deep(.n-button){min-height:40px}.designer-edit :deep(.n-card-header){flex-wrap:wrap}}
 </style>

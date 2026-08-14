@@ -10,6 +10,36 @@ import { applyErpSample } from './fixtures/erpSample.js';
 const kernelOf = (app: unknown): Kernel => (app as { kernel: Kernel }).kernel;
 
 describe('manifest models boot migration', () => {
+  it('migrates v0.1.3 extensions in place and preserves an audit copy', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'emu-v014-migration-'));
+    const dbPath = join(dir, 'data.sqlite'); const designerDbPath = join(dir, 'designer.sqlite');
+    const first = buildServer({ dbPath, designerDbPath }); await first.ready();
+    const db = kernelOf(first).designerDb;
+    const insert = db.prepare(`INSERT INTO "FW_WebArtifact" (kind,name,json,createdAt,createdBy,modifiedAt,modifiedBy) VALUES (?,?,?,CURRENT_TIMESTAMP,'test',CURRENT_TIMESTAMP,'test')`);
+    insert.run('app', 'legacy', JSON.stringify({ kind: 'app', name: 'legacy', models: [{ name: 'Base', layer: 'SYS' }, { name: 'Cus', layer: 'CUS' }] }));
+    insert.run('table', 'LEGACY_Item', JSON.stringify({ kind: 'table', name: 'LEGACY_Item', app: 'legacy', model: 'Base', fields: [{ name: 'status', type: 'enum', enumName: 'LEGACY_Status', mandatory: true }, { name: 'computed', type: 'real', mandatory: true, readOnly: true }] }));
+    insert.run('enum', 'LEGACY_Status', JSON.stringify({ kind: 'enum', name: 'LEGACY_Status', app: 'legacy', model: 'Base', values: [{ name: 'Open', value: 0 }] }));
+    insert.run('tableExtension', 'LEGACY_Item_Extension', JSON.stringify({ kind: 'tableExtension', name: 'LEGACY_Item_Extension', app: 'legacy', model: 'Cus', table: 'LEGACY_Item', fields: [{ name: 'note', type: 'string' }] }));
+    db.prepare(`DELETE FROM "FW_DesignerMigration" WHERE migration='v0.1.4.0-layered-customization'`).run();
+    await first.close();
+
+    const second = buildServer({ dbPath, designerDbPath }); await second.ready();
+    const kernel = kernelOf(second);
+    expect(kernel.registry.getTable('LEGACY_Item').fields.find((field) => field.name === 'status')?.mandatory).toBeUndefined();
+    expect(kernel.registry.getTable('LEGACY_Item').fields.find((field) => field.name === 'computed')?.mandatory).toBeUndefined();
+    expect(kernel.designerDb.prepare(`SELECT 1 FROM "FW_WebArtifact" WHERE name='LEGACY_Cus_LEGACY_Item_Extension'`).get()).toBeTruthy();
+    const auditCount = (kernel.designerDb.prepare(`SELECT COUNT(*) AS count FROM "FW_MetadataMigrationAudit" WHERE migration='v0.1.4.0-layered-customization'`).get() as { count: number }).count;
+    expect(auditCount).toBeGreaterThan(0);
+    await second.close();
+
+    const third = buildServer({ dbPath, designerDbPath }); await third.ready();
+    const thirdKernel = kernelOf(third);
+    const systemMenu = JSON.parse((thirdKernel.designerDb.prepare(`SELECT json FROM "FW_WebArtifact" WHERE name='FW_SettingsMenu'`).get() as { json: string }).json);
+    expect(systemMenu.items.every((item: { id?: string }) => Boolean(item.id))).toBe(true);
+    expect((thirdKernel.designerDb.prepare(`SELECT COUNT(*) AS count FROM "FW_MetadataMigrationAudit" WHERE migration='v0.1.4.0-layered-customization'`).get() as { count: number }).count).toBe(auditCount);
+    await third.close();
+  });
+
   it('patches stored app manifests without models from their artifacts', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'emu-migration-'));
     const dbPath = join(dir, 'data.sqlite');

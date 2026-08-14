@@ -57,8 +57,8 @@ const systemWebArtifact: TableMeta = {
 const systemMigration: TableMeta = {
   kind: 'table', name: 'FW_Migration', app: 'system', model: 'Framework', layer: 'SYS',
   fields: [
-    { name: 'migration', type: 'string', mandatory: true, readOnly: true },
-    { name: 'appliedAt', type: 'datetime', mandatory: true, readOnly: true },
+    { name: 'migration', type: 'string', readOnly: true },
+    { name: 'appliedAt', type: 'datetime', readOnly: true },
   ],
   indexes: [{ name: 'MigrationIdx', fields: ['migration'], unique: true }],
 };
@@ -67,7 +67,7 @@ const systemViewToken: TableMeta = {
   kind: 'table', name: 'FW_ViewToken', app: 'system', model: 'Framework', layer: 'SYS',
   fields: [
     { name: 'name', type: 'string', mandatory: true, maxLength: 120 },
-    { name: 'tokenHash', type: 'string', mandatory: true, readOnly: true },
+    { name: 'tokenHash', type: 'string', readOnly: true },
     { name: 'enabled', type: 'boolean', default: true },
     { name: 'expiresAt', type: 'datetime' },
     { name: 'lastUsedAt', type: 'datetime', readOnly: true },

@@ -2,13 +2,14 @@
 import { computed, h, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
-  NButton, NCheckbox, NCheckboxGroup, NDataTable, NDropdown, NEmpty, NInput,
+  NButton, NCheckbox, NCheckboxGroup, NDropdown, NEmpty, NInput,
   NPopover, NSelect, NSpace, useMessage, type DataTableColumns, type DataTableSortState,
 } from 'naive-ui';
 import { api, ApiError, type Row } from '../api';
 import { useMeta } from '../stores/meta';
 import ImportDialog from './ImportDialog.vue';
 import ActionDialog from '../components/ActionDialog.vue';
+import BusinessDataTable from '../components/BusinessDataTable.vue';
 import type { FormAction, ReportMeta } from '@emu/core';
 
 const props = defineProps<{ formName: string; appName?: string }>();
@@ -136,7 +137,7 @@ function back() { window.history.length > 1 ? router.back() : router.push(formPa
     <div v-if="rows.length" class="mobile-cards">
       <button v-for="row in rows" :key="row.id" class="record-card" @click="router.push(`${formPath}/form/${formName}/${row.id}`)"><span v-for="field in shownFields.slice(0,4)" :key="field.name"><small>{{ field.label ?? field.name }}</small>{{ display(field,row) || '—' }}</span></button>
     </div>
-    <n-data-table v-show="rows.length" class="desktop-table" :columns="columns" :data="rows" :loading="loading" :row-props="rowProps" :pagination="{ page, pageSize, itemCount: total, 'onUpdate:page': (value: number) => (page = value) }" remote @update:sorter="onSorterChange" />
+    <BusinessDataTable v-show="rows.length" class="desktop-table" :columns="columns" :data="rows" :loading="loading" :row-props="rowProps" :pagination="{ page, pageSize, itemCount: total, 'onUpdate:page': (value: number) => (page = value) }" remote @update:sorter="onSorterChange" />
     <ImportDialog v-model:show="showImport" :table-name="table.name" @imported="load" />
     <ActionDialog :show="selectedReport !== null" :action="reportAction" @update:show="(value) => { if (!value) selectedReport = null }" />
   </div>

@@ -113,7 +113,7 @@ function countMetadata(appDir: string): string | null {
     }
   }
   // Check extensions too
-  for (const extDir of ['tableExtensions', 'formExtensions', 'menuExtensions']) {
+  for (const extDir of ['tableExtensions', 'enumExtensions', 'formExtensions', 'menuExtensions', 'privilegeExtensions', 'dutyExtensions', 'roleExtensions', 'scriptExtensions', 'viewExtensions', 'chartExtensions', 'functionExtensions']) {
     const d = join(metaDir, extDir);
     if (existsSync(d)) {
       const count = readdirSync(d).filter((f) => f.endsWith('.json')).length;
@@ -146,4 +146,4 @@ function countModuleMetadata(modDir: string): string | null {
   return parts.length > 0 ? parts.join(', ') : null;
 }
 
-const KNOWN_META_KINDS = new Set([...META_DIRS, 'tableExtensions', 'formExtensions', 'menuExtensions']);
+const KNOWN_META_KINDS = new Set([...META_DIRS, 'tableExtensions', 'enumExtensions', 'formExtensions', 'menuExtensions', 'privilegeExtensions', 'dutyExtensions', 'roleExtensions', 'scriptExtensions', 'viewExtensions', 'chartExtensions', 'functionExtensions']);

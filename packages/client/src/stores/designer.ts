@@ -32,6 +32,12 @@ export interface DesignerCatalog {
   privileges: Artifact[]; duties: Artifact[]; roles: Artifact[]; scripts: Artifact[];
   functions: Artifact[]; reports: Artifact[]; views: Artifact[]; charts: Artifact[];
 }
+export interface CustomizationChain {
+  target: { kind: string; name: string; app?: string };
+  layers: { artifact: Artifact; artifactName: string; app?: string; model?: string; layer: string; editable: boolean }[];
+  effective: Artifact;
+  warnings: string[];
+}
 const emptyCatalog = (): DesignerCatalog => ({ tables: [], enums: [], forms: [], menus: [], privileges: [], duties: [], roles: [], scripts: [], functions: [], reports: [], views: [], charts: [] });
 
 export const useDesigner = defineStore('designer', {
@@ -49,7 +55,7 @@ export const useDesigner = defineStore('designer', {
       this.loaded = true;
     },
     async save(artifact: Artifact) {
-      if (artifact.kind === 'script' || artifact.kind === 'scriptExtension') {
+      if (artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function' || artifact.kind === 'functionExtension') {
         if (!window.confirm('Executable scripts can change data and server behavior. Review the code carefully and confirm this high-risk change.')) {
           return false;
         }
@@ -81,6 +87,9 @@ export const useDesigner = defineStore('designer', {
     async reloadFromDisk() {
       await api.post('/api/designer/reload');
       await Promise.all([this.load(), useMeta().load()]);
+    },
+    async customization(kind: string, name: string, app: string, model: string) {
+      return api.get<CustomizationChain>(`/api/designer/customization/${encodeURIComponent(kind)}/${encodeURIComponent(name)}?app=${encodeURIComponent(app)}&model=${encodeURIComponent(model)}`);
     },
     async snapshot(app?: string) {
       return api.get<{ revision: string; artifacts: Artifact[] }>(`/api/designer/snapshot${app ? `?app=${encodeURIComponent(app)}` : ''}`);

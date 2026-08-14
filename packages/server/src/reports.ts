@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import pdfMake from 'pdfmake';
 import type { DataContext, Kernel, ReportBandMeta, ReportElementMeta, ReportMeta, TableMeta } from '@emu/core';
 import { buildFilteredQuery } from './importExport.js';
-import { DEFAULT_REPORT_FONT, THAI_REPORT_FONT, registerPdfFonts } from './fontManager.js';
+import { DEFAULT_REPORT_FONT, THAI_REPORT_FONT, pdfFontSupports, registerPdfFonts } from './fontManager.js';
 
 // Fonts/images referenced in a report are always server-authored (never taken from request
 // input), so it's safe to allow local-file resolution; remote URLs stay disabled.
@@ -20,6 +20,26 @@ const THAI_TEXT = /[\u0E00-\u0E7F]/;
 export function reportFontForText(text: string, requestedFont: string | undefined, availableFonts: Set<string>): string | undefined {
   if (THAI_TEXT.test(text)) return THAI_REPORT_FONT;
   return requestedFont && availableFonts.has(requestedFont) ? requestedFont : undefined;
+}
+
+export interface ReportTextRun { text: string; font: string }
+
+/** Split mixed-script text at grapheme boundaries and choose a face that contains every glyph. */
+export function reportTextRuns(text: string, requestedFont: string | undefined, defaultFont: string, availableFonts: Set<string>): ReportTextRun[] {
+  const requested = requestedFont && availableFonts.has(requestedFont) ? requestedFont : defaultFont;
+  const segmenter = new Intl.Segmenter('th', { granularity: 'grapheme' });
+  const runs: ReportTextRun[] = [];
+  for (const { segment } of segmenter.segment(text)) {
+    const candidates = THAI_TEXT.test(segment)
+      ? [requested, THAI_REPORT_FONT, DEFAULT_REPORT_FONT]
+      : [requested, DEFAULT_REPORT_FONT, THAI_REPORT_FONT];
+    const font = candidates.find((candidate, index) => availableFonts.has(candidate) && (pdfFontSupports(candidate, segment) || (/^\s+$/u.test(segment) && index === 0)))
+      ?? DEFAULT_REPORT_FONT;
+    const previous = runs[runs.length - 1];
+    if (previous?.font === font) previous.text += segment;
+    else runs.push({ text: segment, font });
+  }
+  return runs;
 }
 
 export function formatReportFieldValue(kernel: Kernel, ctx: DataContext, table: TableMeta, row: ReportRow | null, fieldName: string): string {
@@ -61,6 +81,7 @@ function renderElement(
   originX: number,
   originY: number,
   availableFonts: Set<string>,
+  defaultFont: string,
 ): unknown {
   const x = originX + el.x;
   const y = originY + el.y;
@@ -81,8 +102,10 @@ function renderElement(
   }
 
   const text = el.type === 'field' && el.field ? formatReportFieldValue(kernel, ctx, table, row, el.field) : (el.text ?? '');
+  const runs = reportTextRuns(text, style.fontFamily, defaultFont, availableFonts);
+  const singleRun = runs.length === 1 ? runs[0] : undefined;
   return {
-    text,
+    text: singleRun?.text ?? runs,
     absolutePosition: { x, y },
     width: el.width,
     fontSize: style.fontSize ?? 10,
@@ -90,13 +113,14 @@ function renderElement(
     italics: style.italic,
     alignment: style.align,
     color: style.color,
-    font: reportFontForText(text, style.fontFamily, availableFonts),
+    font: singleRun?.font,
   };
 }
 
 /** Builds a pdfmake docDefinition by walking the report's bands top-to-bottom, tracking a running Y cursor. */
 export function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: ReportMeta, mainRows: ReportRow[]): Record<string, unknown> {
   const availableFonts = registerPdfFonts(kernel);
+  const defaultFont = report.defaultFont && availableFonts.has(report.defaultFont) ? report.defaultFont : DEFAULT_REPORT_FONT;
   const table = kernel.registry.getTable(report.dataSource);
   const margins = report.page?.margins ?? [40, 40, 40, 40];
   const [marginTop, , , marginLeft] = margins;
@@ -105,7 +129,7 @@ export function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: Rep
 
   const renderBand = (band: ReportBandMeta, row: ReportRow | null, bandTable: TableMeta) => {
     for (const el of band.elements) {
-      content.push(renderElement(kernel, ctx, bandTable, el, row, marginLeft, cursorY, availableFonts));
+      content.push(renderElement(kernel, ctx, bandTable, el, row, marginLeft, cursorY, availableFonts, defaultFont));
     }
     cursorY += band.height;
   };
@@ -139,7 +163,7 @@ export function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: Rep
     pageSize: report.page?.size ?? 'A4',
     pageOrientation: report.page?.orientation ?? 'portrait',
     pageMargins: margins,
-    defaultStyle: { font: report.defaultFont && availableFonts.has(report.defaultFont) ? report.defaultFont : DEFAULT_REPORT_FONT, fontSize: 10 },
+    defaultStyle: { font: defaultFont, fontSize: 10 },
     content,
   };
 }
