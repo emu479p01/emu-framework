@@ -72,6 +72,16 @@ function onTypeChange(field: EditableField) {
   if (field.type !== 'enum') delete field.enumName;
   if (field.type !== 'reference') delete field.reference;
   if (field.type === 'reference' && !field.reference) field.reference = { table: '' };
+  if (field.type === 'enum') delete field.mandatory;
+}
+
+function onReadOnlyChange(field: EditableField, value: boolean) {
+  field.readOnly = value || undefined;
+  if (value) {
+    delete field.mandatory;
+    delete field.allowEdit;
+    delete field.allowEditOnCreate;
+  }
 }
 
 function fieldIssues(field: EditableField): string[] {
@@ -96,8 +106,8 @@ function fieldIssues(field: EditableField): string[] {
       </div>
 
       <div class="field-options">
-        <div><n-checkbox :checked="field.mandatory === true" @update:checked="(v: boolean) => (field.mandatory = v || undefined)">Required</n-checkbox><small>Value cannot be empty.</small></div>
-        <div><n-checkbox :checked="field.readOnly === true" @update:checked="(v: boolean) => (field.readOnly = v || undefined)">Read only</n-checkbox><small>Blocks editing during create and update.</small></div>
+        <div><n-checkbox :checked="field.mandatory === true" :disabled="field.type === 'enum' || field.readOnly" @update:checked="(v: boolean) => (field.mandatory = v || undefined)">Required</n-checkbox><small>{{ field.type === 'enum' ? 'Enum fields are optional.' : 'Value cannot be empty.' }}</small></div>
+        <div><n-checkbox :checked="field.readOnly === true" @update:checked="(v: boolean) => onReadOnlyChange(field, v)">Read only</n-checkbox><small>Blocks UI and REST editing; Functions and Scripts may write.</small></div>
         <div><n-checkbox :checked="!field.readOnly && field.allowEdit !== false" :disabled="field.readOnly" @update:checked="(v: boolean) => (field.allowEdit = v ? undefined : false)">Allow edit</n-checkbox><small>User may change an existing record.</small></div>
         <div><n-checkbox :checked="!field.readOnly && field.allowEditOnCreate !== false" :disabled="field.readOnly" @update:checked="(v: boolean) => (field.allowEditOnCreate = v ? undefined : false)">Allow edit on create</n-checkbox><small>User may enter a value on a new record.</small></div>
       </div>

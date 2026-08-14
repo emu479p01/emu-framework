@@ -69,11 +69,11 @@ export function previewMetadataChangeSet(
     if (artifact.kind !== operation.kind || artifact.name !== operation.name) {
       diagnostics.push({ path: `/operations/${operation.name}`, code: 'identity_mismatch', message: 'Operation kind/name must match the artifact' });
     }
-    if (!options.allowScripts && (artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function')) {
+    if (!options.allowScripts && (artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function' || artifact.kind === 'functionExtension')) {
       diagnostics.push({ path: `/operations/${operation.name}`, code: 'high_risk_script', message: 'AI and automated change sets cannot create executable scripts' });
     }
     byName.set(operation.name, structuredClone(artifact));
-    diff.push({ op: existing ? 'update' : 'create', kind: operation.kind, name: operation.name, highRisk: artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function' });
+    diff.push({ op: existing ? 'update' : 'create', kind: operation.kind, name: operation.name, highRisk: artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function' || artifact.kind === 'functionExtension' });
     if (artifact.kind === 'table') {
       schemaEffects.push({ type: existing ? 'metadata-only' : 'create-table', target: artifact.name });
       const oldFields = new Set(existing?.kind === 'table' ? existing.fields.map((field) => field.name) : []);
@@ -83,7 +83,7 @@ export function previewMetadataChangeSet(
   const candidateArtifacts = [...byName.values()];
   const warnings: SchemaDiagnostic[] = candidateArtifacts.flatMap((artifact) => {
     if (!EXTENSION_KINDS.has(artifact.kind) || !('app' in artifact) || !artifact.app || !('model' in artifact) || !artifact.model) return [];
-    const targetField = ({ tableExtension: 'table', formExtension: 'form', menuExtension: 'menu', enumExtension: 'enum', privilegeExtension: 'privilege', dutyExtension: 'duty', roleExtension: 'role', scriptExtension: 'script' } as Record<string, string>)[artifact.kind];
+    const targetField = ({ tableExtension: 'table', formExtension: 'form', menuExtension: 'menu', enumExtension: 'enum', privilegeExtension: 'privilege', dutyExtension: 'duty', roleExtension: 'role', scriptExtension: 'script', viewExtension: 'view', chartExtension: 'chart', functionExtension: 'function' } as Record<string, string>)[artifact.kind];
     const target = (artifact as unknown as Record<string, string>)[targetField];
     const expected = canonicalExtensionName(artifact.app, artifact.model, target);
     return artifact.name === expected ? [] : [{ path: `/artifacts/${artifact.name}/name`, code: 'legacy_extension_name', message: `Canonical extension name is '${expected}'` }];

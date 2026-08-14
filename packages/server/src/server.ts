@@ -14,6 +14,8 @@ import {
   SecurityError,
   allowAll,
   buildRolePolicy,
+  canonicalExtensionName,
+  normalizeLegacyArtifact,
   type DataContext,
   type FieldValue,
   type MenuItemMeta,
@@ -245,6 +247,58 @@ function migrateManifestModels(kernel: Kernel): void {
   markMigration(kernel, migration);
 }
 
+/** v0.1.4.0: persist compatibility normalization and canonical extension names without touching business data. */
+function migrateV014DesignerMetadata(kernel: Kernel): void {
+  const migration = 'v0.1.4.0-layered-customization';
+  if (!tableExists(kernel.designerDb, 'FW_WebArtifact')) return;
+  kernel.designerDb.exec(`
+    CREATE TABLE IF NOT EXISTS "FW_DesignerMigration" (
+      migration TEXT PRIMARY KEY, appliedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS "FW_MetadataMigrationAudit" (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      migration TEXT NOT NULL, originalName TEXT NOT NULL, migratedName TEXT NOT NULL,
+      originalJson TEXT NOT NULL, migratedJson TEXT NOT NULL, status TEXT NOT NULL,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  if (kernel.designerDb.prepare('SELECT 1 FROM "FW_DesignerMigration" WHERE migration=?').get(migration)) return;
+  const rows = kernel.designerDb.prepare('SELECT kind,name,json FROM "FW_WebArtifact" ORDER BY name').all() as { kind: string; name: string; json: string }[];
+  const names = new Set(rows.map((row) => row.name));
+  const targetFields: Record<string, string> = {
+    tableExtension: 'table', enumExtension: 'enum', formExtension: 'form', menuExtension: 'menu',
+    privilegeExtension: 'privilege', dutyExtension: 'duty', roleExtension: 'role', scriptExtension: 'script',
+    viewExtension: 'view', chartExtension: 'chart', functionExtension: 'function',
+  };
+  const update = kernel.designerDb.prepare('UPDATE "FW_WebArtifact" SET kind=?, name=?, json=?, modifiedAt=CURRENT_TIMESTAMP, modifiedBy=? WHERE name=?');
+  const audit = kernel.designerDb.prepare('INSERT INTO "FW_MetadataMigrationAudit" (migration,originalName,migratedName,originalJson,migratedJson,status) VALUES (?,?,?,?,?,?)');
+  kernel.designerDb.transaction(() => {
+    for (const row of rows) {
+      let parsed: any;
+      try { parsed = JSON.parse(row.json); } catch { continue; }
+      let normalized = parsed.kind === 'app' ? structuredClone(parsed) : normalizeLegacyArtifact(parsed);
+      let nextName = row.name;
+      let status = 'normalized';
+      const targetField = targetFields[normalized.kind];
+      if (targetField && normalized.app && normalized.model && normalized[targetField]) {
+        const canonical = canonicalExtensionName(normalized.app, normalized.model, normalized[targetField]);
+        if (canonical !== row.name) {
+          if (!names.has(canonical)) {
+            names.delete(row.name); names.add(canonical); nextName = canonical; status = 'renamed';
+          } else status = 'collision';
+        }
+      }
+      normalized = { ...normalized, name: nextName };
+      const nextJson = JSON.stringify(normalized);
+      if (nextJson !== row.json || nextName !== row.name || normalized.kind !== row.kind) {
+        update.run(normalized.kind, nextName, nextJson, 'v0.1.4.0-migration', row.name);
+        audit.run(migration, row.name, nextName, row.json, nextJson, status);
+      }
+    }
+    kernel.designerDb.prepare('INSERT INTO "FW_DesignerMigration" (migration) VALUES (?)').run(migration);
+  })();
+}
+
 function migrateFrameworkUserCustomization(kernel: Kernel): void {
   const migration = 'v0.1.1.0-framework-user-customize';
   if (migrationApplied(kernel, migration)) return;
@@ -281,6 +335,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   seedDesignerDb(kernel);
   migrateLegacyDesignerArtifacts(kernel);
   migrateManifestModels(kernel);
+  migrateV014DesignerMetadata(kernel);
 
   // merge web-designer artifacts from designer.db into the registry
   bootWebArtifacts(kernel);

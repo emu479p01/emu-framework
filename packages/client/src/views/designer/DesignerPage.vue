@@ -272,10 +272,13 @@ const NEW_KINDS = [
   { key: 'privilegeExtension', label: 'Privilege Extension' },
   { key: 'dutyExtension', label: 'Duty Extension' },
   { key: 'roleExtension', label: 'Role Extension' },
+  { key: 'viewExtension', label: 'View Extension' },
+  { key: 'chartExtension', label: 'Chart Extension' },
   { type: 'divider' as const, key: 'd2' },
   { key: 'script', label: 'Script' },
   { key: 'scriptExtension', label: 'Script Extension' },
   { key: 'function', label: 'Function' },
+  { key: 'functionExtension', label: 'Function Extension' },
   { type: 'divider' as const, key: 'd3' },
   { key: 'app', label: 'App' },
 ];
@@ -284,6 +287,7 @@ const KIND_ORDER = [
   'table', 'enum', 'form', 'menu', 'view', 'chart', 'privilege', 'duty', 'role', 'script', 'function', 'report',
   'tableExtension', 'enumExtension', 'formExtension', 'menuExtension',
   'privilegeExtension', 'dutyExtension', 'roleExtension', 'scriptExtension',
+  'viewExtension', 'chartExtension', 'functionExtension',
 ];
 
 // ---- artifact counting ----

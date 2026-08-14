@@ -48,3 +48,18 @@ export function scaffoldMenuExtension(
   );
   return path;
 }
+
+export function scaffoldGenericExtension(
+  appDir: string,
+  data: Placement & { kind: 'viewExtension' | 'chartExtension' | 'functionExtension'; name: string; target: string },
+): string {
+  const config = {
+    viewExtension: { dir: 'viewExtensions', field: 'view', delta: { joins: [], columns: [], filters: [], orderBy: [], columnOverrides: [] } },
+    chartExtension: { dir: 'chartExtensions', field: 'chart', delta: { measures: [], measureOverrides: [] } },
+    functionExtension: { dir: 'functionExtensions', field: 'function', delta: { code: '// Chain of Command extension\nreturn next(args);\n' } },
+  }[data.kind];
+  const path = join(appDir, 'metadata', config.dir, `${data.name}.json`);
+  ensureDir(path);
+  writeFileSync(path, JSON.stringify({ kind: data.kind, name: data.name, app: data.app, model: data.model, layer: data.layer, [config.field]: data.target, ...config.delta }, null, 2));
+  return path;
+}

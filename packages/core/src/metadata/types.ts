@@ -112,6 +112,10 @@ export interface AggregateMeta {
 }
 
 export interface FormLineGridMeta {
+  id?: string;
+  label?: string;
+  hidden?: boolean;
+  order?: number;
   table: string;
   refField: string;
   fields: string[];
@@ -120,11 +124,17 @@ export interface FormLineGridMeta {
 }
 
 export interface FormGroupMeta {
+  id?: string;
   label?: string;
+  hidden?: boolean;
+  order?: number;
   fields: string[];
 }
 
 export interface FormAction {
+  id?: string;
+  hidden?: boolean;
+  order?: number;
   label: string;
   /** Legacy function target. New metadata should use type + target. */
   action?: string;
@@ -179,6 +189,9 @@ export interface FormMeta {
 }
 
 export interface MenuItemMeta {
+  id?: string;
+  hidden?: boolean;
+  order?: number;
   label?: string;
   icon?: IconName;
   form?: string;
@@ -254,6 +267,7 @@ export interface TableExtensionMeta {
   table: string;
   fields?: FieldMeta[];
   indexes?: IndexMeta[];
+  fieldOverrides?: FieldUiOverrideMeta[];
   layer?: LayerType;
   model?: string;
 }
@@ -268,6 +282,8 @@ export interface FormExtensionMeta {
   groups?: FormGroupMeta[];
   charts?: FormChartMeta[];
   actions?: FormAction[];
+  lines?: FormLineGridMeta[];
+  elementOverrides?: PresentationOverrideMeta[];
   layer?: LayerType;
   model?: string;
 }
@@ -278,6 +294,7 @@ export interface MenuExtensionMeta {
   app?: string;
   menu: string;
   items: MenuItemMeta[];
+  itemOverrides?: MenuItemOverrideMeta[];
   layer?: LayerType;
   model?: string;
 }
@@ -288,6 +305,7 @@ export interface EnumExtensionMeta {
   app?: string;
   enum: string;
   values: EnumValueMeta[];
+  valueOverrides?: { name: string; label: string }[];
   layer?: LayerType;
   model?: string;
 }
@@ -441,6 +459,25 @@ export interface ReportParameterMeta {
   required?: boolean;
 }
 
+export interface MenuItemOverrideMeta extends PresentationOverrideMeta {
+  icon?: IconName;
+}
+
+export interface PresentationOverrideMeta {
+  targetId: string;
+  label?: string;
+  hidden?: boolean;
+  order?: number;
+}
+
+export interface FieldUiOverrideMeta {
+  field: string;
+  label?: string;
+  readOnly?: boolean;
+  allowEdit?: boolean;
+  allowEditOnCreate?: boolean;
+}
+
 // ---- declarative views and reusable charts ----
 
 export type ViewParameterType = 'string' | 'int' | 'real' | 'boolean' | 'date' | 'datetime';
@@ -495,6 +532,44 @@ export interface ViewMeta {
   model?: string;
 }
 
+export interface ViewExtensionMeta {
+  kind: 'viewExtension';
+  name: string;
+  app?: string;
+  view: string;
+  joins?: ViewJoinMeta[];
+  columns?: ViewColumnMeta[];
+  filters?: ViewFilterMeta[];
+  orderBy?: { column: string; direction?: 'asc' | 'desc' }[];
+  columnOverrides?: { column: string; label: string }[];
+  layer?: LayerType;
+  model?: string;
+}
+
+export interface ChartExtensionMeta {
+  kind: 'chartExtension';
+  name: string;
+  app?: string;
+  chart: string;
+  measures?: ChartMeasureMeta[];
+  label?: string;
+  legend?: boolean;
+  stacked?: boolean;
+  measureOverrides?: { field: string; label?: string; color?: string }[];
+  layer?: LayerType;
+  model?: string;
+}
+
+export interface FunctionExtensionMeta {
+  kind: 'functionExtension';
+  name: string;
+  app?: string;
+  function: string;
+  code: string;
+  layer?: LayerType;
+  model?: string;
+}
+
 export interface ChartMeasureMeta {
   field: string;
   label?: string;
@@ -524,6 +599,10 @@ export interface FormChartParameterBindingMeta {
 }
 
 export interface FormChartMeta {
+  id?: string;
+  label?: string;
+  hidden?: boolean;
+  order?: number;
   chart: string;
   width?: 'half' | 'full';
   parameterBindings?: FormChartParameterBindingMeta[];
@@ -554,6 +633,9 @@ export type AnyMeta =
   | DutyExtensionMeta
   | RoleExtensionMeta
   | ScriptExtensionMeta
+  | ViewExtensionMeta
+  | ChartExtensionMeta
+  | FunctionExtensionMeta
   | ScriptMeta
   | FunctionMeta
   | ReportMeta
@@ -570,6 +652,9 @@ export const EXTENSION_KINDS = new Set([
   'dutyExtension',
   'roleExtension',
   'scriptExtension',
+  'viewExtension',
+  'chartExtension',
+  'functionExtension',
 ]);
 
 /** All non-extension kinds (can override by layer). */

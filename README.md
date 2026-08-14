@@ -4,7 +4,15 @@
 
 EmuFramework is a metadata-driven TypeScript framework for building business applications. It includes a browser-based Designer, generated forms and lists, role-based security, SQLite storage, reporting, import/export, and Docker deployment.
 
-Current framework version: **0.1.3.0 (Beta)**
+Current framework version: **0.1.4.0 (Beta)**
+
+## v0.1.4.0 layered customization and business UI
+
+- Adds inherited-layer inspection and delta-only extensions for Tables, Enums, Forms, Menus, Views, Charts, Security, Scripts, and Functions.
+- Migrates legacy Designer metadata with stable element IDs, canonical extension names, audit copies, and idempotent field-rule normalization.
+- Makes Enum and read-only fields optional; read-only values remain writable from trusted Functions and Scripts but not from REST or generated forms.
+- Adds confirmation dialogs to Form Lines and a reusable two-axis business grid with sticky headers and actions.
+- Renders mixed Thai and Latin report text with grapheme-safe, glyph-aware font fallback.
 
 ## Quick start on Windows
 

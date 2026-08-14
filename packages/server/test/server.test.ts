@@ -139,6 +139,27 @@ describe('server', () => {
     expect(res.json().total).toBe(1);
   });
 
+  it('rejects read-only REST writes while trusted DataContext logic can update them', async () => {
+    const customer = await app.inject({
+      method: 'POST', url: '/api/data/ERP_CustTable', headers: auth(),
+      payload: { accountNum: 'C011', name: 'Read-only test' },
+    });
+    const sale = await app.inject({
+      method: 'POST', url: '/api/data/ERP_SalesTable', headers: auth(),
+      payload: { salesId: 'SO-READONLY', custId: customer.json().id },
+    });
+    const rejected = await app.inject({
+      method: 'PATCH', url: `/api/data/ERP_SalesTable/${sale.json().id}`, headers: auth(),
+      payload: { status: 1 },
+    });
+    expect(rejected.statusCode).toBe(422);
+
+    const kernel = (app as unknown as { kernel: Kernel }).kernel;
+    const trusted = kernel.context().select('ERP_SalesTable').where('id', '=', sale.json().id).firstOnly()!;
+    trusted.set('status', 1).update();
+    expect(kernel.context().select('ERP_SalesTable').where('id', '=', sale.json().id).firstOnly()!.f.status).toBe(1);
+  });
+
   it('blocks security tables through the generic data API even for System Admin', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/data/FW_User', headers: auth() });
     expect(res.statusCode).toBe(404);

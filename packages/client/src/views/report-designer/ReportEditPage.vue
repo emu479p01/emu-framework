@@ -100,7 +100,6 @@ const selectedApp = ref('');
 const selectedModel = ref('');
 const selectedLayer = ref('CUS');
 const fontOptions = ref<{ label: string; value: string }[]>([{ label: 'Roboto', value: 'Roboto' }]);
-const THAI_TEXT = /[\u0E00-\u0E7F]/;
 const THAI_FONT = 'Noto Sans Thai';
 const canvasWidth = computed(() => {
   const size = report.page?.size ?? 'A4';
@@ -111,8 +110,8 @@ const canvasWidth = computed(() => {
   return Math.max(240, pageWidth - margins[0] - margins[2]);
 });
 function previewFont(element: ReportElement): string {
-  if (element.type === 'text' && THAI_TEXT.test(element.text ?? '')) return THAI_FONT;
-  return element.style?.fontFamily ?? report.defaultFont ?? 'Roboto';
+  const selected = element.style?.fontFamily ?? report.defaultFont ?? 'Roboto';
+  return [selected, THAI_FONT, 'Roboto', 'sans-serif'].map((font) => font.includes(' ') ? `"${font}"` : font).join(', ');
 }
 
 async function loadFonts() {

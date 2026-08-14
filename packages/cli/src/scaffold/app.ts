@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { getAppDir } from '../utils/paths.js';
 import { appJson, appPackageJson, appTsConfig, logicTs } from '../utils/templates.js';
 
-const META_DIRS = ['tables', 'enums', 'forms', 'menus', 'privileges', 'duties', 'roles', 'functions', 'reports', 'views', 'charts', 'menuExtensions'];
+const META_DIRS = ['tables', 'enums', 'forms', 'menus', 'privileges', 'duties', 'roles', 'functions', 'reports', 'views', 'charts', 'tableExtensions', 'enumExtensions', 'formExtensions', 'menuExtensions', 'privilegeExtensions', 'dutyExtensions', 'roleExtensions', 'scriptExtensions', 'viewExtensions', 'chartExtensions', 'functionExtensions'];
 
 export interface ScaffoldAppResult {
   appDir: string;

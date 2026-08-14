@@ -516,7 +516,7 @@ function listAllByKind(root: string, kindDir: string): string[] {
 function listModules(appDir: string): string[] {
   const metaDir = join(appDir, 'metadata');
   if (!existsSync(metaDir)) return [];
-  const known = new Set(['tables', 'enums', 'forms', 'menus', 'views', 'charts', 'privileges', 'duties', 'roles', 'functions', 'reports', 'tableExtensions', 'formExtensions', 'menuExtensions']);
+  const known = new Set(['tables', 'enums', 'forms', 'menus', 'views', 'charts', 'privileges', 'duties', 'roles', 'functions', 'reports', 'tableExtensions', 'enumExtensions', 'formExtensions', 'menuExtensions', 'privilegeExtensions', 'dutyExtensions', 'roleExtensions', 'scriptExtensions', 'viewExtensions', 'chartExtensions', 'functionExtensions']);
   return readdirSync(metaDir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && !known.has(d.name))
     .map((d) => d.name);

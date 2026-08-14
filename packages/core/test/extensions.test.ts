@@ -62,6 +62,27 @@ describe('extensions', () => {
     expect(fields).toContain('creditLimit');
   });
 
+  it('applies only safe field overrides and normalizes read-only fields', () => {
+    const registry = baseRegistry();
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [{
+      kind: 'tableExtension', name: 'TESTAPP_ClientCustom_TESTAPP_CustTable_Extension', table: 'TESTAPP_CustTable',
+      fieldOverrides: [{ field: 'name', label: 'Customer name', readOnly: true }],
+    }]);
+    const field = registry.getTable('TESTAPP_CustTable').fields.find((item) => item.name === 'name')!;
+    expect(field).toMatchObject({ label: 'Customer name', readOnly: true });
+    expect(field.mandatory).toBeUndefined();
+  });
+
+  it('keeps enum numeric values stable while allowing label overrides', () => {
+    const registry = baseRegistry();
+    const original = registry.getEnum('TESTAPP_SalesStatus').values[0].value;
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [{
+      kind: 'enumExtension', name: 'TESTAPP_ClientCustom_TESTAPP_SalesStatus_Extension', enum: 'TESTAPP_SalesStatus', values: [],
+      valueOverrides: [{ name: registry.getEnum('TESTAPP_SalesStatus').values[0].name, label: 'Localized' }],
+    }]);
+    expect(registry.getEnum('TESTAPP_SalesStatus').values[0]).toMatchObject({ value: original, label: 'Localized' });
+  });
+
   it('extended fields reach the DB schema', () => {
     const registry = baseRegistry();
     registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [tableExt]);
@@ -111,7 +132,7 @@ describe('extensions', () => {
     registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [menuExt]);
     const items = registry.allMenus()[0].items;
     expect(items).toHaveLength(2);
-    expect(items[1].items).toEqual([{ label: 'Nested', form: 'TESTAPP_CustForm' }]);
+    expect(items[1].items).toEqual([expect.objectContaining({ label: 'Nested', form: 'TESTAPP_CustForm', id: expect.any(String) })]);
   });
 
   it('rejects extending unknown tables and duplicate fields', () => {

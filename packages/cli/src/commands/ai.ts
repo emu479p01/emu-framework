@@ -19,6 +19,7 @@ const kindDirectories: Record<string, string> = {
   script: 'scripts', report: 'reports', view: 'views', chart: 'charts', tableExtension: 'tableExtensions', enumExtension: 'enumExtensions',
   formExtension: 'formExtensions', menuExtension: 'menuExtensions', privilegeExtension: 'privilegeExtensions',
   dutyExtension: 'dutyExtensions', roleExtension: 'roleExtensions', scriptExtension: 'scriptExtensions',
+  viewExtension: 'viewExtensions', chartExtension: 'chartExtensions', functionExtension: 'functionExtensions',
 };
 
 function flag(args: Record<string, unknown>, key: string): boolean { return args[key] === true || args[key] === 'true'; }

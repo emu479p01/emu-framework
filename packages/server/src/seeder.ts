@@ -1,4 +1,4 @@
-import type { AnyMeta, Kernel } from '@emu/core';
+import { normalizeLegacyArtifact, type AnyMeta, type Kernel } from '@emu/core';
 
 const FW_MODEL = 'Framework';
 
@@ -69,15 +69,18 @@ export function seedDesignerDb(kernel: Kernel): void {
   });
 
   for (const art of artifacts) {
-    const json = JSON.stringify(art);
+    // Persist the same stable IDs and field invariants used by the legacy
+    // migration so SYS metadata remains byte-stable on every subsequent boot.
+    const normalized = normalizeLegacyArtifact(art);
+    const json = JSON.stringify(normalized);
     const existing = ctx.select('FW_WebArtifact').whereEq({ name: art.name }).firstOnly();
     if (existing) {
       if (existing.f.json !== json) {
-        existing.setMany({ kind: art.kind, json });
+        existing.setMany({ kind: normalized.kind, json });
         existing.update();
       }
     } else {
-      ctx.newRecord('FW_WebArtifact').setMany({ kind: art.kind, name: art.name, json }).insert();
+      ctx.newRecord('FW_WebArtifact').setMany({ kind: normalized.kind, name: normalized.name, json }).insert();
     }
   }
 

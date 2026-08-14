@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import pdfMake from 'pdfmake';
 // @ts-expect-error pdfmake ships this descriptor without declarations
 import robotoFonts from 'pdfmake/fonts/Roboto.js';
+import * as fontkit from 'fontkit';
 import type { Kernel, ReportMeta } from '@emu/core';
 
 export const DEFAULT_REPORT_FONT = 'Roboto';
@@ -21,6 +22,9 @@ const bundledThaiVariants: Record<string, string> = {
   '700italic': join(bundledThaiDir, 'NotoSansThai-Bold.ttf'),
 };
 const MAX_FONT_BYTES = 20 * 1024 * 1024;
+type PdfFontDefinition = { normal: string; bold: string; italics: string; bolditalics: string };
+let registeredDefinitions: Record<string, PdfFontDefinition> = {};
+const fontCoverage = new Map<string, Set<number>>();
 
 export interface InstalledFont { family: string; version?: string; subsets: string[]; variants: Record<string, string>; checksum: string; license: string; installedAt: string }
 export interface GoogleFont { family: string; version?: string; subsets: string[]; variants: string[]; files: Record<string, string>; category?: string }
@@ -38,7 +42,7 @@ export function configuredFonts(kernel: Kernel): InstalledFont[] {
 }
 
 export function registerPdfFonts(kernel: Kernel): Set<string> {
-  const definitions: Record<string, { normal: string; bold: string; italics: string; bolditalics: string }> = {
+  const definitions: Record<string, PdfFontDefinition> = {
     Roboto: robotoFonts.Roboto,
     [THAI_REPORT_FONT]: {
       normal: bundledThaiVariants.regular,
@@ -54,7 +58,24 @@ export function registerPdfFonts(kernel: Kernel): Set<string> {
     definitions[font.family] = { normal: pick('regular', 'regular'), bold: pick('700', 'regular'), italics: pick('italic', 'regular'), bolditalics: pick('700italic', '700') };
   }
   pdfMake.addFonts(definitions);
+  registeredDefinitions = definitions;
+  fontCoverage.clear();
   return new Set(Object.keys(definitions));
+}
+
+/** True when the registered regular face contains every non-control code point in the grapheme. */
+export function pdfFontSupports(family: string, grapheme: string): boolean {
+  const definition = registeredDefinitions[family];
+  if (!definition) return false;
+  let coverage = fontCoverage.get(family);
+  if (!coverage) {
+    try {
+      const font = fontkit.openSync(definition.normal) as { characterSet: number[] };
+      coverage = new Set(font.characterSet);
+    } catch { coverage = new Set(); }
+    fontCoverage.set(family, coverage);
+  }
+  return [...grapheme].every((character) => /\s/u.test(character) || coverage!.has(character.codePointAt(0)!));
 }
 
 function safeFamily(value: string): string { return value.replace(/[^a-z0-9 _-]/gi, '').trim(); }

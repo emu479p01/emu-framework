@@ -93,6 +93,7 @@ const WEB_KIND_ORDER = [
   'tableExtension', 'enumExtension', 'form', 'formExtension',
   'menu', 'menuExtension', 'privilegeExtension', 'dutyExtension',
   'roleExtension', 'scriptExtension',
+  'viewExtension', 'chartExtension', 'functionExtension',
 ];
 
 /**
@@ -393,7 +394,7 @@ export class Kernel {
     // Never execute user-provided scripts during a preview. Metadata registration does not
     // depend on script bodies, so blanking them preserves structural validation safely.
     const safe = artifacts.map((artifact) =>
-      artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function'
+      artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function' || artifact.kind === 'functionExtension'
         ? ({ ...artifact, code: '' } as AnyMeta)
         : artifact,
     );
@@ -441,7 +442,38 @@ export class Kernel {
           ? Object.getPrototypeOf(async function () {}).constructor as FunctionConstructor
           : Function;
         const fn = new FunctionCtor('ctx', 'args', 'kernel', 'services', f.code);
-        this.actions.set(f.name, (ctx, args, services) => fn(ctx, args, this, services));
+        let handler: ActionHandler = (ctx, args, services) => fn(ctx, args, this, services);
+        const extensions = this._registry.customizationLayers('function', f.name)
+          .filter((artifact: any) => artifact.kind === 'functionExtension') as Array<AnyMeta & { code?: string; name: string }>;
+        for (const extension of extensions) {
+          if (!extension.code) continue;
+          const extensionFn = new FunctionCtor('ctx', 'args', 'next', 'kernel', 'services', extension.code);
+          const nextHandler = handler;
+          if (mode === 'async') {
+            handler = async (ctx, args, services) => {
+              let calls = 0;
+              const next = async (nextArgs: { [key: string]: unknown } = args) => {
+                if (++calls > 1) throw new ValidationError(`Function extension '${extension.name}' called next() more than once`);
+                return await nextHandler(ctx, nextArgs, services);
+              };
+              const result = await extensionFn(ctx, args, next, this, services);
+              if (calls !== 1) throw new ValidationError(`Function extension '${extension.name}' must call next() exactly once`);
+              return result;
+            };
+          } else {
+            handler = (ctx, args, services) => {
+              let calls = 0;
+              const next = (nextArgs: { [key: string]: unknown } = args) => {
+                if (++calls > 1) throw new ValidationError(`Function extension '${extension.name}' called next() more than once`);
+                return nextHandler(ctx, nextArgs, services);
+              };
+              const result = extensionFn(ctx, args, next, this, services);
+              if (calls !== 1) throw new ValidationError(`Function extension '${extension.name}' must call next() exactly once`);
+              return result;
+            };
+          }
+        }
+        this.actions.set(f.name, handler);
         this.actionModes.set(f.name, mode);
       } catch (err) {
         errors.push({
