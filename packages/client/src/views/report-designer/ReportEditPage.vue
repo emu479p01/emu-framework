@@ -23,6 +23,7 @@ import { api, ApiError } from '../../api';
 import { useDesigner } from '../../stores/designer';
 import { useMeta, type FieldMeta } from '../../stores/meta';
 import { useDraggableElement } from './useDraggableElement';
+import TablixEditor from './TablixEditor.vue';
 
 interface ReportElement {
   id: string;
@@ -36,10 +37,17 @@ interface ReportElement {
   style?: { fontSize?: number; bold?: boolean; italic?: boolean; align?: 'left' | 'center' | 'right'; color?: string; borderWidth?: number; fontFamily?: string };
 }
 type ReportBandKind = 'pageHeader' | 'header' | 'detail' | 'footer' | 'pageFooter';
+type ReportBandDisplay = 'firstPage' | 'everyPage' | 'lastPage';
+interface ReportTablixColumn { field: string; label?: string; width?: number; align?: 'left' | 'center' | 'right'; format?: string }
+interface ReportTablixStyle { fontSize?: number; bold?: boolean; italic?: boolean; align?: 'left' | 'center' | 'right'; color?: string; backgroundColor?: string; padding?: number; fontFamily?: string }
+interface ReportTablix { columns: ReportTablixColumn[]; headerHeight?: number; rowHeight?: number; headerStyle?: ReportTablixStyle; rowStyle?: ReportTablixStyle; border?: { width?: number; color?: string } }
 interface ReportBand {
   kind: ReportBandKind;
+  displayOn?: ReportBandDisplay;
+  layout?: 'freeform' | 'tablix';
   height: number;
   elements: ReportElement[];
+  tablix?: ReportTablix;
 }
 interface ReportLineSource {
   table: string;
@@ -76,12 +84,14 @@ const jsonText = ref('');
 const jsonResult = ref<{ valid: boolean; diagnostics: { path: string; code: string; message: string }[]; summary?: { bands: number; elements: number; lineSources: number; parameters: number } } | null>(null);
 
 const BAND_KINDS: { kind: ReportBandKind; label: string }[] = [
-  { kind: 'pageHeader', label: 'Page header' },
   { kind: 'header', label: 'Header' },
   { kind: 'detail', label: 'Detail (repeats per row)' },
   { kind: 'footer', label: 'Footer' },
-  { kind: 'pageFooter', label: 'Page footer' },
 ];
+const DISPLAY_OPTIONS = [
+  { label: 'First page', value: 'firstPage' }, { label: 'Every page', value: 'everyPage' }, { label: 'Last page', value: 'lastPage' },
+];
+const LAYOUT_OPTIONS = [{ label: 'Freeform', value: 'freeform' }, { label: 'Tablix', value: 'tablix' }];
 
 function blank(): ReportArtifact {
   return {
@@ -89,7 +99,7 @@ function blank(): ReportArtifact {
     name: '',
     label: '',
     dataSource: '',
-    bands: [{ kind: 'header', height: 30, elements: [] }, { kind: 'detail', height: 20, elements: [] }],
+    bands: [{ kind: 'header', displayOn: 'firstPage', height: 30, elements: [] }, { kind: 'detail', layout: 'freeform', height: 20, elements: [] }],
     lineSources: [],
     parameters: [],
   };
@@ -147,6 +157,7 @@ async function load() {
   } else {
     const entry = designer.get(props.name!);
     const art = entry ? (JSON.parse(JSON.stringify(entry.artifact)) as ReportArtifact) : blank();
+    normalizeReportBands(art);
     Object.assign(report, blank(), art);
     selectedApp.value = report.app ?? '';
     selectedModel.value = report.model ?? '';
@@ -155,6 +166,19 @@ async function load() {
   selected.value = null;
   jsonText.value = JSON.stringify(report, null, 2);
   jsonResult.value = null;
+}
+function normalizeReportBands(value: ReportArtifact) {
+  const normalize = (bands: ReportBand[]) => {
+    for (const band of bands) {
+      if (band.kind === 'pageHeader') { band.kind = 'header'; band.displayOn = 'everyPage'; }
+      else if (band.kind === 'pageFooter') { band.kind = 'footer'; band.displayOn = 'everyPage'; }
+      else if (band.kind === 'header' && !band.displayOn) band.displayOn = 'firstPage';
+      else if (band.kind === 'footer' && !band.displayOn) band.displayOn = 'lastPage';
+      band.layout ??= band.tablix ? 'tablix' : 'freeform';
+    }
+  };
+  normalize(value.bands);
+  for (const line of value.lineSources ?? []) normalize(line.bands);
 }
 watch(() => props.name, load, { immediate: true });
 
@@ -179,10 +203,23 @@ function hasBand(kind: ReportBandKind): boolean {
 }
 function toggleBand(kind: ReportBandKind, on: boolean) {
   if (on) {
-    if (!hasBand(kind)) report.bands.push({ kind, height: 24, elements: [] });
+    if (!hasBand(kind)) report.bands.push({ kind, displayOn: kind === 'header' ? 'firstPage' : kind === 'footer' ? 'lastPage' : undefined, layout: 'freeform', height: 24, elements: [] });
   } else {
     report.bands = report.bands.filter((b) => b.kind !== kind);
   }
+}
+function setBandLayout(band: ReportBand, layout: 'freeform' | 'tablix') {
+  if (layout === 'tablix' && band.elements.length > 0) {
+    dialog.warning({ title: 'Switch to Tablix', content: 'Switching layout removes freeform elements from this Detail band.', positiveText: 'Switch', negativeText: 'Cancel', onPositiveClick: () => { band.elements = []; band.layout = 'tablix'; band.tablix ??= { columns: [] }; } });
+    return;
+  }
+  if (layout === 'freeform' && band.tablix && band.tablix.columns.length > 0) {
+    dialog.warning({ title: 'Switch to Freeform', content: 'Switching layout removes the Tablix columns and styles from this Detail band.', positiveText: 'Switch', negativeText: 'Cancel', onPositiveClick: () => { delete band.tablix; band.layout = 'freeform'; } });
+    return;
+  }
+  band.layout = layout;
+  if (layout === 'tablix') band.tablix ??= { columns: [] };
+  else delete band.tablix;
 }
 
 // ---- element selection ----
@@ -215,7 +252,7 @@ function dragHandlers(el: ReportElement) {
 // ---- line sources ----
 function addLineSource() {
   report.lineSources = report.lineSources ?? [];
-  report.lineSources.push({ table: '', refField: '', bands: [{ kind: 'detail', height: 20, elements: [] }] });
+  report.lineSources.push({ table: '', refField: '', bands: [{ kind: 'detail', layout: 'freeform', height: 20, elements: [] }] });
 }
 function removeLineSource(idx: number) {
   report.lineSources?.splice(idx, 1);
@@ -290,6 +327,7 @@ function applyJson() {
     title: 'Replace report design?', content: 'This replaces the current report bands, elements, line sources, and parameters with the validated JSON.',
     positiveText: 'Replace design', negativeText: 'Cancel',
     onPositiveClick: () => {
+      normalizeReportBands(parsed);
       Object.assign(report, blank(), parsed);
       selectedApp.value = (route.params.appName as string) || parsed.app || selectedApp.value;
       selectedModel.value = (route.params.modelName as string) || parsed.model || selectedModel.value;
@@ -357,14 +395,19 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
               <template v-if="hasBand(bk.kind)">
                 <span>Height</span>
                 <n-input-number v-model:value="bandFor(bk.kind)!.height" :min="8" size="small" style="width: 90px" />
-                <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'text', mainFieldOptions)">+ Text</n-button>
-                <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'field', mainFieldOptions)">+ Field</n-button>
-                <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'line', mainFieldOptions)">+ Line</n-button>
-                <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'rect', mainFieldOptions)">+ Box</n-button>
+                <n-select v-if="bk.kind === 'header' || bk.kind === 'footer'" v-model:value="bandFor(bk.kind)!.displayOn" :options="DISPLAY_OPTIONS" size="small" style="width:140px" />
+                <n-select v-if="bk.kind === 'detail'" :value="bandFor(bk.kind)!.layout ?? 'freeform'" :options="LAYOUT_OPTIONS" size="small" style="width:120px" @update:value="(value) => setBandLayout(bandFor(bk.kind)!, value)" />
+                <template v-if="bandFor(bk.kind)!.layout !== 'tablix'">
+                  <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'text', mainFieldOptions)">+ Text</n-button>
+                  <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'field', mainFieldOptions)">+ Field</n-button>
+                  <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'line', mainFieldOptions)">+ Line</n-button>
+                  <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'rect', mainFieldOptions)">+ Box</n-button>
+                </template>
               </template>
             </n-space>
           </template>
-          <div v-if="hasBand(bk.kind)" class="report-canvas-scroll"><div class="report-band" :style="{ height: bandFor(bk.kind)!.height + 'px', width: canvasWidth + 'px' }">
+          <TablixEditor v-if="hasBand(bk.kind) && bandFor(bk.kind)!.layout === 'tablix' && bandFor(bk.kind)!.tablix" :tablix="bandFor(bk.kind)!.tablix!" :field-options="mainFieldOptions" :font-options="fontOptions" />
+          <div v-else-if="hasBand(bk.kind)" class="report-canvas-scroll"><div class="report-band" :style="{ height: bandFor(bk.kind)!.height + 'px', width: canvasWidth + 'px' }">
             <div
               v-for="(el, i) in bandFor(bk.kind)!.elements"
               :key="el.id"
@@ -390,12 +433,14 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
             <n-space class="line-source-controls" align="center" style="margin-bottom: 8px">
               <n-select v-model:value="line.table" :options="tableOptions" placeholder="Child table" style="width: 200px" />
               <n-select v-model:value="line.refField" :options="refFieldOptions(line.table)" placeholder="Reference field back to main record" style="width: 260px" />
-              <n-button size="tiny" @click="addElement(line.bands[0].elements, 'text', lineFieldOptions(line.table))">+ Text</n-button>
-              <n-button size="tiny" @click="addElement(line.bands[0].elements, 'field', lineFieldOptions(line.table))">+ Field</n-button>
+              <n-select :value="line.bands[0].layout ?? 'freeform'" :options="LAYOUT_OPTIONS" size="small" style="width:120px" @update:value="(value) => setBandLayout(line.bands[0], value)" />
+              <n-button v-if="line.bands[0].layout !== 'tablix'" size="tiny" @click="addElement(line.bands[0].elements, 'text', lineFieldOptions(line.table))">+ Text</n-button>
+              <n-button v-if="line.bands[0].layout !== 'tablix'" size="tiny" @click="addElement(line.bands[0].elements, 'field', lineFieldOptions(line.table))">+ Field</n-button>
               <n-button size="tiny" type="error" quaternary @click="removeLineSource(li)">Remove</n-button>
               <span>Height</span><n-input-number v-model:value="line.bands[0].height" :min="8" size="small" style="width:90px" />
             </n-space>
-            <div class="report-canvas-scroll"><div class="report-band" :style="{ height: line.bands[0].height + 'px', width: canvasWidth + 'px' }">
+            <TablixEditor v-if="line.bands[0].layout === 'tablix' && line.bands[0].tablix" :tablix="line.bands[0].tablix!" :field-options="lineFieldOptions(line.table)" :font-options="fontOptions" />
+            <div v-else class="report-canvas-scroll"><div class="report-band" :style="{ height: line.bands[0].height + 'px', width: canvasWidth + 'px' }">
               <div
                 v-for="(el, i) in line.bands[0].elements"
                 :key="el.id"

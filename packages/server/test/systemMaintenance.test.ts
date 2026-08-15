@@ -68,7 +68,7 @@ describe('system maintenance', () => {
   it('accepts legacy full manifests and rejects backups from newer frameworks', async () => {
     const exported = await app.inject({ method: 'GET', url: '/api/system/backup/export', headers: auth });
     const files = unzipSync(exported.rawPayload); const legacy = JSON.parse(Buffer.from(files['manifest.json']).toString('utf8'));
-    legacy.schemaVersion = 2; delete legacy.components; files['manifest.json'] = new TextEncoder().encode(JSON.stringify(legacy));
+    legacy.schemaVersion = 2; legacy.frameworkVersion = '0.1.4.0'; delete legacy.components; files['manifest.json'] = new TextEncoder().encode(JSON.stringify(legacy));
     const legacyUpload = multipart(Buffer.from(zipSync(files)));
     const accepted = await app.inject({ method: 'POST', url: '/api/system/backup/validate', headers: { ...auth, 'content-type': `multipart/form-data; boundary=${legacyUpload.boundary}` }, payload: legacyUpload.body });
     expect(accepted.statusCode).toBe(200);
@@ -88,12 +88,12 @@ describe('system maintenance', () => {
 
   it('reports the latest stable release without accepting a client-selected version', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
-      tag_name: '0.1.4.0', name: 'Stable', body: 'Release notes', html_url: 'https://example.test/release',
+      tag_name: '0.1.5.0', name: 'Stable', body: 'Release notes', html_url: 'https://example.test/release',
       published_at: '2026-07-12T00:00:00Z', draft: false, prerelease: false,
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const response = await app.inject({ method: 'GET', url: '/api/system/update/latest', headers: auth });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ currentVersion: '0.1.4.0', latestVersion: '0.1.4.0', updateAvailable: false });
+    expect(response.json()).toMatchObject({ currentVersion: '0.1.5.0', latestVersion: '0.1.5.0', updateAvailable: false });
   });
 
   it('exposes an unauthenticated health check for container supervision', async () => {

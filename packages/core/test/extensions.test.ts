@@ -135,6 +135,36 @@ describe('extensions', () => {
     expect(items[1].items).toEqual([expect.objectContaining({ label: 'Nested', form: 'TESTAPP_CustForm', id: expect.any(String) })]);
   });
 
+  it('menu extension inserts items at an exact stable-id path', () => {
+    const registry = new MetadataRegistry();
+    registry.registerApp(testManifest('testapp', 'SYS'), [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable, baseForm, {
+      kind: 'menu', name: 'TESTAPP_Main', items: [{ id: 'level-1-a', label: 'Level 1 A', target: { type: 'group' }, items: [
+        { id: 'level-2-a', label: 'Level 2 A', target: { type: 'group' }, items: [] },
+      ] }],
+    }]);
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [{
+      kind: 'menuExtension', name: 'TESTAPP_ClientCustom_TESTAPP_Main_Extension', menu: 'TESTAPP_Main',
+      items: [{ label: 'Root form', form: 'TESTAPP_CustForm' }],
+      insertions: [{ path: ['level-1-a', 'level-2-a'], items: [{ label: 'Nested form', form: 'TESTAPP_CustForm' }] }],
+    }]);
+    const root = registry.allMenus()[0].items;
+    expect(root).toHaveLength(2);
+    expect(root[0].items?.[0].items).toEqual([expect.objectContaining({ label: 'Nested form', form: 'TESTAPP_CustForm' })]);
+  });
+
+  it('rejects missing, ambiguous and leaf menu insertion paths', () => {
+    const make = (path: string[]) => ({
+      kind: 'menuExtension' as const, name: 'TESTAPP_ClientCustom_TESTAPP_Main_Extension', menu: 'TESTAPP_Main',
+      insertions: [{ path, items: [{ label: 'Nested form', form: 'TESTAPP_CustForm' }] }],
+    });
+    const missing = baseRegistry();
+    expect(() => missing.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [make(['missing'])])).toThrow(/menu path 'missing' was not found/);
+
+    const leaf = baseRegistry();
+    const leafId = leaf.allMenus()[0].items[0].id!;
+    expect(() => leaf.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [make([leafId])])).toThrow(/targets a leaf item/);
+  });
+
   it('rejects extending unknown tables and duplicate fields', () => {
     const registry = baseRegistry();
     expect(() =>

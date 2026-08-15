@@ -1,6 +1,6 @@
 {
   "name": "@emu/mcp",
-  "version": "0.1.4.0",
+  "version": "0.1.5.0",
   "type": "module",
   "private": true,
   "main": "dist/index.js",

@@ -128,7 +128,7 @@ export function registerFontRoutes(app: FastifyInstance, kernel: Kernel, require
   app.put<{ Body: { apiKey?: string } }>('/api/system/fonts/settings', (req) => { requireAdmin(req); const key = req.body?.apiKey?.trim(); if (!key) kernel.designerDb.prepare("DELETE FROM FW_SystemSetting WHERE name='googleFontsApiKey'").run(); else kernel.designerDb.prepare("INSERT INTO FW_SystemSetting(name,value) VALUES('googleFontsApiKey',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value, modifiedAt=CURRENT_TIMESTAMP").run(key); return { ok: true, configured: Boolean(key) }; });
   app.get('/api/system/fonts/catalog', async (req) => { requireAdmin(req); return { fonts: (await catalog(kernel)).map(({ family, variants, subsets, category, version }) => ({ family, variants, subsets, category, version })) }; });
   app.post<{ Params: { family: string } }>('/api/system/fonts/:family/install', async (req) => { requireAdmin(req); return install(kernel, decodeURIComponent(req.params.family)); });
-  app.delete<{ Params: { family: string } }>('/api/system/fonts/:family', async (req, reply) => { requireAdmin(req); const family = decodeURIComponent(req.params.family); const used = kernel.registry.allReports().filter((report) => report.defaultFont === family || report.bands.some((band) => band.elements.some((element) => element.style?.fontFamily === family)) || report.lineSources?.some((line) => line.bands.some((band) => band.elements.some((element) => element.style?.fontFamily === family)))); if (used.length) return reply.status(409).send({ error: `Font is used by: ${used.map((r) => r.name).join(', ')}` }); kernel.designerDb.prepare('DELETE FROM FW_Font WHERE family=?').run(family); await rm(join(cacheDir(), safeFamily(family)), { recursive: true, force: true }); registerPdfFonts(kernel); return { ok: true }; });
+  app.delete<{ Params: { family: string } }>('/api/system/fonts/:family', async (req, reply) => { requireAdmin(req); const family = decodeURIComponent(req.params.family); const used = kernel.registry.allReports().filter((report) => reportUsesFont(report, family)); if (used.length) return reply.status(409).send({ error: `Font is used by: ${used.map((r) => r.name).join(', ')}` }); kernel.designerDb.prepare('DELETE FROM FW_Font WHERE family=?').run(family); await rm(join(cacheDir(), safeFamily(family)), { recursive: true, force: true }); registerPdfFonts(kernel); return { ok: true }; });
   app.get<{ Params: { family: string; variant: string } }>('/api/fonts/:family/:variant', async (req, reply) => {
     requireUser(req);
     const familyName = decodeURIComponent(req.params.family);
@@ -154,6 +154,19 @@ export function missingReportFonts(kernel: Kernel, report: ReportMeta): string[]
   const available = new Set([DEFAULT_REPORT_FONT, THAI_REPORT_FONT, ...configuredFonts(kernel).map((font) => font.family)]);
   const requested = new Set<string>();
   if (report.defaultFont) requested.add(report.defaultFont);
-  for (const band of [...report.bands, ...(report.lineSources ?? []).flatMap((line) => line.bands)]) for (const element of band.elements) if (element.style?.fontFamily) requested.add(element.style.fontFamily);
+  for (const band of [...report.bands, ...(report.lineSources ?? []).flatMap((line) => line.bands)]) {
+    for (const element of band.elements) if (element.style?.fontFamily) requested.add(element.style.fontFamily);
+    if (band.tablix?.headerStyle?.fontFamily) requested.add(band.tablix.headerStyle.fontFamily);
+    if (band.tablix?.rowStyle?.fontFamily) requested.add(band.tablix.rowStyle.fontFamily);
+  }
   return [...requested].filter((font) => !available.has(font));
+}
+
+function reportUsesFont(report: ReportMeta, family: string): boolean {
+  if (report.defaultFont === family) return true;
+  return [...report.bands, ...(report.lineSources ?? []).flatMap((line) => line.bands)].some((band) =>
+    band.elements.some((element) => element.style?.fontFamily === family)
+    || band.tablix?.headerStyle?.fontFamily === family
+    || band.tablix?.rowStyle?.fontFamily === family,
+  );
 }

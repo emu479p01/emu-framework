@@ -293,7 +293,10 @@ export interface MenuExtensionMeta {
   name: string;
   app?: string;
   menu: string;
-  items: MenuItemMeta[];
+  /** Items appended at the menu root (v0.1.4-compatible behavior). */
+  items?: MenuItemMeta[];
+  /** Items inserted below an inherited submenu selected by its stable-id path. */
+  insertions?: MenuPathInsertionMeta[];
   itemOverrides?: MenuItemOverrideMeta[];
   layer?: LayerType;
   model?: string;
@@ -411,13 +414,49 @@ export interface ReportElementMeta {
   style?: ReportElementStyle;
 }
 
+/** pageHeader/pageFooter remain accepted for v0.1.4 report compatibility. */
 export type ReportBandKind = 'pageHeader' | 'header' | 'detail' | 'footer' | 'pageFooter';
+export type ReportBandDisplay = 'firstPage' | 'everyPage' | 'lastPage';
+
+export interface ReportTablixCellStyle {
+  fontSize?: number;
+  bold?: boolean;
+  italic?: boolean;
+  align?: 'left' | 'center' | 'right';
+  color?: string;
+  backgroundColor?: string;
+  padding?: number;
+  fontFamily?: string;
+}
+
+export interface ReportTablixColumnMeta {
+  field: string;
+  label?: string;
+  /** Width in points. Omit to share the remaining width. */
+  width?: number;
+  align?: 'left' | 'center' | 'right';
+  format?: string;
+}
+
+export interface ReportTablixMeta {
+  columns: ReportTablixColumnMeta[];
+  headerHeight?: number;
+  rowHeight?: number;
+  headerStyle?: ReportTablixCellStyle;
+  rowStyle?: ReportTablixCellStyle;
+  border?: { width?: number; color?: string };
+}
 
 export interface ReportBandMeta {
   kind: ReportBandKind;
+  /** Defaults to firstPage for header and lastPage for footer. */
+  displayOn?: ReportBandDisplay;
+  /** Freeform is the legacy/default canvas layout. */
+  layout?: 'freeform' | 'tablix';
   /** Band height in points. */
   height: number;
   elements: ReportElementMeta[];
+  tablix?: ReportTablixMeta;
 }
 
 export interface ReportLineSourceMeta {
@@ -457,6 +496,12 @@ export interface ReportParameterMeta {
   operator?: 'eq' | 'from' | 'to';
   label?: string;
   required?: boolean;
+}
+
+export interface MenuPathInsertionMeta {
+  /** Stable menu item ids from the root to the destination submenu. */
+  path: string[];
+  items: MenuItemMeta[];
 }
 
 export interface MenuItemOverrideMeta extends PresentationOverrideMeta {

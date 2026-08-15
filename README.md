@@ -4,7 +4,51 @@
 
 EmuFramework is a metadata-driven TypeScript framework for building business applications. It includes a browser-based Designer, generated forms and lists, role-based security, SQLite storage, reporting, import/export, and Docker deployment.
 
-Current framework version: **0.1.4.0 (Beta)**
+Current framework version: **0.1.5.0 (Beta)**
+
+## v0.1.5.0 responsive tables and paginated reports
+
+- Uses the same horizontally scrollable business tables on desktop and mobile, including visible remote pagination for record lists.
+- Lets Menu Extensions insert delta-only items into inherited submenus through stable-ID paths.
+- Adds Tablix Detail and Line layouts with repeated column headers, field formatting, styles, and native PDF pagination.
+- Unifies report Header and Footer bands with first-page, every-page, and last-page display policies while preserving v0.1.4.0 report metadata.
+
+Menu Extensions may keep using root-level `items` and may also target inherited submenus:
+
+```json
+{
+  "kind": "menuExtension",
+  "name": "SALES_ClientCustom_SALES_MainMenu_Extension",
+  "menu": "SALES_MainMenu",
+  "items": [{ "id": "custom-root", "label": "Custom root", "target": { "type": "form", "name": "SALES_CustomForm" } }],
+  "insertions": [{
+    "path": ["sales", "orders"],
+    "items": [{ "id": "custom-order", "label": "Custom order", "target": { "type": "form", "name": "SALES_CustomOrderForm" } }]
+  }]
+}
+```
+
+Report Detail and Line bands can use a Tablix; `headerRows: 1` is applied by the PDF renderer so the header repeats when the table crosses a page:
+
+```json
+{
+  "kind": "detail",
+  "layout": "tablix",
+  "height": 18,
+  "elements": [],
+  "tablix": {
+    "columns": [
+      { "field": "accountNum", "label": "Account", "width": 100 },
+      { "field": "amount", "label": "Amount", "width": 90, "align": "right", "format": "#,##0.00" }
+    ],
+    "headerStyle": { "bold": true, "backgroundColor": "#eeeeee", "padding": 4 },
+    "rowStyle": { "padding": 4 },
+    "border": { "width": 0.5, "color": "#999999" }
+  }
+}
+```
+
+Use `displayOn` on unified Header/Footer bands, for example `{ "kind": "header", "displayOn": "everyPage", ... }`. Legacy `pageHeader` and `pageFooter` metadata remains accepted.
 
 ## v0.1.4.0 layered customization and business UI
 

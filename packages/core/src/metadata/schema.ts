@@ -162,6 +162,22 @@ const reportStyleSchema = Type.Object({
   align: Type.Optional(Type.Union([Type.Literal('left'), Type.Literal('center'), Type.Literal('right')])),
   color: Type.Optional(Type.String()), borderWidth: Type.Optional(Type.Number()),
 }, { additionalProperties: false });
+const reportTablixCellStyleSchema = Type.Object({
+  fontSize: Type.Optional(Type.Number({ minimum: 1 })), bold: Type.Optional(Type.Boolean()), italic: Type.Optional(Type.Boolean()),
+  fontFamily: Type.Optional(Type.String({ minLength: 1 })),
+  align: Type.Optional(Type.Union([Type.Literal('left'), Type.Literal('center'), Type.Literal('right')])),
+  color: Type.Optional(Type.String()), backgroundColor: Type.Optional(Type.String()), padding: Type.Optional(Type.Number({ minimum: 0 })),
+}, { additionalProperties: false });
+const reportTablixSchema = Type.Object({
+  columns: Type.Array(Type.Object({
+    field: Type.String({ minLength: 1 }), label: Type.Optional(Type.String()), width: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+    align: Type.Optional(Type.Union([Type.Literal('left'), Type.Literal('center'), Type.Literal('right')])),
+    format: Type.Optional(Type.String()),
+  }, { additionalProperties: false }), { minItems: 1 }),
+  headerHeight: Type.Optional(Type.Number({ exclusiveMinimum: 0 })), rowHeight: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+  headerStyle: Type.Optional(reportTablixCellStyleSchema), rowStyle: Type.Optional(reportTablixCellStyleSchema),
+  border: Type.Optional(Type.Object({ width: Type.Optional(Type.Number({ minimum: 0 })), color: Type.Optional(Type.String()) }, { additionalProperties: false })),
+}, { additionalProperties: false });
 const reportElementSchema = Type.Object({
   id: Type.String(), type: Type.Union(['text', 'field', 'image', 'line', 'rect'].map((v) => Type.Literal(v))),
   x: Type.Number(), y: Type.Number(), width: Type.Number(), height: Type.Number(),
@@ -170,7 +186,10 @@ const reportElementSchema = Type.Object({
 }, { additionalProperties: false });
 const reportBandSchema = Type.Object({
   kind: Type.Union(['pageHeader', 'header', 'detail', 'footer', 'pageFooter'].map((v) => Type.Literal(v))),
+  displayOn: Type.Optional(Type.Union(['firstPage', 'everyPage', 'lastPage'].map((v) => Type.Literal(v)))),
+  layout: Type.Optional(Type.Union([Type.Literal('freeform'), Type.Literal('tablix')])),
   height: Type.Number({ minimum: 0 }), elements: Type.Array(reportElementSchema),
+  tablix: Type.Optional(reportTablixSchema),
 }, { additionalProperties: false });
 const reportParameterSchema = Type.Object({
   field: Type.String({ minLength: 1 }),
@@ -189,7 +208,7 @@ const artifactSchemas = [
   Type.Object({ kind: Type.Literal('role'), ...common, duties: Type.Optional(Type.Array(Type.String())), privileges: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('tableExtension'), ...common, table: Type.String(), fields: Type.Optional(Type.Array(fieldSchema)), indexes: Type.Optional(Type.Array(indexSchema)), fieldOverrides: Type.Optional(Type.Array(fieldOverrideSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('formExtension'), ...common, form: Type.String(), listFields: Type.Optional(Type.Array(Type.String())), filterFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), charts: Type.Optional(Type.Array(formChartSchema)), actions: Type.Optional(Type.Array(formActionSchema)), lines: Type.Optional(Type.Array(lineGridSchema)), elementOverrides: Type.Optional(Type.Array(presentationOverrideSchema)) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal('menuExtension'), ...common, menu: Type.String(), items: Type.Array(menuItemSchema), itemOverrides: Type.Optional(Type.Array(menuItemOverrideSchema)) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('menuExtension'), ...common, menu: Type.String(), items: Type.Optional(Type.Array(menuItemSchema)), insertions: Type.Optional(Type.Array(Type.Object({ path: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), items: Type.Array(menuItemSchema, { minItems: 1 }) }, { additionalProperties: false }))), itemOverrides: Type.Optional(Type.Array(menuItemOverrideSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('enumExtension'), ...common, enum: Type.String(), values: Type.Array(Type.Object({ name, value: Type.Integer(), label: Type.Optional(Type.String()) })), valueOverrides: Type.Optional(Type.Array(Type.Object({ name: Type.String({ minLength: 1 }), label: Type.String() }, { additionalProperties: false }))) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('privilegeExtension'), ...common, privilege: Type.String(), tablePermissions: Type.Optional(Type.Array(tablePermissionSchema)), forms: Type.Optional(Type.Array(Type.String())), functions: Type.Optional(Type.Array(Type.String())), reports: Type.Optional(Type.Array(Type.String())), views: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('dutyExtension'), ...common, duty: Type.String(), privileges: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),

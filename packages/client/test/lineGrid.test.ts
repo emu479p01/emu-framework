@@ -24,7 +24,7 @@ async function confirm(label: string) {
   await flushPromises();
 }
 
-describe('LineGrid responsive cards', () => {
+describe('LineGrid responsive table', () => {
   let pinia: ReturnType<typeof createPinia>;
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -38,7 +38,7 @@ describe('LineGrid responsive cards', () => {
     } as Metadata;
   });
 
-  it('renders readable mobile cards and keeps edit/create/delete actions available', async () => {
+  it('renders one responsive table and keeps edit/create/delete actions available', async () => {
     vi.spyOn(api, 'list').mockResolvedValue({ data: rows, total: 1 });
     const patch = vi.spyOn(api, 'patch').mockResolvedValue({});
     const post = vi.spyOn(api, 'post').mockResolvedValue({});
@@ -59,8 +59,8 @@ describe('LineGrid responsive cards', () => {
     });
     await flushPromises();
 
-    expect(wrapper.get('.line-mobile-card').text()).toContain('โฟมล้างหน้า');
-    expect(wrapper.get('.line-mobile-card').text()).toContain('Quantity');
+    expect(wrapper.get('.line-table').text()).toContain('โฟมล้างหน้า');
+    expect(wrapper.get('.line-table').text()).toContain('Quantity');
 
     await button(wrapper, 'Edit').trigger('click');
     expect(button(wrapper, 'Save').exists()).toBe(true);
@@ -74,7 +74,7 @@ describe('LineGrid responsive cards', () => {
     await confirm('Add');
     expect(post).toHaveBeenCalledWith('/api/data/TEST_Line', expect.objectContaining({ headerId: 1 }));
 
-    await button(wrapper, 'Delete').trigger('click');
+    await button(wrapper, 'Del').trigger('click');
     await confirm('Delete');
     expect(remove).toHaveBeenCalledWith('/api/data/TEST_Line/7');
   });
