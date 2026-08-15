@@ -362,6 +362,26 @@ describe('MetadataRegistry — reports', () => {
     expect(() => registry.registerWebArtifacts('testapp', [bad])).toThrow(/has no refField 'nope'/);
   });
 
+  it('normalizes legacy report page bands and validates tablix fields', () => {
+    const registry = testRegistry();
+    const report = goodReport();
+    report.bands = [
+      { kind: 'pageHeader', height: 20, elements: [] },
+      { kind: 'detail', layout: 'tablix', height: 18, elements: [], tablix: { columns: [{ field: 'accountNum', label: 'Account' }] } },
+      { kind: 'pageFooter', height: 20, elements: [] },
+    ];
+    registry.registerWebArtifacts('testapp', [report]);
+    expect(registry.getReport(report.name).bands).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'header', displayOn: 'everyPage' }),
+      expect.objectContaining({ kind: 'footer', displayOn: 'everyPage' }),
+    ]));
+
+    const bad = goodReport();
+    bad.name = 'TESTAPP_BadTablixReport';
+    bad.bands = [{ kind: 'detail', layout: 'tablix', height: 18, elements: [], tablix: { columns: [{ field: 'missing' }] } }];
+    expect(() => registry.registerWebArtifacts('testapp', [bad])).toThrow(/unknown tablix field 'missing'/);
+  });
+
   it('validates reusable picker actions and dynamic record filters', () => {
     const registry = testRegistry();
     registry.registerWebArtifacts('testapp', [goodReport(), {

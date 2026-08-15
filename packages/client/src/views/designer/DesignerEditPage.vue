@@ -487,6 +487,30 @@ const selectedForms = computed({
   get: () => (artifact.value.forms ?? []) as string[],
   set: (v: string[]) => { artifact.value.forms = v; },
 });
+interface EditableMenuInsertion { path: string[]; items: EditableMenuItem[] }
+const menuInsertions = computed(() => {
+  if (!artifact.value.insertions) artifact.value.insertions = [];
+  return artifact.value.insertions as EditableMenuInsertion[];
+});
+const menuPathOptions = computed(() => {
+  const options: { label: string; value: string }[] = [];
+  const walk = (items: EditableMenuItem[], labels: string[], ids: string[]) => {
+    for (const item of items) {
+      if (!item.id) continue;
+      const nextLabels = [...labels, item.label || item.id];
+      const nextIds = [...ids, item.id];
+      if (item.items || item.target?.type === 'group') options.push({ label: `${nextLabels.join(' / ')} · ${nextIds.join(' > ')}`, value: JSON.stringify(nextIds) });
+      if (item.items) walk(item.items, nextLabels, nextIds);
+    }
+  };
+  const effective = customizationChain.value?.effective.items as EditableMenuItem[] | undefined;
+  walk(effective ?? [], [], []);
+  return options;
+});
+function insertionPathValue(insertion: EditableMenuInsertion) { return JSON.stringify(insertion.path); }
+function setInsertionPath(insertion: EditableMenuInsertion, value: string) { insertion.path = JSON.parse(value) as string[]; }
+function addMenuInsertion() { menuInsertions.value.push({ path: [], items: [] }); }
+function removeMenuInsertion(index: number) { menuInsertions.value.splice(index, 1); }
 const selectedViews = computed({
   get: () => (artifact.value.views ?? []) as string[],
   set: (value: string[]) => { artifact.value.views = value; },
@@ -834,6 +858,19 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
                 Choose Group, Form, Function, or Report for each item. Use "+ Sub-item" to build nested menus.
               </p>
               <MenuItemsEditor :items="menuItems" :form-options="formOptions" :report-options="reportOptions" :function-options="functionOptions" />
+            </n-card>
+            <n-card v-if="kind === 'menuExtension'" size="small" title="Insert into inherited submenu">
+              <n-alert type="info" style="margin-bottom:12px">Choose a readable menu path; the extension stores the full stable-ID path.</n-alert>
+              <n-space vertical>
+                <n-card v-for="(insertion, ii) in menuInsertions" :key="ii" size="small">
+                  <n-space align="center" style="margin-bottom:8px">
+                    <n-select :value="insertionPathValue(insertion)" :options="menuPathOptions" filterable placeholder="Inherited submenu path" style="min-width:420px" @update:value="(value) => setInsertionPath(insertion, value)" />
+                    <n-button size="small" quaternary type="error" @click="removeMenuInsertion(ii)">Remove insertion</n-button>
+                  </n-space>
+                  <MenuItemsEditor :items="insertion.items" :form-options="formOptions" :report-options="reportOptions" :function-options="functionOptions" />
+                </n-card>
+                <n-button size="small" @click="addMenuInsertion">+ Insert at path</n-button>
+              </n-space>
             </n-card>
 
             <!-- Security objects -->

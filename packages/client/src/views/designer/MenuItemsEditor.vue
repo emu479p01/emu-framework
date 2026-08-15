@@ -4,6 +4,7 @@ import { ICON_OPTIONS } from '../../navigation';
 import type { IconName } from '@emu/core';
 
 export interface EditableMenuItem {
+  id?: string;
   label?: string;
   icon?: IconName;
   form?: string;
@@ -22,13 +23,15 @@ const props = defineProps<{
 }>();
 
 function addItem() {
-  props.items.push({ label: '', icon: 'grid', target: { type: 'group' } });
+  props.items.push({ id: newItemId(), label: '', icon: 'grid', target: { type: 'group' } });
 }
 
 function addSubItem(item: EditableMenuItem) {
   if (!item.items) item.items = [];
-  item.items.push({ label: '', icon: 'grid', target: { type: 'group' } });
+  item.items.push({ id: newItemId(), label: '', icon: 'grid', target: { type: 'group' } });
 }
+function newItemId() { return `menu-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; }
+async function copyId(id: string | undefined) { if (id && navigator.clipboard) await navigator.clipboard.writeText(id); }
 const TARGET_TYPES = [
   { label: 'Group / submenu', value: 'group' }, { label: 'Form', value: 'form' },
   { label: 'Function', value: 'function' }, { label: 'Report', value: 'report' },
@@ -57,6 +60,7 @@ function removeItem(i: number) {
     <n-space vertical :size="8">
       <n-card v-for="(item, i) in items" :key="i" size="small" class="menu-item-card">
         <div class="menu-item-grid">
+          <n-form-item label="Stable ID" required><n-input v-model:value="item.id" placeholder="Stable extension target"><template #suffix><n-button text size="tiny" @click="copyId(item.id)">Copy</n-button></template></n-input></n-form-item>
           <n-form-item label="Label" required><n-input v-model:value="item.label" placeholder="Menu label" /></n-form-item>
           <n-form-item label="Icon"><n-select v-model:value="item.icon" :options="ICON_OPTIONS" clearable placeholder="Icon" /></n-form-item>
           <n-form-item label="Target type" required><n-select :value="itemType(item)" :options="TARGET_TYPES" @update:value="(v) => setType(item, v)" /></n-form-item>
@@ -81,4 +85,4 @@ function removeItem(i: number) {
   </div>
 </template>
 
-<style scoped>.menu-item-card{border:1px solid var(--emu-border)}.menu-item-grid{display:grid;grid-template-columns:1fr 150px 180px minmax(220px,1fr);gap:12px}@media(max-width:900px){.menu-item-grid{grid-template-columns:1fr 1fr}}@media(max-width:560px){.menu-item-grid{grid-template-columns:1fr}}</style>
+<style scoped>.menu-item-card{border:1px solid var(--emu-border)}.menu-item-grid{display:grid;grid-template-columns:minmax(190px,1fr) minmax(180px,1fr) 150px 180px minmax(220px,1fr);gap:12px}@media(max-width:1100px){.menu-item-grid{grid-template-columns:1fr 1fr}}@media(max-width:560px){.menu-item-grid{grid-template-columns:1fr}}</style>

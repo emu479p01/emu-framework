@@ -113,6 +113,56 @@ describe('report PDF rendering', () => {
     ]);
   });
 
+  it('builds a paginating tablix with repeated headers, styles and formats', () => {
+    const ctx = kernel.context();
+    const report = {
+      ...custListReport,
+      bands: [
+        { kind: 'header', displayOn: 'everyPage', height: 24, elements: [{ id: 'h', type: 'text', x: 0, y: 0, width: 100, height: 16, text: 'Every' }] },
+        { kind: 'detail', layout: 'tablix', height: 18, elements: [], tablix: {
+          columns: [{ field: 'accountNum', label: 'Account', width: 100 }, { field: 'name', label: 'Customer', width: 180 }],
+          headerStyle: { bold: true, backgroundColor: '#dddddd', padding: 3 }, rowStyle: { padding: 2 }, border: { width: 1, color: '#333333' },
+        } },
+        { kind: 'footer', displayOn: 'lastPage', height: 20, elements: [{ id: 'f', type: 'text', x: 0, y: 0, width: 100, height: 16, text: 'Last' }] },
+      ],
+    } as any;
+    const rows = Array.from({ length: 60 }, (_, index) => ({ accountNum: `C${index + 1}`, name: index === 0 ? 'ลูกค้าไทย' : `Customer ${index + 1}` }));
+    const doc = buildDocDefinition(kernel, ctx, report, rows) as any;
+    expect(doc.content[0].table.headerRows).toBe(1);
+    expect(doc.content[0].table.body).toHaveLength(61);
+    expect(doc.content[0].table.body[0][0]).toMatchObject({ text: 'Account', bold: true, fillColor: '#dddddd' });
+    expect(doc.content[0].table.body[1][0].text).toBe('C1');
+    expect(doc.header(1, 2).stack[0].text).toBe('Every');
+    expect(doc.header(2, 2).stack[0].text).toBe('Every');
+    expect(doc.footer(1, 2).stack).toHaveLength(0);
+    expect(doc.footer(2, 2).stack[0].text).toBe('Last');
+  });
+
+  it('formats supported report number and date tokens', () => {
+    const table = kernel.registry.getTable('ERP_SalesTable');
+    const ctx = kernel.context();
+    expect(formatReportFieldValue(kernel, ctx, table, { totalAmount: 1234.5 }, 'totalAmount', '#,##0.00')).toBe('1,234.50');
+    expect(formatReportFieldValue(kernel, ctx, table, { orderDate: '2026-08-15T13:45:00Z' }, 'orderDate', 'dd/MM/yyyy HH:mm')).toBe('15/08/2026 13:45');
+  });
+
+  it('renders a line-source detail as a tablix for each parent record', () => {
+    const ctx = kernel.context();
+    const item = ctx.newRecord('ERP_InventItem').setMany({ itemId: 'REPORT-ITEM', itemName: 'Report item', salesPrice: 12, onHand: 10 });
+    item.insert();
+    const sales = ctx.newRecord('ERP_SalesTable').setMany({ salesId: 'REPORT-SO', custId: customerId, orderDate: '2026-08-15' });
+    sales.insert();
+    ctx.newRecord('ERP_SalesLine').setMany({ salesId: sales.id, itemId: item.id, qty: 2, salesPrice: 12 }).insert();
+    const report = {
+      kind: 'report', name: 'ERP_SalesLineTablix', dataSource: 'ERP_SalesTable', bands: [],
+      lineSources: [{ table: 'ERP_SalesLine', refField: 'salesId', bands: [{ kind: 'detail', layout: 'tablix', height: 18, elements: [], tablix: { columns: [{ field: 'qty', format: '#,##0.00' }, { field: 'salesPrice', format: '#,##0.00' }] } }] }],
+    } as any;
+    const doc = buildDocDefinition(kernel, ctx, report, [sales.toObject()]) as any;
+    const lineTable = doc.content.find((itemNode: any) => itemNode.table);
+    expect(lineTable.table.headerRows).toBe(1);
+    expect(lineTable.table.body).toHaveLength(2);
+    expect(lineTable.table.body[1][0].text).toBe('2.00');
+  });
+
   it('masks the stored Google Fonts API key and lists the offline default font', async () => {
     const saved = await app.inject({ method: 'PUT', url: '/api/system/fonts/settings', headers: auth(), payload: { apiKey: 'example-secret-1234' } });
     expect(saved.statusCode).toBe(200);

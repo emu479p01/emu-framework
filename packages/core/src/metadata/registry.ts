@@ -408,7 +408,28 @@ export class MetadataRegistry {
     } else if (e.kind === 'menuExtension') {
       const base = this.menus.get(e.menu);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown menu '${e.menu}'`);
-      base.items.push(...e.items);
+      appendMenuItems(base.items, e.items ?? [], e.name, '<root>');
+      for (const insertion of e.insertions ?? []) {
+        let level = base.items;
+        let parent: MenuItemMeta | undefined;
+        const walked: string[] = [];
+        for (const segment of insertion.path) {
+          walked.push(segment);
+          const matches = level.filter((candidate) => candidate.id === segment);
+          if (matches.length !== 1) {
+            const reason = matches.length === 0 ? 'was not found' : 'is ambiguous';
+            throw new MetadataError(`Extension '${e.name}': menu path '${walked.join(' / ')}' ${reason}`);
+          }
+          parent = matches[0];
+          if (!parent.items && parent.target?.type !== 'group') {
+            throw new MetadataError(`Extension '${e.name}': menu path '${walked.join(' / ')}' targets a leaf item`);
+          }
+          parent.items ??= [];
+          level = parent.items;
+        }
+        if (!parent) throw new MetadataError(`Extension '${e.name}': menu insertion path cannot be empty`);
+        appendMenuItems(parent.items!, insertion.items, e.name, insertion.path.join(' / '));
+      }
       for (const override of e.itemOverrides ?? []) {
         const item = findMenuItem(base.items, override.targetId);
         if (!item) throw new MetadataError(`Extension '${e.name}': unknown menu item '${override.targetId}'`);
@@ -743,6 +764,27 @@ export class MetadataRegistry {
 
   private validateReportBands(bands: ReportBandMeta[], fieldNames: Set<string>, context: string): void {
     for (const band of bands) {
+      const tablix = band.tablix;
+      if (band.kind === 'detail' && band.displayOn) {
+        throw new MetadataError(`${context}: displayOn is only supported on header and footer bands`);
+      }
+      if ((band.layout === 'tablix' || tablix) && band.kind !== 'detail') {
+        throw new MetadataError(`${context}: tablix is only supported in detail bands`);
+      }
+      if (band.layout === 'freeform' && tablix) {
+        throw new MetadataError(`${context}: freeform detail band cannot contain tablix settings`);
+      }
+      if (band.layout === 'tablix' && !tablix) {
+        throw new MetadataError(`${context}: tablix detail band requires tablix settings`);
+      }
+      if (tablix && band.elements.length > 0) {
+        throw new MetadataError(`${context}: tablix detail band cannot contain freeform elements`);
+      }
+      for (const column of tablix?.columns ?? []) {
+        if (!fieldNames.has(column.field)) {
+          throw new MetadataError(`${context}: unknown tablix field '${column.field}' in ${band.kind} band`);
+        }
+      }
       for (const el of band.elements) {
         if (el.type === 'field' && el.field && !fieldNames.has(el.field)) {
           throw new MetadataError(`${context}: unknown field '${el.field}' in ${band.kind} band`);
@@ -1090,6 +1132,17 @@ function sortMenuItems(items: MenuItemMeta[]): void {
   for (const item of items) if (item.items) sortMenuItems(item.items);
 }
 
+function appendMenuItems(target: MenuItemMeta[], additions: MenuItemMeta[], extensionName: string, path: string): void {
+  const existing = new Set(target.map((item) => item.id).filter(Boolean));
+  for (const item of additions) {
+    if (item.id && existing.has(item.id)) {
+      throw new MetadataError(`Extension '${extensionName}': duplicate menu item id '${item.id}' at '${path}'`);
+    }
+    if (item.id) existing.add(item.id);
+  }
+  target.push(...additions);
+}
+
 function stablePart(value: string): string {
   return value.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'item';
 }
@@ -1126,7 +1179,24 @@ export function normalizeLegacyArtifact<T extends AnyMeta>(artifact: T): T {
       assignStableIds(items, prefix, (item) => item.target?.name || item.form || item.route || item.action || item.label);
       for (const item of items) if (item.items) walk(item.items, `${prefix}-${stablePart(item.id)}`);
     };
-    walk(meta.items ?? [], 'menu');
+    const rootPrefix = meta.kind === 'menuExtension' ? `menu-${stablePart(meta.name)}` : 'menu';
+    walk(meta.items ?? [], rootPrefix);
+    for (const [index, insertion] of (meta.insertions ?? []).entries()) {
+      walk(insertion.items ?? [], `${rootPrefix}-insertion-${index + 1}`);
+    }
+  }
+  if (meta.kind === 'report') {
+    const normalizeBands = (bands: any[]) => {
+      for (const band of bands ?? []) {
+        if (band.kind === 'pageHeader') { band.kind = 'header'; band.displayOn = 'everyPage'; }
+        else if (band.kind === 'pageFooter') { band.kind = 'footer'; band.displayOn = 'everyPage'; }
+        else if (band.kind === 'header' && !band.displayOn) band.displayOn = 'firstPage';
+        else if (band.kind === 'footer' && !band.displayOn) band.displayOn = 'lastPage';
+        if (!band.layout) band.layout = band.tablix ? 'tablix' : 'freeform';
+      }
+    };
+    normalizeBands(meta.bands ?? []);
+    for (const line of meta.lineSources ?? []) normalizeBands(line.bands ?? []);
   }
   return meta as T;
 }
