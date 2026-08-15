@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import DatabaseCtor from 'better-sqlite3';
-import { MetadataRegistry, MetadataError, syncSchema, validateMetadataArtifact, type TableMeta, type FormMeta, type ReportMeta } from '../src/index.js';
+import { MetadataRegistry, MetadataError, normalizeLegacyArtifact, syncSchema, validateMetadataArtifact, type MenuMeta, type TableMeta, type FormMeta, type ReportMeta } from '../src/index.js';
 import { TESTAPP_CustTable, salesStatusEnum, TESTAPP_SalesTable, testRegistry, testManifest } from './helpers.js';
 
 describe('MetadataRegistry', () => {
@@ -13,6 +13,32 @@ describe('MetadataRegistry', () => {
     expect(() => registry.registerApp(testManifest('a'),[{
       kind: 'menu', name: 'A_Menu', items: [{ label: 'Nested', items: [{ label: 'Bad', icon: 'unknown' as any }] }],
     }])).toThrow(/unknown icon/);
+  });
+
+  it('accepts v0.1.6 menu visibility, parent anchors and target overrides', () => {
+    expect(validateMetadataArtifact({
+      kind: 'menu', name: 'A_Menu', items: [{ id: 'root', visible: false, target: { type: 'group' } }],
+    })).toEqual([]);
+    expect(validateMetadataArtifact({
+      kind: 'menuExtension', name: 'A_Custom_A_Menu_Extension', menu: 'A_Menu',
+      items: [{ id: 'child', parentId: 'root', visible: true, target: { type: 'form', name: 'A_Form' } }],
+      itemOverrides: [{ targetId: 'root', visible: true, target: { type: 'group' } }],
+    })).toEqual([]);
+  });
+
+  it('generates deterministic non-colliding IDs for legacy menu items', () => {
+    const legacy = {
+      kind: 'menu', name: 'A_Menu', items: [
+        { label: 'Same', target: { type: 'group' }, items: [{ label: 'Leaf', form: 'A_Form' }] },
+        { label: 'Same', target: { type: 'group' } },
+      ],
+    } as MenuMeta;
+    const first = normalizeLegacyArtifact(legacy);
+    const second = normalizeLegacyArtifact(legacy);
+    expect(first.items.map((item) => item.id)).toEqual(['menu-same', 'menu-same-2']);
+    expect(first.items[0].items?.[0].id).toBe('menu-menu-same-a-form');
+    expect(second).toEqual(first);
+    expect(legacy.items.every((item) => item.id === undefined)).toBe(true);
   });
 
   it('loads and validates a well-formed app', () => {

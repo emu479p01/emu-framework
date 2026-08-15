@@ -4,7 +4,27 @@
 
 EmuFramework is a metadata-driven TypeScript framework for building business applications. It includes a browser-based Designer, generated forms and lists, role-based security, SQLite storage, reporting, import/export, and Docker deployment.
 
-Current framework version: **0.1.5.0 (Beta)**
+Current framework version: **0.1.6.0 (Beta)**
+
+## v0.1.6.0 effective Menu Extension editor
+
+- Shows inherited and current-layer menu items in one editable Design tree while saving only the current layer delta.
+- Supports `visible`, target overrides, ordering, reset-to-inherited, and `parentId` anchors for extension-added items.
+- Keeps Stable IDs in metadata and backups but removes them from the visual designer.
+- Applies artifact visibility before privilege filtering without using visibility to grant authorization.
+- Uses a responsive nested editor that wraps controls instead of overflowing its card.
+
+`hidden` and stable-ID-path `insertions` remain readable for backward compatibility. New metadata should prefer `visible` and `parentId`:
+
+```json
+{
+  "kind": "menuExtension",
+  "name": "SALES_ClientCustom_SALES_MainMenu_Extension",
+  "menu": "SALES_MainMenu",
+  "items": [{ "id": "custom-order", "parentId": "orders", "label": "Custom order", "visible": true, "target": { "type": "form", "name": "SALES_CustomOrderForm" } }],
+  "itemOverrides": [{ "targetId": "sales", "label": "Sales workspace", "visible": true, "order": 10 }]
+}
+```
 
 ## v0.1.5.0 responsive tables and paginated reports
 

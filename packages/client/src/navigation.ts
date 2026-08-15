@@ -59,7 +59,7 @@ export function itemToOption(item: MenuItemMeta, parentKey: string, appName: str
   const icon = renderIcon(iconForItem(item), item.label);
   if (item.items?.length) {
     const label = item.label ?? '';
-    return { label: () => h('span', { title: label }, label), key, icon, children: item.items.filter((child) => !child.hidden).map((child) => itemToOption(child, key, appName, onNavigate)) };
+    return { label: () => h('span', { title: label }, label), key, icon, children: item.items.filter(isMenuItemVisible).map((child) => itemToOption(child, key, appName, onNavigate)) };
   }
   const targetType = item.target?.type ?? (item.form ? 'form' : item.action ? 'function' : undefined);
   const targetName = typedName || item.form || item.action || '';
@@ -80,12 +80,12 @@ export function buildNavigationOptions(input: {
   const options: NavMenuOption[] = [];
   options.push(...input.apps.map((app) => ({
     label: () => h('span', { title: app.label }, app.label), key: `app-${app.name}`, icon: renderAppIcon(app),
-    children: app.menus.flatMap((menu) => menu.items.filter((item) => !item.hidden).map((item) => itemToOption(item, `app-${app.name}`, app.name, input.onNavigate))),
+    children: app.menus.flatMap((menu) => menu.items.filter(isMenuItemVisible).map((item) => itemToOption(item, `app-${app.name}`, app.name, input.onNavigate))),
   })));
   if (input.frameworkMenus.length) {
     options.push({
       label: () => h('span', { title: input.settingsLabel }, input.settingsLabel), key: 'framework-settings', icon: renderIcon('settings', input.settingsLabel),
-      children: input.frameworkMenus.flatMap((menu) => menu.items.filter((item) => !item.hidden).map((item) => itemToOption(item, `fw-${menu.name}`, 'system', input.onNavigate))),
+      children: input.frameworkMenus.flatMap((menu) => menu.items.filter(isMenuItemVisible).map((item) => itemToOption(item, `fw-${menu.name}`, 'system', input.onNavigate))),
     });
   }
   return options;
@@ -98,6 +98,8 @@ export function findActiveKey(options: NavMenuOption[], formName: string, path: 
     if (found) return found;
   }
 }
+
+const isMenuItemVisible = (item: MenuItemMeta): boolean => item.visible ?? item.hidden !== true;
 
 export function findNavigationKeyPath(options: NavMenuOption[], key: string, path: string[] = []): string[] | undefined {
   for (const option of options) {

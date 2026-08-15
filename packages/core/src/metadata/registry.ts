@@ -408,7 +408,17 @@ export class MetadataRegistry {
     } else if (e.kind === 'menuExtension') {
       const base = this.menus.get(e.menu);
       if (!base) throw new MetadataError(`Extension '${e.name}': unknown menu '${e.menu}'`);
-      appendMenuItems(base.items, e.items ?? [], e.name, '<root>');
+      const rootItems = (e.items ?? []).filter((item: MenuItemMeta) => !item.parentId);
+      appendMenuItems(base.items, rootItems, e.name, '<root>');
+      for (const item of (e.items ?? []).filter((candidate: MenuItemMeta) => candidate.parentId)) {
+        const parent = findMenuItem(base.items, item.parentId);
+        if (!parent) throw new MetadataError(`Extension '${e.name}': unknown menu parent '${item.parentId}'`);
+        if (!parent.items && parent.target?.type !== 'group') {
+          throw new MetadataError(`Extension '${e.name}': menu parent '${item.parentId}' targets a leaf item`);
+        }
+        parent.items ??= [];
+        appendMenuItems(parent.items, [item], e.name, item.parentId);
+      }
       for (const insertion of e.insertions ?? []) {
         let level = base.items;
         let parent: MenuItemMeta | undefined;
@@ -433,7 +443,8 @@ export class MetadataRegistry {
       for (const override of e.itemOverrides ?? []) {
         const item = findMenuItem(base.items, override.targetId);
         if (!item) throw new MetadataError(`Extension '${e.name}': unknown menu item '${override.targetId}'`);
-        for (const key of ['label', 'icon', 'hidden', 'order'] as const) if (override[key] !== undefined) (item as any)[key] = override[key];
+        for (const key of ['label', 'icon', 'visible', 'hidden', 'order'] as const) if (override[key] !== undefined) (item as any)[key] = override[key];
+        if (override.target !== undefined) item.target = structuredClone(override.target);
       }
       sortMenuItems(base.items);
     } else if (e.kind === 'enumExtension') {
@@ -914,6 +925,9 @@ export class MetadataRegistry {
       }
       if (item.target?.type === 'report' && !this.reports.has(item.target.name)) {
         throw new MetadataError(`${context}: unknown target report '${item.target.name}'`);
+      }
+      if (item.target?.type === 'function' && !this.functions.has(item.target.name)) {
+        throw new MetadataError(`${context}: unknown target function '${item.target.name}'`);
       }
       if (item.items) {
         this.validateMenuItems(item.items, context);

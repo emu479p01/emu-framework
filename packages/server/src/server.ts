@@ -19,6 +19,7 @@ import {
   type DataContext,
   type FieldValue,
   type MenuItemMeta,
+  isMenuItemVisible,
   type SecurityPolicy,
 } from '@emu/core';
 import { registerSystemApp, registerSystemHooks } from './systemApp.js';
@@ -661,6 +662,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       if (!items) return items;
       return items
         .map((item) => {
+          if (!isMenuItemVisible(item)) return null;
           if (item.items) {
             const children = filterItems(item.items, allowRoutes);
             // keep container if it has visible children or a visible form

@@ -57,4 +57,21 @@ describe('sidebar navigation', () => {
     expect(iconForItem({ label: 'Orders', form: 'SALES_OrderForm' })).toBe('table');
     expect(iconForItem({ label: 'Section', items: [] })).toBe('file');
   });
+
+  it('uses visible before legacy hidden and removes hidden descendants', () => {
+    const menu: MenuMeta = { kind: 'menu', name: 'Visibility', items: [
+      { label: 'Legacy hidden', hidden: true, form: 'HiddenForm' },
+      { label: 'Explicitly restored', hidden: true, visible: true, form: 'RestoredForm' },
+      { label: 'Explicitly hidden', visible: false, form: 'InvisibleForm' },
+      { label: 'Group', items: [
+        { label: 'Visible child', form: 'VisibleForm' },
+        { label: 'Hidden child', visible: false, form: 'HiddenChildForm' },
+      ] },
+    ] };
+    const options = buildNavigationOptions({ isFrameworkUser: false, settingsLabel: 'Settings', frameworkMenus: [], apps: [{ name: 'app', label: 'App', menus: [menu] }], onNavigate: vi.fn() });
+    const keys = allOptions(options).map((option) => String(option.key));
+    expect(keys.some((key) => key.includes('RestoredForm'))).toBe(true);
+    expect(keys.some((key) => key.includes('VisibleForm'))).toBe(true);
+    expect(keys.some((key) => key.includes('HiddenForm') || key.includes('InvisibleForm') || key.includes('HiddenChildForm'))).toBe(false);
+  });
 });

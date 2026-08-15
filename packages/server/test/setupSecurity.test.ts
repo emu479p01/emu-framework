@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import type { Kernel } from '@emu/core';
+import type { AnyMeta, Kernel } from '@emu/core';
 import { buildServer } from '../src/server.js';
 import { hashPassword } from '../src/auth.js';
 import { applyErpSample } from './fixtures/erpSample.js';
@@ -20,6 +20,35 @@ describe('first setup and role-only administration', () => {
     const auth = await completeTestSetup(app, 'owner');
     expect((await app.inject({ method: 'GET', url: '/api/me', headers: auth })).json()).toMatchObject({ username: 'owner', roles: ['FW_SystemAdminRole'] });
     expect((await app.inject({ method: 'POST', url: '/api/setup/complete', payload: { code: TEST_SETUP_CODE, username: 'other', password: TEST_ADMIN_PASSWORD } })).statusCode).toBe(409);
+    await app.close();
+  });
+
+  it('applies artifact visibility before privilege filtering without granting access', async () => {
+    const app = buildServer({ setupCode: TEST_SETUP_CODE }); await app.ready();
+    await completeTestSetup(app, 'owner');
+    const kernel = kernelOf(app); applyErpSample(kernel);
+    const menu = kernel.registry.allMenus().find((entry) => entry.name === 'ERP_MainMenu')!;
+    const sales = menu.items.find((item) => item.label === 'Sales')!;
+    const inventory = menu.items.find((item) => item.label === 'Inventory')!;
+    const stored = kernel.designerContext().select('FW_WebArtifact').toArray().map((row) => JSON.parse(String(row.f.json)) as AnyMeta);
+    const extension = {
+      kind: 'menuExtension', name: 'ERP_ClientCustom_ERP_MainMenu_Extension', app: 'erp', model: 'ClientCustom', layer: 'CUS', menu: 'ERP_MainMenu',
+      items: [{ id: 'visible-sales', label: 'Visible sales', visible: true, target: { type: 'form', name: 'ERP_SalesTableForm' } }],
+      itemOverrides: [
+        { targetId: sales.id, visible: false },
+        { targetId: inventory.id, visible: true },
+      ],
+    } as AnyMeta;
+    expect(kernel.applyWebArtifacts([...stored.filter((item) => item.name !== extension.name), extension])).toEqual([]);
+    const ctx = kernel.context();
+    const user = ctx.newRecord('FW_User').setMany({ username: 'visibility-user', passwordHash: hashPassword('Visibility-password-123'), enabled: true }); user.insert();
+    ctx.newRecord('FW_UserRole').setMany({ userId: user.id, role: 'ERP_SalesClerk' }).insert();
+    ctx.newRecord('FW_AppAccess').setMany({ userId: user.id, appName: 'erp', canOpen: true }).insert();
+    const login = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'visibility-user', password: 'Visibility-password-123' } });
+    const auth = { cookie: (login.headers['set-cookie'] as string).split(';')[0] };
+    const metadata = (await app.inject({ method: 'GET', url: '/api/metadata', headers: auth })).json();
+    expect(metadata.apps[0].menus[0].items.map((item: { label: string }) => item.label)).toEqual(['Visible sales']);
+    expect(metadata.forms.map((form: { name: string }) => form.name)).not.toContain('ERP_InventItemForm');
     await app.close();
   });
 

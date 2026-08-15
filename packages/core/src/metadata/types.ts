@@ -190,8 +190,13 @@ export interface FormMeta {
 
 export interface MenuItemMeta {
   id?: string;
+  /** Preferred v0.1.6 visibility flag. Omitted means visible. */
+  visible?: boolean;
+  /** Legacy visibility flag retained for read compatibility. `visible` wins when both are present. */
   hidden?: boolean;
   order?: number;
+  /** menuExtension-only anchor for adding this root delta item below an inherited group. */
+  parentId?: string;
   label?: string;
   icon?: IconName;
   form?: string;
@@ -506,6 +511,13 @@ export interface MenuPathInsertionMeta {
 
 export interface MenuItemOverrideMeta extends PresentationOverrideMeta {
   icon?: IconName;
+  target?: MenuItemMeta['target'];
+  visible?: boolean;
+}
+
+/** Resolve authored menu visibility without granting any security permission. */
+export function isMenuItemVisible(item: Pick<MenuItemMeta, 'visible' | 'hidden'>): boolean {
+  return item.visible ?? item.hidden !== true;
 }
 
 export interface PresentationOverrideMeta {

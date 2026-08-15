@@ -21,11 +21,20 @@ import { ApiError } from '../../api';
 import FieldsEditor, { type EditableField } from './FieldsEditor.vue';
 import IndexesEditor, { type EditableIndex } from './IndexesEditor.vue';
 import MenuItemsEditor, { type EditableMenuItem } from './MenuItemsEditor.vue';
+import {
+  buildMenuExtensionTree,
+  newMenuItem,
+  removeExtensionItem,
+  resetInheritedDelta,
+  updateInheritedDelta,
+  type EditorMenuItem,
+  type MenuOverrideField,
+} from './menuExtensionTree';
 import ActionsEditor from './ActionsEditor.vue';
 import ViewEditor from './ViewEditor.vue';
 import ChartEditor from './ChartEditor.vue';
 import FormChartsEditor from './FormChartsEditor.vue';
-import type { FormAction } from '@emu/core';
+import type { FormAction, MenuExtensionMeta } from '@emu/core';
 import { ICON_OPTIONS } from '../../navigation';
 import { appPrefix, deriveExtensionName, EXT_TARGET_FIELD } from './naming';
 
@@ -43,6 +52,7 @@ const saveError = ref('');
 const jsonText = ref('');
 const activeTab = ref('design');
 const customizationChain = ref<CustomizationChain | null>(null);
+const menuExtensionTree = ref<EditorMenuItem[]>([]);
 
 /** Kinds with a structured editor; others are edited as raw JSON. */
 const DESIGN_KINDS = new Set([
@@ -254,8 +264,14 @@ watch(
   [selectedApp, selectedModel, () => (EXT_TARGET_FIELD[props.kind] ? artifact.value[EXT_TARGET_FIELD[props.kind]] : undefined)],
   async ([app, model, target]) => {
     customizationChain.value = null;
+    if (props.kind === 'menuExtension') menuExtensionTree.value = [];
     if (!isExtension.value || !app || !model || !target) return;
-    try { customizationChain.value = await designer.customization(props.kind.replace(/Extension$/, ''), String(target), String(app), String(model)); }
+    try {
+      customizationChain.value = await designer.customization(props.kind.replace(/Extension$/, ''), String(target), String(app), String(model));
+      if (props.kind === 'menuExtension') {
+        menuExtensionTree.value = buildMenuExtensionTree(customizationChain.value.layers, artifact.value as unknown as MenuExtensionMeta);
+      }
+    }
     catch { customizationChain.value = null; }
   },
   { immediate: true },
@@ -453,9 +469,44 @@ async function save() {
 const enumValues = computed(() => (artifact.value.values ?? []) as { name: string; value: number; label?: string }[]);
 const formGroups = computed(() => (artifact.value.groups ?? []) as { label?: string; fields: string[] }[]);
 const menuItems = computed(() => {
+  if (props.kind === 'menuExtension') return menuExtensionTree.value as EditableMenuItem[];
   if (!artifact.value.items) artifact.value.items = [];
   return artifact.value.items as EditableMenuItem[];
 });
+function menuExtensionArtifact(): MenuExtensionMeta { return artifact.value as unknown as MenuExtensionMeta; }
+function changeInheritedMenuItem(item: EditableMenuItem, field: MenuOverrideField, value: unknown) {
+  updateInheritedDelta(menuExtensionArtifact(), item as EditorMenuItem, field, value);
+}
+function resetInheritedMenuItem(item: EditableMenuItem) {
+  resetInheritedDelta(menuExtensionArtifact(), item as EditorMenuItem);
+}
+function addExtensionMenuItem(parent: EditableMenuItem | undefined, siblings: EditableMenuItem[]) {
+  const extension = menuExtensionArtifact();
+  const item = newMenuItem(parent?.__inherited ? parent.id : undefined);
+  if (parent && !parent.__inherited) {
+    parent.items ??= [];
+    parent.items.push(item);
+  } else {
+    extension.items ??= [];
+    extension.items.push(item);
+  }
+  if (parent) parent.items ??= siblings;
+  if (!siblings.includes(item)) siblings.push(item);
+}
+function removeCurrentMenuItem(item: EditableMenuItem, siblings: EditableMenuItem[], index: number) {
+  if (!item.id || item.__inherited) return;
+  removeExtensionItem(menuExtensionArtifact(), item.id);
+  siblings.splice(index, 1);
+}
+function moveExtensionMenuItem(_item: EditableMenuItem, siblings: EditableMenuItem[], index: number, direction: -1 | 1) {
+  const target = index + direction;
+  if (target < 0 || target >= siblings.length) return;
+  siblings.splice(target, 0, siblings.splice(index, 1)[0]);
+  siblings.forEach((item, order) => {
+    if (item.__inherited) updateInheritedDelta(menuExtensionArtifact(), item as EditorMenuItem, 'order', order * 10);
+    else item.order = order * 10;
+  });
+}
 const tableFields = computed(() => (artifact.value.fields ?? []) as EditableField[]);
 interface EditableAggregate { fn: 'count' | 'sum' | 'avg'; field?: string; label?: string }
 interface EditableLine { table: string; refField: string; fields: string[]; aggregates?: EditableAggregate[]; actions?: FormAction[] }
@@ -487,30 +538,6 @@ const selectedForms = computed({
   get: () => (artifact.value.forms ?? []) as string[],
   set: (v: string[]) => { artifact.value.forms = v; },
 });
-interface EditableMenuInsertion { path: string[]; items: EditableMenuItem[] }
-const menuInsertions = computed(() => {
-  if (!artifact.value.insertions) artifact.value.insertions = [];
-  return artifact.value.insertions as EditableMenuInsertion[];
-});
-const menuPathOptions = computed(() => {
-  const options: { label: string; value: string }[] = [];
-  const walk = (items: EditableMenuItem[], labels: string[], ids: string[]) => {
-    for (const item of items) {
-      if (!item.id) continue;
-      const nextLabels = [...labels, item.label || item.id];
-      const nextIds = [...ids, item.id];
-      if (item.items || item.target?.type === 'group') options.push({ label: `${nextLabels.join(' / ')} · ${nextIds.join(' > ')}`, value: JSON.stringify(nextIds) });
-      if (item.items) walk(item.items, nextLabels, nextIds);
-    }
-  };
-  const effective = customizationChain.value?.effective.items as EditableMenuItem[] | undefined;
-  walk(effective ?? [], [], []);
-  return options;
-});
-function insertionPathValue(insertion: EditableMenuInsertion) { return JSON.stringify(insertion.path); }
-function setInsertionPath(insertion: EditableMenuInsertion, value: string) { insertion.path = JSON.parse(value) as string[]; }
-function addMenuInsertion() { menuInsertions.value.push({ path: [], items: [] }); }
-function removeMenuInsertion(index: number) { menuInsertions.value.splice(index, 1); }
 const selectedViews = computed({
   get: () => (artifact.value.views ?? []) as string[],
   set: (value: string[]) => { artifact.value.views = value; },
@@ -650,7 +677,7 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
               </n-space>
             </n-card>
 
-            <n-card v-if="isExtension && customizationChain" size="small" title="Inherited layers (read-only)">
+            <n-card v-if="isExtension && customizationChain && kind !== 'menuExtension'" size="small" title="Inherited layers (read-only)">
               <n-space vertical>
                 <n-alert type="info">Only the current Layer delta is saved. Inherited metadata below is read-only.</n-alert>
                 <div v-for="entry in customizationChain.layers.filter((layer) => !layer.editable)" :key="entry.artifactName" class="inherited-layer">
@@ -857,20 +884,21 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
               <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0 0 8px">
                 Choose Group, Form, Function, or Report for each item. Use "+ Sub-item" to build nested menus.
               </p>
-              <MenuItemsEditor :items="menuItems" :form-options="formOptions" :report-options="reportOptions" :function-options="functionOptions" />
-            </n-card>
-            <n-card v-if="kind === 'menuExtension'" size="small" title="Insert into inherited submenu">
-              <n-alert type="info" style="margin-bottom:12px">Choose a readable menu path; the extension stores the full stable-ID path.</n-alert>
-              <n-space vertical>
-                <n-card v-for="(insertion, ii) in menuInsertions" :key="ii" size="small">
-                  <n-space align="center" style="margin-bottom:8px">
-                    <n-select :value="insertionPathValue(insertion)" :options="menuPathOptions" filterable placeholder="Inherited submenu path" style="min-width:420px" @update:value="(value) => setInsertionPath(insertion, value)" />
-                    <n-button size="small" quaternary type="error" @click="removeMenuInsertion(ii)">Remove insertion</n-button>
-                  </n-space>
-                  <MenuItemsEditor :items="insertion.items" :form-options="formOptions" :report-options="reportOptions" :function-options="functionOptions" />
-                </n-card>
-                <n-button size="small" @click="addMenuInsertion">+ Insert at path</n-button>
-              </n-space>
+              <n-alert v-if="kind === 'menuExtension'" type="info" style="margin-bottom:12px">
+                The full effective tree is shown below. Inherited edits are saved as the current Layer delta only.
+              </n-alert>
+              <MenuItemsEditor
+                :items="menuItems"
+                :form-options="formOptions"
+                :report-options="reportOptions"
+                :function-options="functionOptions"
+                :extension-mode="kind === 'menuExtension'"
+                @change="changeInheritedMenuItem"
+                @reset="resetInheritedMenuItem"
+                @add-item="addExtensionMenuItem"
+                @remove-item="removeCurrentMenuItem"
+                @move-item="moveExtensionMenuItem"
+              />
             </n-card>
 
             <!-- Security objects -->

@@ -51,7 +51,8 @@ const indexSchema = Type.Object({
 }, { additionalProperties: false });
 const menuItemSchema = Type.Object({
   id: Type.Optional(Type.String({ minLength: 1 })),
-  hidden: Type.Optional(Type.Boolean()), order: Type.Optional(Type.Number()),
+  visible: Type.Optional(Type.Boolean()), hidden: Type.Optional(Type.Boolean()), order: Type.Optional(Type.Number()),
+  parentId: Type.Optional(Type.String({ minLength: 1 })),
   label: Type.Optional(Type.String()),
   icon,
   form: Type.Optional(Type.String()),
@@ -127,7 +128,11 @@ const fieldOverrideSchema = Type.Object({
 }, { additionalProperties: false });
 const menuItemOverrideSchema = Type.Object({
   targetId: Type.String({ minLength: 1 }), label: Type.Optional(Type.String()), icon,
-  hidden: Type.Optional(Type.Boolean()), order: Type.Optional(Type.Number()),
+  visible: Type.Optional(Type.Boolean()), hidden: Type.Optional(Type.Boolean()), order: Type.Optional(Type.Number()),
+  target: Type.Optional(Type.Union([
+    Type.Object({ type: Type.Literal('group') }, { additionalProperties: false }),
+    ...['form', 'function', 'report'].map((targetType) => Type.Object({ type: Type.Literal(targetType), name: Type.String({ minLength: 1 }) }, { additionalProperties: false })),
+  ])),
 }, { additionalProperties: false });
 const viewParameterSchema = Type.Object({
   name, type: Type.Union(['string', 'int', 'real', 'boolean', 'date', 'datetime'].map((v) => Type.Literal(v))),

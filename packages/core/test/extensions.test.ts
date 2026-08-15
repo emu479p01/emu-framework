@@ -135,6 +135,42 @@ describe('extensions', () => {
     expect(items[1].items).toEqual([expect.objectContaining({ label: 'Nested', form: 'TESTAPP_CustForm', id: expect.any(String) })]);
   });
 
+  it('menu extension overrides target and visibility without copying inherited items', () => {
+    const registry = new MetadataRegistry();
+    registry.registerApp(testManifest('testapp', 'SYS'), [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable, baseForm, {
+      kind: 'menu', name: 'TESTAPP_Main', items: [
+        { id: 'customers', label: 'Customers', hidden: true, target: { type: 'group' }, items: [
+          { id: 'customer-list', label: 'Customer list', target: { type: 'group' } },
+        ] },
+      ],
+    }]);
+    const extension: MenuExtensionMeta = {
+      kind: 'menuExtension', name: 'TESTAPP_ClientCustom_TESTAPP_Main_Extension', menu: 'TESTAPP_Main',
+      itemOverrides: [
+        { targetId: 'customers', label: 'Accounts', visible: true, order: 20 },
+        { targetId: 'customer-list', target: { type: 'form', name: 'TESTAPP_CustForm' }, visible: false },
+      ],
+    };
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [extension]);
+    const menu = registry.allMenus()[0];
+    expect(extension).not.toHaveProperty('items');
+    expect(menu.items[0]).toEqual(expect.objectContaining({ label: 'Accounts', visible: true, hidden: true, order: 20 }));
+    expect(menu.items[0].items?.[0]).toEqual(expect.objectContaining({ visible: false, target: { type: 'form', name: 'TESTAPP_CustForm' } }));
+  });
+
+  it('attaches extension root items to an inherited parentId', () => {
+    const registry = new MetadataRegistry();
+    registry.registerApp(testManifest('testapp', 'SYS'), [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable, baseForm, {
+      kind: 'menu', name: 'TESTAPP_Main', items: [{ id: 'customers', label: 'Customers', target: { type: 'group' }, items: [] }],
+    }]);
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [{
+      kind: 'menuExtension', name: 'TESTAPP_ClientCustom_TESTAPP_Main_Extension', menu: 'TESTAPP_Main',
+      items: [{ id: 'customer-list', parentId: 'customers', label: 'Customer list', target: { type: 'form', name: 'TESTAPP_CustForm' } }],
+    }]);
+    expect(registry.allMenus()[0].items).toHaveLength(1);
+    expect(registry.allMenus()[0].items[0].items).toEqual([expect.objectContaining({ id: 'customer-list', parentId: 'customers', label: 'Customer list' })]);
+  });
+
   it('menu extension inserts items at an exact stable-id path', () => {
     const registry = new MetadataRegistry();
     registry.registerApp(testManifest('testapp', 'SYS'), [salesStatusEnum, TESTAPP_CustTable, TESTAPP_SalesTable, baseForm, {
