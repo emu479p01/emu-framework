@@ -4,7 +4,15 @@
 
 EmuFramework is a metadata-driven TypeScript framework for building business applications. It includes a browser-based Designer, generated forms and lists, role-based security, SQLite storage, reporting, import/export, and Docker deployment.
 
-Current framework version: **0.1.6.0 (Beta)**
+Current framework version: **0.1.6.1 (Beta)**
+
+## v0.1.6.1 deterministic report pagination
+
+- Reserves Header and Footer space only on pages where their `displayOn` policy renders them.
+- Keeps freeform Detail and Line rows atomic, moving a row to the next page when its designed height does not fit.
+- Renders each main Detail followed by that record's Line sources before continuing to the next main record.
+- Uses Tablix `headerHeight` and `rowHeight` to pre-plan pages and repeats the Tablix header after page breaks.
+- Fixes Footer coordinates that could place footer elements below the physical PDF page.
 
 ## v0.1.6.0 effective Menu Extension editor
 
