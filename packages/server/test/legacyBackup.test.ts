@@ -64,7 +64,7 @@ describe('legacy .emubackup compatibility', () => {
     const exported = await first.inject({ method: 'GET', url: '/api/system/backup/export', headers: auth });
     expect(exported.statusCode).toBe(200);
     const exportedManifest = JSON.parse(Buffer.from(unzipSync(exported.rawPayload)['manifest.json']).toString('utf8'));
-    expect(exportedManifest.frameworkVersion).toBe('0.1.6.0');
+    expect(exportedManifest.frameworkVersion).toBe('0.1.6.1');
     await first.close();
     apps.splice(apps.indexOf(first), 1);
 

@@ -20,6 +20,37 @@ export interface ReportRouteDeps {
 type ReportRow = { [field: string]: unknown };
 const THAI_TEXT = /[\u0E00-\u0E7F]/;
 
+export interface FreeformBodyUnit {
+  kind: 'freeform';
+  height: number;
+  label: string;
+  band: ReportBandMeta;
+  table: TableMeta;
+  row: ReportRow;
+}
+
+export interface TablixBodyUnit {
+  kind: 'tablix';
+  height: number;
+  label: string;
+  groupId: number;
+  headerHeight: number;
+  band: ReportBandMeta;
+  table: TableMeta;
+  row: ReportRow;
+}
+
+export type ReportBodyUnit = FreeformBodyUnit | TablixBodyUnit;
+
+export interface ReportPagePlan {
+  pageNumber: number;
+  headerHeight: number;
+  footerHeight: number;
+  bodyHeight: number;
+  usedHeight: number;
+  units: ReportBodyUnit[];
+}
+
 export function reportFontForText(text: string, requestedFont: string | undefined, availableFonts: Set<string>): string | undefined {
   if (THAI_TEXT.test(text)) return THAI_REPORT_FONT;
   return requestedFont && availableFonts.has(requestedFont) ? requestedFont : undefined;
@@ -107,22 +138,24 @@ function renderElement(
   originY: number,
   availableFonts: Set<string>,
   defaultFont: string,
+  positionMode: 'absolute' | 'relative' = 'absolute',
 ): unknown {
   const x = originX + el.x;
   const y = originY + el.y;
   const style = el.style ?? {};
+  const position = positionMode === 'relative' ? { relativePosition: { x, y } } : { absolutePosition: { x, y } };
 
   if (el.type === 'line') {
     return {
       canvas: [{ type: 'line', x1: 0, y1: 0, x2: el.width, y2: el.height, lineWidth: style.borderWidth ?? 1 }],
-      absolutePosition: { x, y },
+      ...position,
     };
   }
   if (el.type === 'rect' || el.type === 'image') {
     // Image binding is not yet supported by the designer — render a placeholder box.
     return {
       canvas: [{ type: 'rect', x: 0, y: 0, w: el.width, h: el.height, lineWidth: style.borderWidth ?? 1 }],
-      absolutePosition: { x, y },
+      ...position,
     };
   }
 
@@ -131,7 +164,7 @@ function renderElement(
   const singleRun = runs.length === 1 ? runs[0] : undefined;
   return {
     text: singleRun?.text ?? runs,
-    absolutePosition: { x, y },
+    ...position,
     width: el.width,
     fontSize: style.fontSize ?? 10,
     bold: style.bold,
@@ -181,6 +214,7 @@ function buildTablix(
   return {
     table: {
       headerRows: 1,
+      dontBreakRows: true,
       widths: tablix.columns.map((column) => column.width ?? '*'),
       heights: (rowIndex: number) => rowIndex === 0 ? (tablix.headerHeight ?? 20) : (tablix.rowHeight ?? 18),
       body,
@@ -198,98 +232,183 @@ function buildTablix(
   };
 }
 
-/** Builds a pdfmake docDefinition by walking the report's bands top-to-bottom, tracking a running Y cursor. */
-export function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: ReportMeta, mainRows: ReportRow[]): Record<string, unknown> {
-  const availableFonts = registerPdfFonts(kernel);
-  const defaultFont = report.defaultFont && availableFonts.has(report.defaultFont) ? report.defaultFont : DEFAULT_REPORT_FONT;
-  const table = kernel.registry.getTable(report.dataSource);
-  const margins = report.page?.margins ?? [40, 40, 40, 40];
-  const [marginTop, marginRight, marginBottom, marginLeft] = margins;
-  const pageDimensions = report.page?.size === 'Letter' ? [612, 792] : [595, 842];
-  const pageHeight = report.page?.orientation === 'landscape' ? pageDimensions[0] : pageDimensions[1];
-  const content: unknown[] = [];
-  const headers = report.bands.filter((band) => band.kind === 'header' || band.kind === 'pageHeader');
-  const footers = report.bands.filter((band) => band.kind === 'footer' || band.kind === 'pageFooter');
-  const headerHeight = headers.reduce((sum, band) => sum + band.height, 0);
-  const footerHeight = footers.reduce((sum, band) => sum + band.height, 0);
-  const pdfMargins: [number, number, number, number] = [marginLeft, marginTop + headerHeight, marginRight, marginBottom + footerHeight];
-  let cursorY = pdfMargins[1];
-  let flowingContentPending = false;
+function displaysOnPage(band: ReportBandMeta, currentPage: number, pageCount: number): boolean {
+  const policy = band.kind === 'pageHeader' || band.kind === 'pageFooter'
+    ? 'everyPage'
+    : band.displayOn ?? (band.kind === 'header' ? 'firstPage' : 'lastPage');
+  return policy === 'everyPage' || (policy === 'firstPage' && currentPage === 1) || (policy === 'lastPage' && currentPage === pageCount);
+}
 
-  const renderBand = (band: ReportBandMeta, row: ReportRow | null, bandTable: TableMeta) => {
-    if (flowingContentPending) {
-      content.push({ text: '', pageBreak: 'before' });
-      cursorY = pdfMargins[1];
-      flowingContentPending = false;
+function visibleBandHeight(bands: ReportBandMeta[], currentPage: number, pageCount: number): number {
+  return bands.reduce((sum, band) => sum + (displaysOnPage(band, currentPage, pageCount) ? band.height : 0), 0);
+}
+
+function bodyUnits(kernel: Kernel, ctx: DataContext, report: ReportMeta, mainRows: ReportRow[]): ReportBodyUnit[] {
+  const units: ReportBodyUnit[] = [];
+  const mainTable = kernel.registry.getTable(report.dataSource);
+  const mainDetails = report.bands.filter((band) => band.kind === 'detail');
+  let tablixGroup = 0;
+
+  const appendBand = (band: ReportBandMeta, rows: ReportRow[], table: TableMeta, label: string) => {
+    if (band.layout === 'tablix' && band.tablix) {
+      if (rows.length === 0) return;
+      const groupId = tablixGroup++;
+      const height = band.tablix.rowHeight ?? 18;
+      const headerHeight = band.tablix.headerHeight ?? 20;
+      for (const row of rows) units.push({ kind: 'tablix', height, headerHeight, groupId, band, table, row, label });
+      return;
     }
-    if (cursorY + band.height > pageHeight - pdfMargins[3]) {
-      content.push({ text: '', pageBreak: 'before' });
-      cursorY = pdfMargins[1];
-    }
-    for (const el of band.elements) {
-      content.push(renderElement(kernel, ctx, bandTable, el, row, marginLeft, cursorY, availableFonts, defaultFont));
-    }
-    // Absolute-positioned legacy elements do not consume flow height, so add a
-    // transparent spacer that also gives pdfmake a reliable page-break anchor.
-    content.push({ text: ' ', color: '#ffffff', fontSize: 1, margin: [0, Math.max(0, band.height - 1), 0, 0] });
-    cursorY += band.height;
+    for (const row of rows) units.push({ kind: 'freeform', height: band.height, band, table, row, label });
   };
 
-  const mainDetails = report.bands.filter((band) => band.kind === 'detail');
-  for (const band of mainDetails) {
-    if (band.layout === 'tablix' && band.tablix) {
-      const node = buildTablix(kernel, ctx, table, band.tablix, mainRows, availableFonts, defaultFont);
-      if (node) { content.push(node); flowingContentPending = true; }
-      continue;
-    }
-    for (const mainRow of mainRows) renderBand(band, mainRow, table);
-  }
-
   for (const mainRow of mainRows) {
+    for (const band of mainDetails) appendBand(band, [mainRow], mainTable, `detail band on ${mainTable.name}`);
     for (const line of report.lineSources ?? []) {
       const lineTable = kernel.registry.getTable(line.table);
       const childRows = ctx
         .select(line.table)
         .whereEq({ [line.refField]: mainRow.id as number })
         .toArray()
-        .map((r) => r.toObject());
-      for (const band of line.bands) {
-        if (band.layout === 'tablix' && band.tablix) {
-          const node = buildTablix(kernel, ctx, lineTable, band.tablix, childRows, availableFonts, defaultFont);
-          if (node) { content.push(node); flowingContentPending = true; }
-        } else {
-          for (const child of childRows) renderBand(band, child, lineTable);
-        }
-      }
+        .map((record) => record.toObject());
+      for (const band of line.bands) appendBand(band, childRows, lineTable, `line detail band on ${lineTable.name}`);
     }
   }
+  return units;
+}
 
-  const displayOn = (band: ReportBandMeta, currentPage: number, pageCount: number) => {
-    const policy = band.kind === 'pageHeader' || band.kind === 'pageFooter'
-      ? 'everyPage'
-      : band.displayOn ?? (band.kind === 'header' ? 'firstPage' : 'lastPage');
-    return policy === 'everyPage' || (policy === 'firstPage' && currentPage === 1) || (policy === 'lastPage' && currentPage === pageCount);
-  };
+function addedUnitHeight(previous: ReportBodyUnit | undefined, unit: ReportBodyUnit): number {
+  if (unit.kind === 'freeform') return unit.height;
+  return unit.height + (previous?.kind === 'tablix' && previous.groupId === unit.groupId ? 0 : unit.headerHeight);
+}
+
+function tryPageCount(
+  units: ReportBodyUnit[],
+  pageCount: number,
+  pageHeight: number,
+  marginTop: number,
+  marginBottom: number,
+  headers: ReportBandMeta[],
+  footers: ReportBandMeta[],
+): { pages?: ReportPagePlan[]; failedUnit?: ReportBodyUnit; available?: number } {
+  const pages: ReportPagePlan[] = [];
+  let unitIndex = 0;
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+    const headerHeight = visibleBandHeight(headers, pageNumber, pageCount);
+    const footerHeight = visibleBandHeight(footers, pageNumber, pageCount);
+    const bodyHeight = pageHeight - marginTop - marginBottom - headerHeight - footerHeight;
+    if (bodyHeight < 0) return { failedUnit: units[unitIndex], available: bodyHeight };
+
+    const pageUnits: ReportBodyUnit[] = [];
+    let usedHeight = 0;
+    const remainingPages = pageCount - pageNumber;
+    while (unitIndex < units.length) {
+      // Every planned page must contain a body unit; otherwise it is not the
+      // real last page and lastPage header/footer policies would be incorrect.
+      if (units.length - (unitIndex + 1) < remainingPages) break;
+      const unit = units[unitIndex];
+      const addedHeight = addedUnitHeight(pageUnits[pageUnits.length - 1], unit);
+      if (usedHeight + addedHeight > bodyHeight) break;
+      pageUnits.push(unit);
+      usedHeight += addedHeight;
+      unitIndex++;
+    }
+    if (pageUnits.length === 0) return { failedUnit: units[unitIndex], available: bodyHeight };
+    pages.push({ pageNumber, headerHeight, footerHeight, bodyHeight, usedHeight, units: pageUnits });
+  }
+  return unitIndex === units.length ? { pages } : { failedUnit: units[unitIndex], available: pages[pages.length - 1]?.bodyHeight };
+}
+
+export function planReportPages(kernel: Kernel, ctx: DataContext, report: ReportMeta, mainRows: ReportRow[]): ReportPagePlan[] {
+  const margins = report.page?.margins ?? [40, 40, 40, 40];
+  const [marginTop, , marginBottom] = margins;
+  const pageDimensions = report.page?.size === 'Letter' ? [612, 792] : [595, 842];
+  const pageHeight = report.page?.orientation === 'landscape' ? pageDimensions[0] : pageDimensions[1];
+  const headers = report.bands.filter((band) => band.kind === 'header' || band.kind === 'pageHeader');
+  const footers = report.bands.filter((band) => band.kind === 'footer' || band.kind === 'pageFooter');
+  const units = bodyUnits(kernel, ctx, report, mainRows);
+
+  if (units.length === 0) {
+    const headerHeight = visibleBandHeight(headers, 1, 1);
+    const footerHeight = visibleBandHeight(footers, 1, 1);
+    const bodyHeight = pageHeight - marginTop - marginBottom - headerHeight - footerHeight;
+    if (bodyHeight < 0) throw new Error(`Report '${report.name}' header and footer exceed the printable page height`);
+    return [{ pageNumber: 1, headerHeight, footerHeight, bodyHeight, usedHeight: 0, units: [] }];
+  }
+
+  let lastFailure: { failedUnit?: ReportBodyUnit; available?: number } = {};
+  for (let pageCount = 1; pageCount <= units.length; pageCount++) {
+    const result = tryPageCount(units, pageCount, pageHeight, marginTop, marginBottom, headers, footers);
+    if (result.pages) return result.pages;
+    lastFailure = result;
+  }
+  const failed = lastFailure.failedUnit ?? units[units.length - 1];
+  const required = failed.kind === 'tablix' ? failed.headerHeight + failed.height : failed.height;
+  throw new Error(`Report '${report.name}' cannot fit ${failed.label} (requires ${required}pt, available ${lastFailure.available ?? 0}pt)`);
+}
+
+/** Builds a deterministic, pre-paginated pdfmake document definition. */
+export function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: ReportMeta, mainRows: ReportRow[]): Record<string, unknown> {
+  const availableFonts = registerPdfFonts(kernel);
+  const defaultFont = report.defaultFont && availableFonts.has(report.defaultFont) ? report.defaultFont : DEFAULT_REPORT_FONT;
+  const table = kernel.registry.getTable(report.dataSource);
+  const margins = report.page?.margins ?? [40, 40, 40, 40];
+  const [marginTop, marginRight, marginBottom, marginLeft] = margins;
+  const content: unknown[] = [];
+  const headers = report.bands.filter((band) => band.kind === 'header' || band.kind === 'pageHeader');
+  const footers = report.bands.filter((band) => band.kind === 'footer' || band.kind === 'pageFooter');
+  const pages = planReportPages(kernel, ctx, report, mainRows);
+
+  for (const page of pages) {
+    const pageContent: unknown[] = [];
+    for (let index = 0; index < page.units.length;) {
+      const unit = page.units[index];
+      if (unit.kind === 'freeform') {
+        for (const element of unit.band.elements) pageContent.push(renderElement(kernel, ctx, unit.table, element, unit.row, 0, 0, availableFonts, defaultFont, 'relative'));
+        pageContent.push({ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 0, y2: unit.height, lineWidth: 0, lineColor: '#ffffff' }] });
+        index++;
+        continue;
+      }
+
+      const rows: ReportRow[] = [];
+      const groupId = unit.groupId;
+      while (index < page.units.length) {
+        const candidate = page.units[index];
+        if (candidate.kind !== 'tablix' || candidate.groupId !== groupId) break;
+        rows.push(candidate.row);
+        index++;
+      }
+      const node = buildTablix(kernel, ctx, unit.table, unit.band.tablix!, rows, availableFonts, defaultFont);
+      if (node) pageContent.push(node);
+    }
+
+    content.push({
+      pageSize: report.page?.size ?? 'A4',
+      pageOrientation: report.page?.orientation ?? 'portrait',
+      pageMargins: [marginLeft, marginTop + page.headerHeight, marginRight, marginBottom + page.footerHeight],
+      section: { stack: pageContent.length > 0 ? pageContent : [{ text: '' }] },
+    });
+  }
+
   const pageBand = (bands: ReportBandMeta[], row: ReportRow | null, currentPage: number, pageCount: number, top: number) => {
     const stack: unknown[] = [];
     let y = top;
     for (const band of bands) {
-      if (displayOn(band, currentPage, pageCount)) {
-        for (const element of band.elements) stack.push(renderElement(kernel, ctx, table, element, row, marginLeft, y, availableFonts, defaultFont));
-      }
+      if (!displaysOnPage(band, currentPage, pageCount)) continue;
+      for (const element of band.elements) stack.push(renderElement(kernel, ctx, table, element, row, marginLeft, y, availableFonts, defaultFont));
       y += band.height;
     }
     return { stack };
   };
-  if (content.length === 0) content.push({ text: '' });
 
   return {
     pageSize: report.page?.size ?? 'A4',
     pageOrientation: report.page?.orientation ?? 'portrait',
-    pageMargins: pdfMargins,
+    pageMargins: [marginLeft, marginTop, marginRight, marginBottom],
     defaultStyle: { font: defaultFont, fontSize: 10 },
     header: (currentPage: number, pageCount: number) => pageBand(headers, mainRows[0] ?? null, currentPage, pageCount, marginTop),
-    footer: (currentPage: number, pageCount: number) => pageBand(footers, mainRows[mainRows.length - 1] ?? null, currentPage, pageCount, pageHeight - marginBottom - footerHeight),
+    // Footer fragments are committed at the start of the page's bottom margin;
+    // keep y local so the page offset is applied exactly once.
+    footer: (currentPage: number, pageCount: number) => pageBand(footers, mainRows[mainRows.length - 1] ?? null, currentPage, pageCount, 0),
     content,
   };
 }
