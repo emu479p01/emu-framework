@@ -401,6 +401,13 @@ export class MetadataRegistry {
         if (!element) throw new MetadataError(`Extension '${e.name}': unknown form element '${override.targetId}'`);
         for (const key of ['label', 'hidden', 'order'] as const) if (override[key] !== undefined) element[key] = override[key];
       }
+      for (const override of e.lineOverrides ?? []) {
+        const line = (base.lines ?? []).find((candidate) => candidate.id === override.targetId);
+        if (!line) throw new MetadataError(`Extension '${e.name}': unknown form line '${override.targetId}'`);
+        for (const key of ['label', 'hidden', 'order', 'fields', 'aggregates', 'actions'] as const) {
+          if (override[key] !== undefined) (line as any)[key] = structuredClone(override[key]);
+        }
+      }
       base.groups = sortPresented(base.groups);
       base.charts = sortPresented(base.charts);
       base.actions = sortPresented(base.actions);

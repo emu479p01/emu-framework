@@ -2,6 +2,7 @@ import DatabaseCtor from 'better-sqlite3';
 import type { Database } from 'better-sqlite3';
 import { readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { MetadataRegistry } from './metadata/registry.js';
 import type { AnyMeta, AppManifest } from './metadata/types.js';
 import { LAYER_ORDER } from './metadata/types.js';
@@ -54,6 +55,14 @@ export interface WebArtifactError {
   kind: string;
   name: string;
   error: string;
+}
+
+export interface MetadataApplyMetrics {
+  totalMs: number;
+  dependencyAndRegistryMs: number;
+  schemaSyncMs: number;
+  executableRegistrationMs: number;
+  artifactCount: number;
 }
 
 type OrderableScript = AnyMeta & { name: string; layer?: string; script?: string };
@@ -111,6 +120,11 @@ export class Kernel {
   private _registry = new MetadataRegistry();
   private bootSteps: BootStep[] = [];
   private _webArtifacts: AnyMeta[] = [];
+  private executableSignature = '';
+  private successfulWebSignature = '';
+  lastApplyMetrics: MetadataApplyMetrics = {
+    totalMs: 0, dependencyAndRegistryMs: 0, schemaSyncMs: 0, executableRegistrationMs: 0, artifactCount: 0,
+  };
   /** TS-registered logic (system hooks etc.) — re-applied after every web-script rebuild. */
   private nativeLogic: ((kernel: Kernel) => void)[] = [];
 
@@ -118,10 +132,15 @@ export class Kernel {
     this.db = new DatabaseCtor(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
+    this.db.pragma('busy_timeout = 5000');
+    this.db.pragma('wal_autocheckpoint = 1000');
 
     const ddp = designerDbPath ?? (dbPath === ':memory:' ? ':memory:' : dbPath.replace(/\.sqlite$|\.db$/i, '.designer.sqlite'));
     this.designerDb = new DatabaseCtor(ddp);
     this.designerDb.pragma('journal_mode = WAL');
+    this.designerDb.pragma('foreign_keys = ON');
+    this.designerDb.pragma('busy_timeout = 5000');
+    this.designerDb.pragma('wal_autocheckpoint = 1000');
   }
 
   get registry(): MetadataRegistry { return this._registry; }
@@ -212,6 +231,7 @@ export class Kernel {
    * only - no FW_WebArtifact) and designer DB (FW_WebArtifact only).
    */
   applyWebArtifacts(artifacts: AnyMeta[]): WebArtifactError[] {
+    const applyStartedAt = performance.now();
     const raw = artifacts as (AnyMeta & { app?: string })[];
     const sorted = [...raw].sort((a, b) => {
       const ak = WEB_KIND_ORDER.indexOf(a.kind);
@@ -222,9 +242,21 @@ export class Kernel {
       const bl = LAYER_ORDER.indexOf((b as any).layer ?? 'SYS');
       return al - bl;
     });
+    const candidateSignature = createHash('sha256').update(JSON.stringify(sorted)).digest('hex');
+    if (candidateSignature === this.successfulWebSignature) {
+      const finishedAt = performance.now();
+      this.lastApplyMetrics = {
+        totalMs: finishedAt - applyStartedAt,
+        dependencyAndRegistryMs: 0,
+        schemaSyncMs: 0,
+        executableRegistrationMs: 0,
+        artifactCount: artifacts.length,
+      };
+      return [];
+    }
 
     const appManifests: AppManifest[] = [];
-    const regular: (AnyMeta & { app?: string })[] = [];
+    let regular: (AnyMeta & { app?: string })[] = [];
     const appArtifacts = new Map<string, AnyMeta[]>();
     const appLabels = new Map<string, string>();
     const appManifestByName = new Map<string, AppManifest>();
@@ -269,6 +301,49 @@ export class Kernel {
       if (!appArtifacts.has(m.name)) appArtifacts.set(m.name, []);
     }
 
+    // Resolve the App graph once. Invalid Apps are isolated so one missing
+    // dependency or cycle does not prevent unrelated valid Apps from loading.
+    const invalidApps = new Set<string>();
+    const availableApps = new Set([...fileAppNames, ...appManifestByName.keys()]);
+    for (const [name, manifest] of appManifestByName) {
+      const missing = (manifest.dependsOn ?? []).filter((dependency) => !availableApps.has(dependency));
+      if (missing.length) {
+        invalidApps.add(name);
+        errors.push({ kind: 'app', name, error: `App '${name}' has missing dependencies: ${missing.join(', ')}` });
+      }
+    }
+    const visitedApps = new Set<string>();
+    const activePath: string[] = [];
+    const findCycles = (name: string): void => {
+      const cycleAt = activePath.indexOf(name);
+      if (cycleAt >= 0) {
+        const cycle = [...activePath.slice(cycleAt), name];
+        for (const member of cycle.slice(0, -1)) {
+          if (!invalidApps.has(member)) errors.push({ kind: 'app', name: member, error: `App dependency cycle: ${cycle.join(' -> ')}` });
+          invalidApps.add(member);
+        }
+        return;
+      }
+      if (visitedApps.has(name) || invalidApps.has(name)) return;
+      activePath.push(name);
+      for (const dependency of appManifestByName.get(name)?.dependsOn ?? []) if (appManifestByName.has(dependency)) findCycles(dependency);
+      activePath.pop();
+      visitedApps.add(name);
+    };
+    for (const name of appManifestByName.keys()) findCycles(name);
+    let propagated = true;
+    while (propagated) {
+      propagated = false;
+      for (const [name, manifest] of appManifestByName) {
+        if (!invalidApps.has(name) && (manifest.dependsOn ?? []).some((dependency) => invalidApps.has(dependency))) {
+          invalidApps.add(name); propagated = true;
+          errors.push({ kind: 'app', name, error: `App '${name}' depends on an invalid App` });
+        }
+      }
+    }
+    for (const name of invalidApps) { appArtifacts.delete(name); appManifestByName.delete(name); }
+    regular = regular.filter((artifact) => !invalidApps.has(artifact.app!));
+
     const build = (acceptedAppArtifacts: Map<string, AnyMeta[]>): MetadataRegistry => {
       const fresh = new MetadataRegistry();
       for (const step of this.bootSteps) {
@@ -278,10 +353,11 @@ export class Kernel {
       const unorderedNames = [...new Set([...appArtifacts.keys()])];
       const names: string[] = [];
       const visiting = new Set<string>();
-      const visit = (name: string) => {
-        if (names.includes(name) || visiting.has(name)) return;
+      const visit = (name: string, path: string[] = []) => {
+        if (names.includes(name)) return;
+        if (visiting.has(name)) throw new Error(`App dependency cycle: ${[...path, name].join(' -> ')}`);
         visiting.add(name);
-        for (const dependency of appManifestByName.get(name)?.dependsOn ?? []) if (unorderedNames.includes(dependency)) visit(dependency);
+        for (const dependency of appManifestByName.get(name)?.dependsOn ?? []) if (unorderedNames.includes(dependency)) visit(dependency, [...path, name]);
         visiting.delete(name); names.push(name);
       };
       for (const name of unorderedNames.sort((a, b) => {
@@ -306,14 +382,23 @@ export class Kernel {
       return fresh;
     };
 
-    const accepted = new Map<string, AnyMeta[]>();
+    let accepted = new Map<string, AnyMeta[]>();
     const scriptsFor = (source: Map<string, AnyMeta[]>): (AnyMeta & { app?: string; code?: string; name: string })[] =>
       [...source.values()]
         .flat()
         .filter((a) => (a as any).kind === 'script' || (a as any).kind === 'scriptExtension') as any;
-    let remaining = [...regular];
-    // Retry loop — accept artifacts whose dependencies are already satisfied
-    while (remaining.length > 0) {
+    let final: MetadataRegistry;
+    // Fast path: artifacts are already deterministically ordered by kind/layer and
+    // registry validation resolves cross references against the complete app set.
+    // This avoids rebuilding the entire registry once per artifact (O(n²)).
+    try {
+      final = build(appArtifacts);
+      accepted = appArtifacts;
+    } catch {
+      // Compatibility/error-isolation path: preserve valid artifacts and return
+      // per-artifact diagnostics when a candidate set contains invalid metadata.
+      let remaining = [...regular];
+      while (remaining.length > 0) {
       const next: (AnyMeta & { app?: string })[] = [];
       for (const art of remaining) {
         const target = art.app!;
@@ -342,44 +427,64 @@ export class Kernel {
         }
         break;
       }
-      remaining = next;
+        remaining = next;
+      }
+      final = build(accepted);
     }
-
-    const final = build(accepted);
+    const registryFinishedAt = performance.now();
     // Sync data DB for all tables EXCEPT FW_WebArtifact
     {
       const result: SyncResult = { createdTables: [], addedColumns: [] };
+      const previous = new Map(this._registry.allTables().map((table) => [table.name, JSON.stringify(table)]));
       for (const table of final.allTables()) {
         if (table.name === 'FW_WebArtifact') continue;
+        if (previous.get(table.name) === JSON.stringify(table)) continue;
         syncSchema(this.db, final, { onlyTable: table.name });
       }
     }
     // Sync designer DB for FW_WebArtifact only
     this.syncDesigner();
+    const schemaFinishedAt = performance.now();
     this._registry = final;
     this._webArtifacts = regular.map((a) => ({ ...a } as AnyMeta));
 
-    // Execute web scripts — clear and rebuild event/hook/action registrations
-    this.events.clear();
-    this.hooks.clear();
-    this.actions.clear();
-    this.actionModes.clear();
-    // native (TypeScript) logic must survive web-script rebuilds — e.g. the
-    // FW_User password-hashing hook; without this any Designer save wipes it
-    for (const fn of this.nativeLogic) fn(this);
-    // layer lives on the app manifest's model, not on the raw artifact — resolve it
-    // before ordering so execution follows SYS→ISV→LOC→DEV→CUS deterministically
-    const manifests = final.loadedApps();
-    const withLayer = (scriptsFor(accepted) as OrderableScript[]).map((s) => {
-      if (s.layer) return s;
-      const manifest = manifests.find((m) => m.name === (s as { app?: string }).app);
-      const model = manifest?.models?.find((m) => m.name === (s as { model?: string }).model);
-      return { ...s, layer: model?.layer ?? manifest?.models?.[0]?.layer ?? 'SYS' };
-    });
-    this.executeWebScripts(orderScriptsForExecution(withLayer), errors);
-    // function artifacts register last, so a function overrides a
-    // script-registered action of the same name
-    this.registerFunctionArtifacts(errors);
+    const executableArtifacts = [...accepted.values()].flat().filter((artifact) =>
+      artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function' || artifact.kind === 'functionExtension');
+    const nextExecutableSignature = JSON.stringify(executableArtifacts);
+    if (nextExecutableSignature !== this.executableSignature) {
+      // Execute web scripts — clear and rebuild event/hook/action registrations
+      this.events.clear();
+      this.hooks.clear();
+      this.actions.clear();
+      this.actionModes.clear();
+      // native (TypeScript) logic must survive web-script rebuilds — e.g. the
+      // FW_User password-hashing hook; without this any Designer save wipes it
+      for (const fn of this.nativeLogic) fn(this);
+      // layer lives on the app manifest's model, not on the raw artifact — resolve it
+      // before ordering so execution follows SYS→ISV→LOC→DEV→CUS deterministically
+      const manifests = final.loadedApps();
+      const withLayer = (scriptsFor(accepted) as OrderableScript[]).map((s) => {
+        if (s.layer) return s;
+        const manifest = manifests.find((m) => m.name === (s as { app?: string }).app);
+        const model = manifest?.models?.find((m) => m.name === (s as { model?: string }).model);
+        return { ...s, layer: model?.layer ?? manifest?.models?.[0]?.layer ?? 'SYS' };
+      });
+      this.executeWebScripts(orderScriptsForExecution(withLayer), errors);
+      // function artifacts register last, so a function overrides a
+      // script-registered action of the same name
+      this.registerFunctionArtifacts(errors);
+      this.executableSignature = nextExecutableSignature;
+    }
+
+    const finishedAt = performance.now();
+    this.lastApplyMetrics = {
+      totalMs: finishedAt - applyStartedAt,
+      dependencyAndRegistryMs: registryFinishedAt - applyStartedAt,
+      schemaSyncMs: schemaFinishedAt - registryFinishedAt,
+      executableRegistrationMs: finishedAt - schemaFinishedAt,
+      artifactCount: artifacts.length,
+    };
+    if (errors.length === 0) this.successfulWebSignature = candidateSignature;
 
     return errors;
   }

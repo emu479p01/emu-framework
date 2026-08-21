@@ -1,6 +1,6 @@
 {
   "name": "@emu/core",
-  "version": "0.1.6.1",
+  "version": "0.5.0.0",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {

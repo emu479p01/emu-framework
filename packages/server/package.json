@@ -1,6 +1,6 @@
 {
   "name": "@emu/server",
-  "version": "0.1.6.1",
+  "version": "0.5.0.0",
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
@@ -9,7 +9,6 @@
   "scripts": {
     "dev": "nodemon --watch src --watch ../core/src --watch ../../apps --ext ts,json --ignore \"**/test/**\" --exec \"tsx src/main.ts\"",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/main.js",
     "start:dev": "tsx src/main.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

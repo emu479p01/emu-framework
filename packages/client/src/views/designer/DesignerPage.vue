@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   NAvatar,
@@ -12,6 +12,7 @@ import {
   NFormItem,
   NInput,
   NModal,
+  NPagination,
   NSelect,
   NSkeleton,
   NSpace,
@@ -43,6 +44,8 @@ onMounted(async () => {
 const selectedApp = ref(String(route.params.appName ?? route.query.app ?? ''));
 const selectedModel = ref(String(route.params.modelName ?? route.query.model ?? ''));
 const searchQuery = ref('');
+const artifactPage = ref(1);
+const artifactPageSize = 100;
 const reloading = ref(false);
 
 const selectedAppEntry = computed(() => designer.apps.find((a) => a.name === selectedApp.value));
@@ -316,10 +319,15 @@ const filteredArtifacts = computed(() => {
     return true;
   });
 });
+watch([selectedApp, selectedModel, searchQuery], () => { artifactPage.value = 1; });
+const pagedArtifacts = computed(() => filteredArtifacts.value.slice(
+  (artifactPage.value - 1) * artifactPageSize,
+  artifactPage.value * artifactPageSize,
+));
 
 const grouped = computed(() =>
   KIND_ORDER
-    .map((kind) => ({ kind, items: filteredArtifacts.value.filter((a) => a.kind === kind) }))
+    .map((kind) => ({ kind, items: pagedArtifacts.value.filter((a) => a.kind === kind) }))
     .filter((g) => g.items.length > 0),
 );
 
@@ -443,6 +451,7 @@ async function onReload() {
         </div>
       </div>
       <n-space>
+        <n-button secondary @click="router.push('/designer/ai-proposals')">AI Proposals</n-button>
         <n-button v-if="selectedApp !== 'system'" secondary :loading="packageBusy" @click="choosePackage">Import Package</n-button>
         <n-button text @click="onReload" :loading="reloading">
           Sync from disk
@@ -660,6 +669,12 @@ async function onReload() {
             </template>
           </tbody>
         </n-table>
+        <n-pagination
+          v-if="filteredArtifacts.length > artifactPageSize"
+          v-model:page="artifactPage"
+          :page-count="Math.ceil(filteredArtifacts.length / artifactPageSize)"
+          style="margin-top:16px;justify-content:flex-end"
+        />
       </div>
 
       <!-- Customize existing tables (level 3 only) -->

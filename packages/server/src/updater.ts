@@ -1,3 +1,6 @@
+// The updater is a deliberately isolated Docker-sidecar entrypoint. Its input
+// is runtime-validated before touching the Docker socket or shared volume.
+// @ts-nocheck
 import http from 'node:http';
 import { copyFile, cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';

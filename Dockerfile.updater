@@ -1,4 +1,10 @@
+FROM node:24.18.0-slim AS build
+WORKDIR /app
+RUN corepack enable && corepack prepare pnpm@11.12.0 --activate
+COPY . .
+RUN pnpm install --frozen-lockfile && pnpm --filter @emu/server build
+
 FROM node:24.18.0-slim
 WORKDIR /updater
-COPY scripts/docker-updater.mjs ./docker-updater.mjs
-CMD ["node", "docker-updater.mjs"]
+COPY --from=build /app/packages/server/dist/updater.js ./updater.js
+CMD ["node", "updater.js"]

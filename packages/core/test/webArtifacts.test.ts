@@ -41,6 +41,18 @@ describe('orderScriptsForExecution', () => {
 });
 
 describe('Kernel.applyWebArtifacts', () => {
+  it('reports App dependency cycles while retaining unrelated valid Artifacts', () => {
+    const kernel = bootKernel();
+    const errors = kernel.applyWebArtifacts([
+      { kind: 'app', name: 'cyclea', dependsOn: ['cycleb'], models: [{ name: 'Base', layer: 'SYS' }] } as unknown as AnyMeta,
+      { kind: 'app', name: 'cycleb', dependsOn: ['cyclea'], models: [{ name: 'Base', layer: 'SYS' }] } as unknown as AnyMeta,
+      { kind: 'app', name: 'valid', models: [{ name: 'Base', layer: 'SYS' }] } as unknown as AnyMeta,
+      { kind: 'enum', name: 'VALID_Status', app: 'valid', model: 'Base', layer: 'SYS', values: [{ name: 'Open', value: 0 }] } as AnyMeta,
+    ]);
+    expect(errors.filter((error) => error.kind === 'app')).toHaveLength(2);
+    expect(kernel.registry.getEnum('VALID_Status').name).toBe('VALID_Status');
+  });
+
   it('never injects Models based on an App name', () => {
     const kernel = bootKernel();
     expect(kernel.applyWebArtifacts([{ kind: 'app', name: 'erp', label: 'Fresh ERP' } as unknown as AnyMeta])).toEqual([]);

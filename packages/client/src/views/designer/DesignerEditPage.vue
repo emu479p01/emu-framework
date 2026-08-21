@@ -34,7 +34,8 @@ import ActionsEditor from './ActionsEditor.vue';
 import ViewEditor from './ViewEditor.vue';
 import ChartEditor from './ChartEditor.vue';
 import FormChartsEditor from './FormChartsEditor.vue';
-import type { FormAction, MenuExtensionMeta } from '@emu/core';
+import type { FormAction, FormExtensionMeta, MenuExtensionMeta } from '@emu/core';
+import { buildFormExtensionLines, syncFormLineOverrides, type EditorFormLine } from './formExtensionLines';
 import { ICON_OPTIONS } from '../../navigation';
 import { appPrefix, deriveExtensionName, EXT_TARGET_FIELD } from './naming';
 
@@ -53,6 +54,9 @@ const jsonText = ref('');
 const activeTab = ref('design');
 const customizationChain = ref<CustomizationChain | null>(null);
 const menuExtensionTree = ref<EditorMenuItem[]>([]);
+const extensionFormLines = ref<EditorFormLine[]>([]);
+let lineBaselines = new Map<string, EditorFormLine>();
+let rebuildingLines = false;
 
 /** Kinds with a structured editor; others are edited as raw JSON. */
 const DESIGN_KINDS = new Set([
@@ -270,6 +274,13 @@ watch(
       customizationChain.value = await designer.customization(props.kind.replace(/Extension$/, ''), String(target), String(app), String(model));
       if (props.kind === 'menuExtension') {
         menuExtensionTree.value = buildMenuExtensionTree(customizationChain.value.layers, artifact.value as unknown as MenuExtensionMeta);
+      }
+      if (props.kind === 'formExtension') {
+        rebuildingLines = true;
+        const built = buildFormExtensionLines(customizationChain.value.layers, artifact.value as unknown as FormExtensionMeta);
+        extensionFormLines.value = built.lines;
+        lineBaselines = built.baselines;
+        rebuildingLines = false;
       }
     }
     catch { customizationChain.value = null; }
@@ -509,11 +520,16 @@ function moveExtensionMenuItem(_item: EditableMenuItem, siblings: EditableMenuIt
 }
 const tableFields = computed(() => (artifact.value.fields ?? []) as EditableField[]);
 interface EditableAggregate { fn: 'count' | 'sum' | 'avg'; field?: string; label?: string }
-interface EditableLine { table: string; refField: string; fields: string[]; aggregates?: EditableAggregate[]; actions?: FormAction[] }
+interface EditableLine extends EditorFormLine { aggregates?: EditableAggregate[]; actions?: FormAction[] }
 const formLines = computed(() => {
+  if (props.kind === 'formExtension') return extensionFormLines.value as EditableLine[];
   if (!artifact.value.lines) artifact.value.lines = [];
   return artifact.value.lines as EditableLine[];
 });
+watch(extensionFormLines, (lines) => {
+  if (rebuildingLines || props.kind !== 'formExtension') return;
+  syncFormLineOverrides(artifact.value as unknown as FormExtensionMeta, lines, lineBaselines);
+}, { deep: true });
 const formActions = computed(() => {
   if (!artifact.value.actions) artifact.value.actions = [];
   return artifact.value.actions as FormAction[];
@@ -558,8 +574,18 @@ function removeEnumValue(i: number) { (artifact.value.values as unknown[]).splic
 function addGroup() { if (!artifact.value.groups) artifact.value.groups = []; (artifact.value.groups as unknown[]).push({ label: '', fields: [] }); }
 function removeGroup(i: number) { (artifact.value.groups as unknown[]).splice(i, 1); }
 // ---- form line grid helpers ----
-function addLine() { formLines.value.push({ table: '', refField: '', fields: [] }); }
-function removeLine(i: number) { formLines.value.splice(i, 1); }
+function addLine() { formLines.value.push({ id: `line-${crypto.randomUUID()}`, table: '', refField: '', fields: [] }); }
+function removeLine(i: number) {
+  const line = formLines.value[i];
+  if (line.__inherited) line.hidden = true;
+  else formLines.value.splice(i, 1);
+}
+function resetLine(i: number) {
+  const line = formLines.value[i];
+  if (!line.__inherited || !line.id) return;
+  const baseline = lineBaselines.get(line.id);
+  if (baseline) formLines.value.splice(i, 1, { ...JSON.parse(JSON.stringify(baseline)), __inherited: true });
+}
 function addAggregate(line: EditableLine) { if (!line.aggregates) line.aggregates = []; line.aggregates.push({ fn: 'count' }); }
 function removeAggregate(line: EditableLine, i: number) { line.aggregates!.splice(i, 1); }
 // ---- security helpers ----
@@ -691,7 +717,7 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
             <n-card v-if="kind === 'script' || kind === 'scriptExtension'" size="small" title="Business Logic Script">
               <n-space vertical>
                 <n-alert type="warning" title="High-risk executable code">
-                  Saving a script requires separate confirmation. AI and MCP change sets cannot create or update scripts.
+                  Saving a script requires separate confirmation. AI may only submit it as a proposal for human approval.
                 </n-alert>
                 <n-form-item>
                   <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0">
@@ -715,7 +741,7 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
             <n-card v-if="kind === 'function' || kind === 'functionExtension'" size="small" title="Function">
               <n-space vertical>
                 <n-alert type="warning" title="High-risk executable code">
-                  Functions run on the server. AI and MCP change sets cannot create or update functions.
+                  Functions run on the server. AI may only submit them as proposals for human approval.
                 </n-alert>
                 <n-form-item>
                   <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0">
@@ -831,12 +857,22 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
               </n-card>
 
               <!-- Line grids (master-detail) -->
-              <n-card v-if="kind === 'form'" size="small" title="Line grids">
+              <n-card size="small" title="Line grids">
+                <n-alert v-if="kind === 'formExtension'" type="info" style="margin-bottom:12px">Inherited lines are shown with their relationship locked. Changes are saved as this Layer's lineOverrides delta.</n-alert>
                 <n-space vertical :size="16">
                   <n-card v-for="(line, li) in formLines" :key="li" size="small" :bordered="true">
                     <n-space :size="16" align="start" style="margin-bottom: 8px">
+                      <n-form-item label="Label">
+                        <n-input v-model:value="line.label" size="small" placeholder="(optional)" style="width: 180px" />
+                      </n-form-item>
+                      <n-form-item label="Order">
+                        <n-input-number v-model:value="line.order" size="small" clearable style="width: 110px" />
+                      </n-form-item>
+                      <n-form-item label="Visible">
+                        <n-checkbox :checked="line.hidden !== true" @update:checked="(visible: boolean) => (line.hidden = !visible)" />
+                      </n-form-item>
                       <n-form-item label="Line table">
-                        <n-select v-model:value="line.table" :options="tableOptions" size="small" style="min-width: 200px" filterable />
+                        <n-select v-model:value="line.table" :options="tableOptions" :disabled="line.__inherited" size="small" style="min-width: 200px" filterable />
                       </n-form-item>
                       <n-form-item label="Ref field (on line table)">
                         <n-select
@@ -845,13 +881,15 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
                           size="small"
                           style="min-width: 200px"
                           filterable
+                          :disabled="line.__inherited"
                           @update:value="onLineRefFieldChange(line)"
                         />
                       </n-form-item>
                       <n-form-item label="Display fields">
                         <n-select v-model:value="line.fields" :options="displayFieldOptionsFor(line)" multiple size="small" style="min-width: 260px" />
                       </n-form-item>
-                      <n-button size="tiny" quaternary type="error" @click="removeLine(li)">✕ Remove line</n-button>
+                      <n-button v-if="line.__inherited" size="tiny" quaternary @click="resetLine(li)">Reset</n-button>
+                      <n-button size="tiny" quaternary type="error" @click="removeLine(li)">{{ line.__inherited ? 'Hide line' : '✕ Remove line' }}</n-button>
                     </n-space>
 
                     <p style="color: var(--n-text-color-3); font-size: 13px; margin: 0 0 8px">Aggregates shown on the header (e.g. line count, sum of amount)</p>

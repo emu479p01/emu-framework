@@ -48,10 +48,13 @@ export const useDesigner = defineStore('designer', {
   },
   actions: {
     async load() {
-      const res = await api.get<{ artifacts: WebArtifactEntry[]; apps: DesignerApp[]; catalog?: DesignerCatalog }>('/api/designer/artifacts');
+      const [res, catalogRes] = await Promise.all([
+        api.get<{ artifacts: WebArtifactEntry[]; apps: DesignerApp[] }>('/api/designer/artifacts?includeCatalog=false&limit=5000'),
+        api.get<{ catalog: DesignerCatalog }>('/api/designer/catalog'),
+      ]);
       this.artifacts = res.artifacts;
       this.apps = res.apps ?? [];
-      this.catalog = res.catalog ?? emptyCatalog();
+      this.catalog = catalogRes.catalog ?? emptyCatalog();
       this.loaded = true;
     },
     async save(artifact: Artifact) {
