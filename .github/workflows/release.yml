@@ -18,7 +18,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 24.18.0, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check:versions
+      - name: Verify release tag
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          test "${GITHUB_REF_NAME#v}" = "$VERSION"
       - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm build
@@ -38,18 +42,6 @@ jobs:
           docker buildx build --push --file Dockerfile.updater \
             --tag "ghcr.io/emu479p01/emu-framework-updater:$VERSION" \
             --tag "ghcr.io/emu479p01/emu-framework-updater:latest" .
-      - name: Package updater asset
-        shell: bash
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          mkdir -p release/emuframework-$VERSION
-          rsync -a --exclude='.git' --exclude='node_modules' --exclude='release' --exclude='*.db*' ./ release/emuframework-$VERSION/
-          cd release
-          zip -qr "emuframework-$VERSION.zip" "emuframework-$VERSION"
-          sha256sum "emuframework-$VERSION.zip" > "emuframework-$VERSION.zip.sha256"
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release/emuframework-*.zip
-            release/emuframework-*.zip.sha256
           generate_release_notes: true
