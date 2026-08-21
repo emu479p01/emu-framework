@@ -34,6 +34,7 @@ import { registerAppDataManagementRoutes } from './appDataManagement.js';
 import { createIntegrationManager, registerIntegrationRoutes } from './integrationServices.js';
 import { registerUserSecurityRoutes } from './userSecurity.js';
 import { registerViewRoutes } from './views.js';
+import { registerAiRoutes } from './aiApi.js';
 
 export interface ServerOptions {
   dbPath?: string;
@@ -784,6 +785,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }
     return user.username;
   };
+  registerAiRoutes(app, kernel, { requireDesigner, designerScope, requireAdmin: requireFrameworkAdmin });
   registerSystemMaintenanceRoutes(app, kernel, requireFrameworkAdmin);
   registerAppDataManagementRoutes(app, kernel, requireFrameworkAdmin);
   registerFontRoutes(app, kernel, requireFrameworkAdmin, requireUser);

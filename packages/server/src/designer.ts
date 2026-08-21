@@ -22,6 +22,19 @@ import { missingReportFonts } from './fontManager.js';
 
 const MAX_METADATA_PACKAGE_BYTES = 20 * 1024 * 1024;
 const METADATA_PACKAGE_TOO_LARGE = 'Package is too large (maximum 20 MB)';
+export let lastArtifactReadMetrics = { sqliteQueryMs: 0, jsonParseMs: 0, serializationMs: 0, rows: 0 };
+export let lastMetadataValidationMs = 0;
+
+function artifactColumns(artifact: MetadataArtifact) {
+  return {
+    kind: artifact.kind,
+    app: artifact.kind === 'app' ? artifact.name : artifact.app ?? null,
+    model: artifact.kind === 'app' ? null : artifact.model ?? null,
+    layer: artifact.kind === 'app' ? null : artifact.layer ?? null,
+    revision: metadataRevision([artifact]),
+    json: JSON.stringify(artifact),
+  };
+}
 
 /**
  * Web Designer API — CRUD over runtime metadata artifacts stored in
@@ -67,9 +80,55 @@ function loadStored(kernel: Kernel): MetadataArtifact[] {
   }
   return artifacts;
 }
+export const loadStoredArtifacts = loadStored;
+
+function backfillArtifactColumns(kernel: Kernel): void {
+  const rows = kernel.designerDb.prepare('SELECT name, app, model, layer, revision, json FROM "FW_WebArtifact"').all() as Array<{
+    name: string; app?: string | null; model?: string | null; layer?: string | null; revision?: string | null; json: string;
+  }>;
+  const update = kernel.designerDb.prepare('UPDATE "FW_WebArtifact" SET kind=?, app=?, model=?, layer=?, revision=? WHERE name=?');
+  const migrate = kernel.designerDb.transaction(() => {
+    for (const row of rows) {
+      try {
+        const artifact = JSON.parse(row.json) as MetadataArtifact;
+        const columns = artifactColumns(artifact);
+        if (row.app !== columns.app || row.model !== columns.model || row.layer !== columns.layer || row.revision !== columns.revision) {
+          update.run(columns.kind, columns.app, columns.model, columns.layer, columns.revision, row.name);
+        }
+      } catch {
+        // Invalid legacy JSON is reported by loadStored and left untouched.
+      }
+    }
+  });
+  migrate();
+}
+
+export function persistStoredArtifacts(kernel: Kernel, candidate: MetadataArtifact[], actor = 'changeset'): void {
+  const transaction = kernel.designerDb.transaction(() => {
+    const names = new Set(candidate.map((artifact) => artifact.name));
+    const rows = kernel.designerDb.prepare('SELECT name, revision FROM "FW_WebArtifact"').all() as { name: string; revision?: string }[];
+    const remove = kernel.designerDb.prepare('DELETE FROM "FW_WebArtifact" WHERE name = ?');
+    for (const row of rows) if (!names.has(row.name)) remove.run(row.name);
+    const upsert = kernel.designerDb.prepare(`
+      INSERT INTO "FW_WebArtifact" (kind, name, app, model, layer, revision, json, createdAt, createdBy, modifiedAt, modifiedBy)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?)
+      ON CONFLICT(name) DO UPDATE SET kind=excluded.kind, app=excluded.app, model=excluded.model,
+        layer=excluded.layer, revision=excluded.revision, json=excluded.json,
+        modifiedAt=CURRENT_TIMESTAMP, modifiedBy=excluded.modifiedBy
+    `);
+    const revisions = new Map(rows.map((row) => [row.name, row.revision]));
+    for (const artifact of candidate) {
+      const columns = artifactColumns(artifact);
+      if (revisions.get(artifact.name) === columns.revision) continue;
+      upsert.run(columns.kind, artifact.name, columns.app, columns.model, columns.layer, columns.revision, columns.json, actor, actor);
+    }
+  });
+  transaction();
+}
 
 /** Load stored web artifacts and merge them into the registry (boot). */
 export function bootWebArtifacts(kernel: Kernel): WebArtifactError[] {
+  backfillArtifactColumns(kernel);
   const stored = loadStored(kernel);
   const errors = kernel.applyWebArtifacts(stored as unknown as AnyMeta[]);
   for (const e of errors) {
@@ -85,6 +144,16 @@ export function registerDesignerRoutes(
   designerScope: (req: FastifyRequest) => 'all' | Set<string>,
 ): void {
   let lastErrors: WebArtifactError[] = [];
+  const serializationStarts = new WeakMap<FastifyRequest, number>();
+  app.addHook('onSend', (req, reply, payload, done) => {
+    const startedAt = serializationStarts.get(req);
+    if (startedAt !== undefined) {
+      lastArtifactReadMetrics.serializationMs = performance.now() - startedAt;
+      const current = String(reply.getHeader('Server-Timing') ?? '');
+      reply.header('Server-Timing', `${current}, serialization;dur=${lastArtifactReadMetrics.serializationMs.toFixed(2)}`);
+    }
+    done(null, payload);
+  });
   const previews = new Map<string, { actor: string; expiresAt: number; changeSet: MetadataChangeSet; preview: ChangeSetPreview }>();
   kernel.designerDb.exec(`
     CREATE TABLE IF NOT EXISTS "FW_ChangeSetAudit" (
@@ -100,22 +169,7 @@ export function registerDesignerRoutes(
     )
   `);
 
-  const saveCandidate = (candidate: MetadataArtifact[]): void => {
-    const transaction = kernel.designerDb.transaction(() => {
-      const names = new Set(candidate.map((artifact) => artifact.name));
-      const rows = kernel.designerDb.prepare('SELECT name FROM "FW_WebArtifact"').all() as { name: string }[];
-      const remove = kernel.designerDb.prepare('DELETE FROM "FW_WebArtifact" WHERE name = ?');
-      for (const row of rows) if (!names.has(row.name)) remove.run(row.name);
-      const upsert = kernel.designerDb.prepare(`
-        INSERT INTO "FW_WebArtifact" (kind, name, json, createdAt, createdBy, modifiedAt, modifiedBy)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?)
-        ON CONFLICT(name) DO UPDATE SET kind=excluded.kind, json=excluded.json,
-          modifiedAt=CURRENT_TIMESTAMP, modifiedBy=excluded.modifiedBy
-      `);
-      for (const artifact of candidate) upsert.run(artifact.kind, artifact.name, JSON.stringify(artifact), 'changeset', 'changeset');
-    });
-    transaction();
-  };
+  const saveCandidate = (candidate: MetadataArtifact[]): void => persistStoredArtifacts(kernel, candidate);
 
   const assertExplicitPlacement = (artifact: MetadataArtifact): void => {
     if (artifact.kind === 'app') return;
@@ -175,7 +229,7 @@ export function registerDesignerRoutes(
     }
   };
 
-  app.get('/api/designer/artifacts', (req) => {
+  const catalogFor = (req: FastifyRequest) => {
     requireDesigner(req);
     const scope = designerScope(req);
     const readableCatalogItem = (artifact: { name: string; app?: string }): boolean => {
@@ -195,32 +249,8 @@ export function registerDesignerRoutes(
     const safeArtifact = (artifact: AnyMeta): AnyMeta => artifact.kind === 'table'
       ? safeTable(artifact) as AnyMeta
       : artifact;
-    const storedRows = kernel
-      .designerContext()
-      .select('FW_WebArtifact')
-      .toArray()
-      .map((r) => ({
-        kind: r.f.kind as string,
-        name: r.f.name as string,
-        artifact: safeArtifact(JSON.parse(r.f.json as string) as AnyMeta),
-        error: lastErrors.find((e) => e.name === r.f.name)?.error,
-      }))
-      .filter((r) => inScope(scope, { kind: r.kind, name: r.name, ...(r.artifact as { app?: string }) }));
-    const storedNames = new Set(storedRows.map((row) => row.name));
-    const systemRows = scope === 'all'
-      ? [
-          ...kernel.registry.allTables(), ...kernel.registry.allEnums(), ...kernel.registry.allForms(),
-          ...kernel.registry.allMenus(), ...kernel.registry.allPrivileges(), ...kernel.registry.allDuties(),
-          ...kernel.registry.allRoles(), ...kernel.registry.allScripts(), ...kernel.registry.allFunctions(),
-          ...kernel.registry.allReports(), ...kernel.registry.allViews(), ...kernel.registry.allCharts(),
-        ]
-          .filter((artifact) => kernel.registry.appForArtifact(artifact.name) === 'system' && !storedNames.has(artifact.name))
-          .map((artifact) => ({ kind: artifact.kind, name: artifact.name, artifact: safeArtifact(artifact) }))
-      : [];
-    const rows = [...storedRows, ...systemRows];
     return {
-      artifacts: rows,
-      apps: kernel.registry.loadedApps().filter((a) => scope === 'all' || scope.has(a.name)),
+      safeArtifact,
       catalog: {
         tables: kernel.registry.allTables().filter(readableCatalogItem).map(safeTable),
         enums: kernel.registry.allEnums().filter(readableCatalogItem),
@@ -236,6 +266,86 @@ export function registerDesignerRoutes(
         charts: kernel.registry.allCharts().filter(readableCatalogItem),
       },
     };
+  };
+
+  app.get<{ Querystring: { app?: string; model?: string; kind?: string; cursor?: string; limit?: string; revision?: string; includeCatalog?: string } }>(
+    '/api/designer/artifacts',
+    (req, reply) => {
+    requireDesigner(req);
+    const scope = designerScope(req);
+    const { safeArtifact, catalog } = catalogFor(req);
+    const sqliteStartedAt = performance.now();
+    const storedRecords = kernel
+      .designerContext()
+      .select('FW_WebArtifact')
+      .toArray();
+    const sqliteFinishedAt = performance.now();
+    const storedRows = storedRecords
+      .map((r) => ({
+        kind: r.f.kind as string,
+        name: r.f.name as string,
+        artifact: safeArtifact(JSON.parse(r.f.json as string) as AnyMeta),
+        error: lastErrors.find((e) => e.name === r.f.name)?.error,
+      }))
+      .filter((r) => inScope(scope, { kind: r.kind, name: r.name, ...(r.artifact as { app?: string }) }))
+      .filter((r) => !req.query.app || (r.artifact as { app?: string }).app === req.query.app)
+      .filter((r) => !req.query.model || (r.artifact as { model?: string }).model === req.query.model)
+      .filter((r) => !req.query.kind || r.kind === req.query.kind);
+    const parseFinishedAt = performance.now();
+    lastArtifactReadMetrics = {
+      sqliteQueryMs: sqliteFinishedAt - sqliteStartedAt,
+      jsonParseMs: parseFinishedAt - sqliteFinishedAt,
+      serializationMs: 0,
+      rows: storedRecords.length,
+    };
+    reply.header('Server-Timing', [
+      `sqlite;dur=${lastArtifactReadMetrics.sqliteQueryMs.toFixed(2)}`,
+      `json-parse;dur=${lastArtifactReadMetrics.jsonParseMs.toFixed(2)}`,
+      `registry;dur=${kernel.lastApplyMetrics.dependencyAndRegistryMs.toFixed(2)}`,
+      `schema-sync;dur=${kernel.lastApplyMetrics.schemaSyncMs.toFixed(2)}`,
+    ].join(', '));
+    const storedNames = new Set(storedRows.map((row) => row.name));
+    const systemRows = scope === 'all'
+      ? [
+          ...kernel.registry.allTables(), ...kernel.registry.allEnums(), ...kernel.registry.allForms(),
+          ...kernel.registry.allMenus(), ...kernel.registry.allPrivileges(), ...kernel.registry.allDuties(),
+          ...kernel.registry.allRoles(), ...kernel.registry.allScripts(), ...kernel.registry.allFunctions(),
+          ...kernel.registry.allReports(), ...kernel.registry.allViews(), ...kernel.registry.allCharts(),
+        ]
+          .filter((artifact) => kernel.registry.appForArtifact(artifact.name) === 'system' && !storedNames.has(artifact.name))
+          .map((artifact) => ({ kind: artifact.kind, name: artifact.name, artifact: safeArtifact(artifact) }))
+      : [];
+    const rows = [...storedRows, ...systemRows].sort((a, b) => a.name.localeCompare(b.name));
+    const revision = metadataRevision(rows.map((row) => row.artifact as MetadataArtifact));
+    const etag = `"${revision}"`;
+    if (req.headers['if-none-match'] === etag || req.query.revision === revision) return reply.status(304).send();
+    reply.header('ETag', etag);
+    const cursor = Math.max(0, Number.parseInt(req.query.cursor ?? '0', 10) || 0);
+    const limit = Math.min(5000, Math.max(1, Number.parseInt(req.query.limit ?? '5000', 10) || 5000));
+    const page = rows.slice(cursor, cursor + limit);
+    serializationStarts.set(req, performance.now());
+    return reply.send({
+      artifacts: page,
+      apps: kernel.registry.loadedApps().filter((a) => scope === 'all' || scope.has(a.name)),
+      revision,
+      nextCursor: cursor + limit < rows.length ? String(cursor + limit) : undefined,
+      total: rows.length,
+      ...(req.query.includeCatalog === 'false' ? {} : { catalog }),
+    });
+  });
+
+  app.get<{ Querystring: { app?: string; kind?: string; revision?: string } }>('/api/designer/catalog', (req, reply) => {
+    const fullCatalog = catalogFor(req).catalog;
+    const filter = (items: AnyMeta[]) => items.filter((item) =>
+      (!req.query.app || kernel.registry.appForArtifact(item.name) === req.query.app)
+      && (!req.query.kind || item.kind === req.query.kind));
+    const catalog = Object.fromEntries(Object.entries(fullCatalog).map(([key, items]) => [key, filter(items as AnyMeta[])]));
+    const artifacts = Object.values(catalog).flat() as MetadataArtifact[];
+    const revision = metadataRevision(artifacts);
+    const etag = `"${revision}"`;
+    if (req.headers['if-none-match'] === etag || req.query.revision === revision) return reply.status(304).send();
+    reply.header('ETag', etag);
+    return reply.send({ catalog, revision });
   });
 
   app.get<{ Params: { kind: string; name: string }; Querystring: { app?: string; model?: string } }>(
@@ -439,7 +549,9 @@ export function registerDesignerRoutes(
     const actor = requireDesigner(req);
     assertChangeSetScope(req, req.body);
     const allowScripts = req.body.source === 'designer';
+    const validationStartedAt = performance.now();
     const preview = previewMetadataChangeSet(kernel, loadStored(kernel), req.body, { allowScripts });
+    lastMetadataValidationMs = performance.now() - validationStartedAt;
     if (!preview.valid) return reply.status(422).send(preview);
     const previewId = randomUUID();
     previews.set(previewId, { actor, expiresAt: Date.now() + 10 * 60_000, changeSet: req.body, preview });
@@ -520,7 +632,7 @@ export function registerDesignerRoutes(
         return reply.status(422).send({ error: own.error });
       }
       lastErrors = errors;
-      kernel.designerContext().newRecord('FW_WebArtifact').setMany({ kind, name, json: JSON.stringify(artifact) }).insert();
+       kernel.designerContext().newRecord('FW_WebArtifact').setMany({ name, ...artifactColumns(artifact) }).insert();
       reply.status(201);
       return { ok: true, artifact, errors };
     },
@@ -564,10 +676,10 @@ export function registerDesignerRoutes(
       const ctx = kernel.designerContext();
       const existing = ctx.select('FW_WebArtifact').whereEq({ name }).firstOnly();
       if (existing) {
-        existing.setMany({ kind, json: JSON.stringify(artifact) });
+        existing.setMany(artifactColumns(artifact as MetadataArtifact));
         existing.update();
       } else {
-        ctx.newRecord('FW_WebArtifact').setMany({ kind, name, json: JSON.stringify(artifact) }).insert();
+        ctx.newRecord('FW_WebArtifact').setMany({ name, ...artifactColumns(artifact as MetadataArtifact) }).insert();
       }
       return { ok: true, errors };
     },
@@ -720,7 +832,7 @@ export function registerDesignerRoutes(
     },
   );
 
-  // Reload file-based apps from disk (for apps created via CLI while server is running)
+  // Reload legacy file-based apps from disk during compatibility migrations.
   app.post('/api/designer/reload', (req, reply) => {
     requireDesigner(req);
     if (designerScope(req) !== 'all') {

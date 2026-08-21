@@ -288,9 +288,17 @@ export interface FormExtensionMeta {
   charts?: FormChartMeta[];
   actions?: FormAction[];
   lines?: FormLineGridMeta[];
+  /** Delta-only overrides for inherited line grids. Relationship identity (table/refField) is immutable. */
+  lineOverrides?: FormLineOverrideMeta[];
   elementOverrides?: PresentationOverrideMeta[];
   layer?: LayerType;
   model?: string;
+}
+
+export interface FormLineOverrideMeta extends PresentationOverrideMeta {
+  fields?: string[];
+  aggregates?: AggregateMeta[];
+  actions?: FormAction[];
 }
 
 export interface MenuExtensionMeta {

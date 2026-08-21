@@ -49,9 +49,17 @@ const systemWebArtifact: TableMeta = {
   fields: [
     { name: 'kind', type: 'string', mandatory: true },
     { name: 'name', type: 'string', mandatory: true },
+    { name: 'app', type: 'string' },
+    { name: 'model', type: 'string' },
+    { name: 'layer', type: 'string' },
+    { name: 'revision', type: 'string' },
     { name: 'json', type: 'string', mandatory: true },
   ],
-  indexes: [{ name: 'NameIdx', fields: ['name'], unique: true }],
+  indexes: [
+    { name: 'NameIdx', fields: ['name'], unique: true },
+    { name: 'PlacementIdx', fields: ['app', 'model', 'kind'] },
+    { name: 'RevisionIdx', fields: ['revision'] },
+  ],
 };
 
 const systemMigration: TableMeta = {

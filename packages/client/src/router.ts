@@ -8,6 +8,7 @@ const ListPage = () => import('./views/ListPage.vue');
 const FormPage = () => import('./views/FormPage.vue');
 const DesignerPage = () => import('./views/designer/DesignerPage.vue');
 const DesignerEditPage = () => import('./views/designer/DesignerEditPage.vue');
+const AiProposalsPage = () => import('./views/designer/AiProposalsPage.vue');
 const ReportEditPage = () => import('./views/report-designer/ReportEditPage.vue');
 const SystemMaintenancePage = () => import('./views/SystemMaintenancePage.vue');
 const AppDataManagementPage = () => import('./views/AppDataManagementPage.vue');
@@ -34,6 +35,7 @@ export const router = createRouter({
     { path: '/form/:formName/:id', component: FormPage, props: true },
     // Designer (framework-level)
     { path: '/designer', component: DesignerPage, meta: { capability: 'designer' } },
+    { path: '/designer/ai-proposals', component: AiProposalsPage, meta: { capability: 'designer' } },
     { path: '/designer/app/:appName', component: DesignerPage, meta: { capability: 'designer' } },
     { path: '/designer/app/:appName/model/:modelName', component: DesignerPage, meta: { capability: 'designer' } },
     { path: '/designer/app/:appName/model/:modelName/new/report', component: ReportEditPage, meta: { capability: 'designer' } },

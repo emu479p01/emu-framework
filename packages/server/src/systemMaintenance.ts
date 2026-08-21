@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +9,7 @@ import { strFromU8, unzipSync, zipSync } from 'fflate';
 import DatabaseCtor from 'better-sqlite3';
 import { CORE_VERSION, type Kernel } from '@emu/core';
 import { fontCachePath } from './fontManager.js';
+import { lastArtifactReadMetrics, lastMetadataValidationMs } from './designer.js';
 
 const BACKUP_FORMAT = 'emuframework-backup';
 const BACKUP_SCHEMA_VERSION = 3;
@@ -54,7 +54,7 @@ export interface UpdateJob {
   requestedAt: string;
   updatedAt: string;
   backupPath: string;
-  deployment: 'windows' | 'docker' | 'unsupported';
+  deployment: 'docker' | 'unsupported';
   error?: string;
 }
 
@@ -70,7 +70,6 @@ interface GitHubRelease {
 
 function deploymentMode(): UpdateJob['deployment'] {
   if (process.env.EMU_DEPLOYMENT_MODE === 'docker') return 'docker';
-  if (process.env.EMU_DEPLOYMENT_MODE === 'windows' || process.platform === 'win32') return 'windows';
   return 'unsupported';
 }
 
@@ -88,6 +87,7 @@ function restoreStageDir(): string {
 
 function dataDbPath(): string { return process.env.EMU_DB_PATH ?? join(root, 'data.db'); }
 function designerDbPath(): string { return process.env.EMU_DESIGNER_DB_PATH ?? join(root, 'designer.db'); }
+function secretKeyPath(): string { return process.env.EMU_SECRET_KEY_PATH ?? join(dirname(designerDbPath()), '.emu-secret.key'); }
 
 function backupDir(): string {
   return process.env.EMU_BACKUP_DIR ?? (deploymentMode() === 'docker' ? '/data/backups' : join(root, 'backups'));
@@ -227,27 +227,10 @@ async function launchRestore(job: RestoreJob): Promise<void> {
     if (!response.ok) throw new Error(`Docker updater rejected restore (HTTP ${response.status})`);
     return;
   }
-  if (job.deployment === 'windows') {
-    const script = join(root, 'scripts', 'restore-coordinator.mjs');
-    if (!existsSync(script)) throw new Error('Restore coordinator is missing');
-    const child = spawn(process.execPath, [script, '--job', restoreStatePath(), '--stage', job.stagePath, '--data', dataDbPath(), '--designer', designerDbPath(), '--fonts', fontCachePath(), '--root', root], {
-      cwd: root, detached: true, stdio: 'ignore', windowsHide: true,
-    });
-    child.unref(); return;
-  }
   throw new Error('Web restore is not supported on this deployment');
 }
 
 async function launchUpdate(job: UpdateJob): Promise<void> {
-  if (job.deployment === 'windows') {
-    const script = join(root, 'scripts', 'update-framework.ps1');
-    if (!existsSync(script)) throw new Error('Windows updater script is missing');
-    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-Version', job.targetVersion, '-StatusPath', statePath(), '-JobId', job.id], {
-      cwd: root, detached: true, stdio: 'ignore', windowsHide: true,
-    });
-    child.unref();
-    return;
-  }
   if (job.deployment === 'docker') {
     const url = process.env.EMU_UPDATER_URL;
     const token = process.env.EMU_UPDATER_TOKEN;
@@ -264,6 +247,25 @@ async function launchUpdate(job: UpdateJob): Promise<void> {
 }
 
 export function registerSystemMaintenanceRoutes(app: FastifyInstance, kernel: Kernel, requireFrameworkAdmin: (req: FastifyRequest) => string): void {
+  app.get('/api/system/database/diagnostics', (req) => {
+    requireFrameworkAdmin(req);
+    const inspect = (db: Kernel['db']) => {
+      const file = (db.pragma('database_list') as { name: string; file: string }[]).find((entry) => entry.name === 'main')?.file ?? '';
+      const scalar = (name: string) => Number((db.pragma(name, { simple: true }) as number) ?? 0);
+      return {
+        file,
+        quickCheck: db.pragma('quick_check'),
+        journalMode: db.pragma('journal_mode', { simple: true }),
+          busyTimeoutMs: scalar('busy_timeout'),
+          walAutoCheckpointPages: scalar('wal_autocheckpoint'),
+        pageCount: scalar('page_count'),
+        pageSize: scalar('page_size'),
+        freelistCount: scalar('freelist_count'),
+        walBytes: file && existsSync(`${file}-wal`) ? statSync(`${file}-wal`).size : 0,
+      };
+    };
+    return { data: inspect(kernel.db), designer: inspect(kernel.designerDb), metadata: { apply: kernel.lastApplyMetrics, artifactRead: lastArtifactReadMetrics, validationMs: lastMetadataValidationMs }, checkedAt: new Date().toISOString() };
+  });
   app.get('/api/system/info', async (req) => {
     requireFrameworkAdmin(req);
     return { version: CORE_VERSION, backupSchemaVersion: BACKUP_SCHEMA_VERSION, updateChannel: 'stable', deployment: deploymentMode(), updateEnabled: deploymentMode() !== 'unsupported', job: await readJob() };
@@ -283,6 +285,8 @@ export function registerSystemMaintenanceRoutes(app: FastifyInstance, kernel: Ke
 
   app.post('/api/system/update', async (req, reply) => {
     const requestedBy = requireFrameworkAdmin(req);
+    if (deploymentMode() !== 'docker') return reply.status(409).send({ error: 'Framework updates require the Docker updater service' });
+    if (!existsSync(secretKeyPath())) return reply.status(409).send({ error: 'Persistent .emu-secret.key or EMU_SECRET_KEY_PATH is required before update' });
     const existing = await readJob();
     if (existing && ['pending', 'running', 'restarting'].includes(existing.status)) return reply.status(409).send({ error: 'A framework update is already running', job: publicJob(existing) });
     const release = await latestRelease();
@@ -359,7 +363,6 @@ export function registerSystemMaintenanceRoutes(app: FastifyInstance, kernel: Ke
       job.status = 'failed'; job.updatedAt = new Date().toISOString(); job.error = error instanceof Error ? error.message : String(error); await writeRestoreJob(job);
       return reply.status(503).send({ error: job.error, job });
     }
-    if (job.deployment === 'windows') setTimeout(() => { void app.close().finally(() => process.exit(0)); }, 750).unref();
     return reply.status(202).send({ job });
   });
 

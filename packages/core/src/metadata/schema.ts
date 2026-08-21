@@ -121,6 +121,13 @@ const presentationOverrideSchema = Type.Object({
   targetId: Type.String({ minLength: 1 }), label: Type.Optional(Type.String()),
   hidden: Type.Optional(Type.Boolean()), order: Type.Optional(Type.Number()),
 }, { additionalProperties: false });
+const lineOverrideSchema = Type.Object({
+  targetId: Type.String({ minLength: 1 }), label: Type.Optional(Type.String()),
+  hidden: Type.Optional(Type.Boolean()), order: Type.Optional(Type.Number()),
+  fields: Type.Optional(Type.Array(Type.String())),
+  aggregates: Type.Optional(Type.Array(aggregateSchema)),
+  actions: Type.Optional(Type.Array(formActionSchema)),
+}, { additionalProperties: false });
 const fieldOverrideSchema = Type.Object({
   field: Type.String({ minLength: 1 }), label: Type.Optional(Type.String()),
   readOnly: Type.Optional(Type.Boolean()), allowEdit: Type.Optional(Type.Boolean()),
@@ -212,7 +219,7 @@ const artifactSchemas = [
   Type.Object({ kind: Type.Literal('duty'), ...common, privileges: Type.Array(Type.String()) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('role'), ...common, duties: Type.Optional(Type.Array(Type.String())), privileges: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('tableExtension'), ...common, table: Type.String(), fields: Type.Optional(Type.Array(fieldSchema)), indexes: Type.Optional(Type.Array(indexSchema)), fieldOverrides: Type.Optional(Type.Array(fieldOverrideSchema)) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal('formExtension'), ...common, form: Type.String(), listFields: Type.Optional(Type.Array(Type.String())), filterFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), charts: Type.Optional(Type.Array(formChartSchema)), actions: Type.Optional(Type.Array(formActionSchema)), lines: Type.Optional(Type.Array(lineGridSchema)), elementOverrides: Type.Optional(Type.Array(presentationOverrideSchema)) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('formExtension'), ...common, form: Type.String(), listFields: Type.Optional(Type.Array(Type.String())), filterFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), charts: Type.Optional(Type.Array(formChartSchema)), actions: Type.Optional(Type.Array(formActionSchema)), lines: Type.Optional(Type.Array(lineGridSchema)), lineOverrides: Type.Optional(Type.Array(lineOverrideSchema)), elementOverrides: Type.Optional(Type.Array(presentationOverrideSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('menuExtension'), ...common, menu: Type.String(), items: Type.Optional(Type.Array(menuItemSchema)), insertions: Type.Optional(Type.Array(Type.Object({ path: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), items: Type.Array(menuItemSchema, { minItems: 1 }) }, { additionalProperties: false }))), itemOverrides: Type.Optional(Type.Array(menuItemOverrideSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('enumExtension'), ...common, enum: Type.String(), values: Type.Array(Type.Object({ name, value: Type.Integer(), label: Type.Optional(Type.String()) })), valueOverrides: Type.Optional(Type.Array(Type.Object({ name: Type.String({ minLength: 1 }), label: Type.String() }, { additionalProperties: false }))) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('privilegeExtension'), ...common, privilege: Type.String(), tablePermissions: Type.Optional(Type.Array(tablePermissionSchema)), forms: Type.Optional(Type.Array(Type.String())), functions: Type.Optional(Type.Array(Type.String())), reports: Type.Optional(Type.Array(Type.String())), views: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),

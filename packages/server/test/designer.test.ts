@@ -105,6 +105,19 @@ describe('web designer API', () => {
     expect(duplicate.statusCode).toBe(409);
   });
 
+  it('paginates the Artifact list separately from the conditional catalog', async () => {
+    const listed = await app.inject({ method: 'GET', url: '/api/designer/artifacts?includeCatalog=false&kind=enum&limit=1', headers: admin });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().artifacts).toHaveLength(1);
+    expect(listed.json().catalog).toBeUndefined();
+    expect(listed.headers.etag).toBeTruthy();
+    const unchanged = await app.inject({ method: 'GET', url: '/api/designer/artifacts?includeCatalog=false&kind=enum&limit=1', headers: { ...admin, 'if-none-match': listed.headers.etag! } });
+    expect(unchanged.statusCode).toBe(304);
+    const catalog = await app.inject({ method: 'GET', url: '/api/designer/catalog?app=web', headers: admin });
+    expect(catalog.statusCode).toBe(200);
+    expect(catalog.json().catalog.enums.some((entry: { name: string }) => entry.name === 'WEB_ApiPriority')).toBe(true);
+  });
+
   it('creates Apps with zero Models and requires explicit placement for every new artifact', async () => {
     const createdApp = await app.inject({
       method: 'PUT', url: '/api/designer/artifacts/app/zeromodel', headers: admin,

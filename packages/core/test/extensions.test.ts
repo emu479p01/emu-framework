@@ -18,6 +18,7 @@ const baseForm: FormMeta = {
   table: 'TESTAPP_CustTable',
   listFields: ['accountNum', 'name'],
   groups: [{ label: 'General', fields: ['accountNum', 'name'] }],
+  lines: [{ id: 'sales-lines', label: 'Sales', table: 'TESTAPP_SalesTable', refField: 'custId', fields: ['salesId', 'totalAmount'] }],
 };
 const baseMenu: MenuMeta = { kind: 'menu', name: 'TESTAPP_Main', items: [{ form: 'TESTAPP_CustForm' }] };
 
@@ -107,6 +108,29 @@ describe('extensions', () => {
     const form = registry.getForm('TESTAPP_CustForm');
     expect(form.listFields).toEqual(['accountNum', 'name', 'creditLimit']);
     expect(form.groups).toHaveLength(2);
+  });
+
+  it('form extension adds new lines and overrides inherited line presentation without copying it', () => {
+    const registry = baseRegistry();
+    const formExt: FormExtensionMeta = {
+      kind: 'formExtension', name: 'TESTAPP_ClientCustom_TESTAPP_CustForm_Extension', form: 'TESTAPP_CustForm',
+      lines: [{ id: 'open-sales', label: 'Open sales', table: 'TESTAPP_SalesTable', refField: 'custId', fields: ['salesId'] }],
+      lineOverrides: [{ targetId: 'sales-lines', label: 'Sales history', hidden: false, order: 20, fields: ['salesId'], aggregates: [{ fn: 'count', label: 'Orders' }], actions: [] }],
+    };
+    registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [formExt]);
+    expect(formExt).not.toHaveProperty('table');
+    expect(registry.getForm('TESTAPP_CustForm').lines).toEqual([
+      expect.objectContaining({ id: 'open-sales', label: 'Open sales' }),
+      expect.objectContaining({ id: 'sales-lines', label: 'Sales history', fields: ['salesId'], aggregates: [{ fn: 'count', label: 'Orders' }] }),
+    ]);
+  });
+
+  it('rejects line overrides that target a missing inherited line', () => {
+    const registry = baseRegistry();
+    expect(() => registry.registerApp({ ...testManifest('testapp.ext'), dependsOn: ['testapp'] }, [{
+      kind: 'formExtension', name: 'TESTAPP_ClientCustom_TESTAPP_CustForm_Extension', form: 'TESTAPP_CustForm',
+      lineOverrides: [{ targetId: 'missing-line', fields: ['salesId'] }],
+    }])).toThrow(/unknown form line 'missing-line'/);
   });
 
   it('menu extension appends items', () => {

@@ -11,6 +11,7 @@ interface Grant { appName: string; canOpen: boolean; canCustomize: boolean }
 interface UserRow { id: number; username: string; displayName?: string; enabled: boolean; roles: string[]; appAccess: Grant[] }
 interface Catalog { roles: { name: string; label: string; legacy?: boolean }[]; apps: { name: string; label: string }[] }
 interface TokenRow { id: number; name: string; enabled: boolean; views: string[]; expiresAt?: string; lastUsedAt?: string; revokedAt?: string }
+interface AiTokenRow { id: number; name: string; apps: string[]; scopes: string[]; expiresAt?: string; lastUsedAt?: string; revokedAt?: string }
 
 const meta = useMeta();
 const message = useMessage();
@@ -18,26 +19,30 @@ const dialog = useDialog();
 const users = ref<UserRow[]>([]);
 const catalog = ref<Catalog>({ roles: [], apps: [] });
 const tokens = ref<TokenRow[]>([]);
+const aiTokens = ref<AiTokenRow[]>([]);
 const busy = ref(false);
 const showUser = ref(false);
 const showReset = ref(false);
 const showToken = ref(false);
+const showAiToken = ref(false);
 const editingId = ref<number | null>(null);
 const error = ref('');
 const resetPassword = ref('');
 const issuedSecret = ref('');
 const draft = reactive({ username: '', displayName: '', password: '', enabled: true, roles: [] as string[], appAccess: [] as Grant[] });
 const tokenDraft = reactive({ name: '', views: [] as string[], expiresAt: null as number | null });
+const aiTokenDraft = reactive({ name: '', apps: [] as string[], scopes: ['inspect', 'validate', 'propose'] as string[], expiresAt: null as number | null });
 const roleOptions = computed(() => catalog.value.roles.map((role) => ({ label: `${role.label}${role.legacy ? ' — legacy' : ''}`, value: role.name })));
 const viewOptions = computed(() => (meta.meta?.views ?? []).map((view) => ({ label: view.label ?? view.name, value: view.name })));
 
 async function load() {
-  const [catalogResult, userResult, tokenResult] = await Promise.all([
+  const [catalogResult, userResult, tokenResult, aiTokenResult] = await Promise.all([
     api.get<Catalog>('/api/system/security/catalog'),
     api.get<{ data: UserRow[] }>('/api/system/security/users'),
     api.get<{ data: TokenRow[] }>('/api/system/view-tokens'),
+    api.get<{ data: AiTokenRow[] }>('/api/system/ai-tokens'),
   ]);
-  catalog.value = catalogResult; users.value = userResult.data; tokens.value = tokenResult.data;
+  catalog.value = catalogResult; users.value = userResult.data; tokens.value = tokenResult.data; aiTokens.value = aiTokenResult.data;
 }
 onMounted(load);
 function allGrants(existing: Grant[] = []): Grant[] {
@@ -89,6 +94,13 @@ async function revokeToken(token: TokenRow) {
   try { await api.post(`/api/system/view-tokens/${token.id}/revoke`); await load(); message.success('Token revoked'); }
   catch (err) { message.error(err instanceof ApiError ? err.message : 'Token could not be revoked'); }
 }
+function createAiToken() { Object.assign(aiTokenDraft, { name: '', apps: [], scopes: ['inspect', 'validate', 'propose'], expiresAt: null }); issuedSecret.value = ''; error.value = ''; showAiToken.value = true; }
+async function issueAiToken() {
+  busy.value = true; error.value = '';
+  try { const created = await api.post<{ token: string }>('/api/system/ai-tokens', { ...aiTokenDraft, expiresAt: aiTokenDraft.expiresAt ? new Date(aiTokenDraft.expiresAt).toISOString() : null }); issuedSecret.value = created.token; await load(); }
+  catch (err) { error.value = err instanceof ApiError ? err.message : 'AI token could not be created.'; } finally { busy.value = false; }
+}
+async function revokeAiToken(token: AiTokenRow) { try { await api.post(`/api/system/ai-tokens/${token.id}/revoke`); await load(); message.success('AI token revoked'); } catch (err) { message.error(err instanceof ApiError ? err.message : 'AI token could not be revoked'); } }
 </script>
 
 <template>
@@ -105,6 +117,11 @@ async function revokeToken(token: TokenRow) {
         <n-space justify="end" style="margin-bottom:12px"><n-button type="primary" @click="createToken">Create View token</n-button></n-space>
         <n-card><div class="table-scroll"><n-table><thead><tr><th>Name</th><th>Views</th><th>Expires</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody><tr v-for="token in tokens" :key="token.id"><td>{{ token.name }}</td><td>{{ token.views.join(', ') }}</td><td>{{ token.expiresAt || 'Never' }}</td><td>{{ token.lastUsedAt || 'Never' }}</td><td><n-tag :type="token.enabled && !token.revokedAt ? 'success' : 'error'">{{ token.enabled && !token.revokedAt ? 'Active' : 'Revoked' }}</n-tag></td><td><n-button v-if="token.enabled && !token.revokedAt" size="small" type="error" @click="revokeToken(token)">Revoke</n-button></td></tr></tbody></n-table></div></n-card>
       </n-tab-pane>
+      <n-tab-pane name="ai-tokens" tab="AI REST tokens">
+        <n-alert type="info" style="margin-bottom:14px">AI tokens can inspect, validate, and propose metadata only for selected Apps. They cannot apply changes or read business data.</n-alert>
+        <n-space justify="end" style="margin-bottom:12px"><n-button type="primary" @click="createAiToken">Create AI token</n-button></n-space>
+        <n-card><div class="table-scroll"><n-table><thead><tr><th>Name</th><th>Apps</th><th>Scopes</th><th>Expires</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody><tr v-for="token in aiTokens" :key="token.id"><td>{{ token.name }}</td><td>{{ token.apps.join(', ') }}</td><td>{{ token.scopes.join(', ') }}</td><td>{{ token.expiresAt || 'Never' }}</td><td>{{ token.lastUsedAt || 'Never' }}</td><td><n-tag :type="!token.revokedAt ? 'success' : 'error'">{{ !token.revokedAt ? 'Active' : 'Revoked' }}</n-tag></td><td><n-button v-if="!token.revokedAt" size="small" type="error" @click="revokeAiToken(token)">Revoke</n-button></td></tr></tbody></n-table></div></n-card>
+      </n-tab-pane>
     </n-tabs>
 
     <n-modal v-model:show="showUser" preset="card" :title="editingId ? 'Edit user' : 'New user'" style="width:min(800px,calc(100vw - 24px))">
@@ -117,6 +134,7 @@ async function revokeToken(token: TokenRow) {
     </n-modal>
     <n-modal v-model:show="showReset" preset="card" title="Reset password" style="width:min(520px,calc(100vw - 24px))"><n-alert v-if="error" type="error" style="margin-bottom:12px">{{ error }}</n-alert><n-form-item label="New password (minimum 12 characters)" required><n-input v-model:value="resetPassword" type="password" show-password-on="click" /></n-form-item><template #footer><n-space justify="end"><n-button @click="showReset=false">Cancel</n-button><n-button type="primary" :loading="busy" @click="applyReset">Reset and revoke sessions</n-button></n-space></template></n-modal>
     <n-modal v-model:show="showToken" preset="card" title="Create View token" style="width:min(620px,calc(100vw - 24px))"><n-alert v-if="error" type="error" style="margin-bottom:12px">{{ error }}</n-alert><template v-if="!issuedSecret"><n-form-item label="Name" required><n-input v-model:value="tokenDraft.name" /></n-form-item><n-form-item label="Allowed Views" required><n-select v-model:value="tokenDraft.views" :options="viewOptions" multiple filterable /></n-form-item><n-form-item label="Expiry (optional)"><n-date-picker v-model:value="tokenDraft.expiresAt" type="datetime" clearable /></n-form-item></template><n-alert v-else type="warning" title="Copy this secret now — it will not be shown again"><code class="secret">{{ issuedSecret }}</code></n-alert><template #footer><n-space justify="end"><n-button @click="showToken=false">{{ issuedSecret ? 'Done' : 'Cancel' }}</n-button><n-button v-if="!issuedSecret" type="primary" :loading="busy" @click="issueToken">Create token</n-button></n-space></template></n-modal>
+    <n-modal v-model:show="showAiToken" preset="card" title="Create AI REST token" style="width:min(620px,calc(100vw - 24px))"><n-alert v-if="error" type="error" style="margin-bottom:12px">{{ error }}</n-alert><template v-if="!issuedSecret"><n-form-item label="Name" required><n-input v-model:value="aiTokenDraft.name" /></n-form-item><n-form-item label="Allowed Apps" required><n-select v-model:value="aiTokenDraft.apps" :options="catalog.apps.filter(app=>app.name!=='system').map(app=>({label:app.label,value:app.name}))" multiple filterable /></n-form-item><n-form-item label="Scopes" required><n-select v-model:value="aiTokenDraft.scopes" :options="['inspect','validate','propose'].map(value=>({label:value,value}))" multiple /></n-form-item><n-form-item label="Expiry (optional)"><n-date-picker v-model:value="aiTokenDraft.expiresAt" type="datetime" clearable /></n-form-item></template><n-alert v-else type="warning" title="Copy this secret now — it will not be shown again"><code class="secret">{{ issuedSecret }}</code></n-alert><template #footer><n-space justify="end"><n-button @click="showAiToken=false">{{ issuedSecret ? 'Done' : 'Cancel' }}</n-button><n-button v-if="!issuedSecret" type="primary" :loading="busy" @click="issueAiToken">Create token</n-button></n-space></template></n-modal>
   </div>
 </template>
 

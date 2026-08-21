@@ -1,12 +1,12 @@
-import { normalizeLegacyArtifact, type AnyMeta, type Kernel } from '@emu/core';
+import { metadataRevision, normalizeLegacyArtifact, type AnyMeta, type Kernel } from '@emu/core';
 
 const FW_MODEL = 'Framework';
 
 /**
  * Framework metadata seeder — runs on EVERY boot and upserts the SYS-layer
  * framework artifacts (idempotent), so upgrades add new framework tables/forms
- * (e.g. FW_AppAccess) to existing installations. Business apps are created via
- * CLI (`pnpm emu add app`) or the Web Designer and are never touched here.
+ * (e.g. FW_AppAccess) to existing installations. Business apps are created in
+ * the Web Designer and are never touched here.
  */
 export function seedDesignerDb(kernel: Kernel): void {
   const ctx = kernel.designerContext();
@@ -74,13 +74,14 @@ export function seedDesignerDb(kernel: Kernel): void {
     const normalized = normalizeLegacyArtifact(art);
     const json = JSON.stringify(normalized);
     const existing = ctx.select('FW_WebArtifact').whereEq({ name: art.name }).firstOnly();
+    const revision = metadataRevision([normalized]);
     if (existing) {
-      if (existing.f.json !== json) {
-        existing.setMany({ kind: normalized.kind, json });
+      if (existing.f.json !== json || existing.f.app !== normalized.app || existing.f.model !== normalized.model || existing.f.layer !== normalized.layer || existing.f.revision !== revision) {
+        existing.setMany({ kind: normalized.kind, app: normalized.app ?? null, model: normalized.model ?? null, layer: normalized.layer ?? null, revision, json });
         existing.update();
       }
     } else {
-      ctx.newRecord('FW_WebArtifact').setMany({ kind: normalized.kind, name: normalized.name, json }).insert();
+      ctx.newRecord('FW_WebArtifact').setMany({ kind: normalized.kind, name: normalized.name, app: normalized.app ?? null, model: normalized.model ?? null, layer: normalized.layer ?? null, revision, json }).insert();
     }
   }
 
