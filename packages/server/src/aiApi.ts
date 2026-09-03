@@ -162,4 +162,16 @@ export function registerAiRoutes(
     const actor = options.requireDesigner(req); const result = kernel.designerDb.prepare('UPDATE "FW_AiProposal" SET status=?,reviewedAt=CURRENT_TIMESTAMP,reviewedBy=? WHERE id=? AND status=?').run('rejected', actor, req.params.id, 'pending');
     if (!result.changes) return reply.status(409).send({ error: 'Proposal is missing or already reviewed' }); audit('proposal.reject', {}, undefined, actor, req.params.id); return { ok: true };
   });
+  app.delete<{ Params: { id: string } }>('/api/designer/ai-proposals/:id', (req, reply) => {
+    const actor = options.requireDesigner(req);
+    const row = kernel.designerDb.prepare('SELECT * FROM "FW_AiProposal" WHERE id=?').get(req.params.id) as any;
+    if (!row) return reply.status(404).send({ error: 'Proposal not found' });
+    if (row.status === 'pending') return reply.status(409).send({ error: 'Review the pending proposal before deleting it' });
+    const current = loadStoredArtifacts(kernel); const scope = options.designerScope(req);
+    const apps = affectedApps(JSON.parse(row.changeSetJson), current);
+    if (scope !== 'all' && [...apps].some((name) => !scope.has(name))) return reply.status(403).send({ error: 'No customize permission for every affected app' });
+    kernel.designerDb.prepare('DELETE FROM "FW_AiProposal" WHERE id=?').run(req.params.id);
+    audit('proposal.delete', { previousStatus: row.status }, row.tokenId, actor, req.params.id);
+    return { ok: true };
+  });
 }
