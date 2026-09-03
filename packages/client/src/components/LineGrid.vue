@@ -10,7 +10,7 @@ import BusinessDataTable from './BusinessDataTable.vue';
 import type { FormAction } from '@emu/core';
 
 const props = defineProps<{
-  line: { table: string; refField: string; fields: string[]; aggregates?: { fn: 'count' | 'sum' | 'avg'; field?: string; label?: string }[]; actions?: FormAction[] };
+  line: { id?: string; table: string; refField: string; fields: string[]; aggregates?: { fn: 'count' | 'sum' | 'avg'; field?: string; label?: string }[]; actions?: FormAction[] };
   headerId: number;
   headerRecord?: Record<string, unknown>;
 }>();
@@ -185,7 +185,7 @@ const aggregateResults = computed(() =>
         <n-button size="small" data-testid="add-line" @click="startEdit(null)">Add line</n-button>
       </n-space>
     </template>
-    <BusinessDataTable class="line-table" :columns="columns" :data="displayRows" :row-key="(r: Row) => r.id" size="small" />
+    <BusinessDataTable class="line-table" :columns="columns" :data="displayRows" :row-key="(r: Row) => r.id" :storage-key="`line:${line.table}:${line.id ?? line.refField}`" size="small" />
     <ActionDialog v-model:show="actionDialogOpen" :action="selectedAction" :record-id="headerId" :record="headerRecord" :line-id="selectedLine?.id" :line-record="selectedLine ?? undefined" @completed="load" />
   </n-card>
 </template>

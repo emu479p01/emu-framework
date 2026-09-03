@@ -1,4 +1,4 @@
-export const CORE_VERSION = '0.5.0.0';
+export const CORE_VERSION = '1.0.0';
 
 export {
   Kernel,

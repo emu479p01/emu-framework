@@ -22,7 +22,7 @@ function back() { window.history.length > 1 ? router.back() : router.push('/'); 
     <div class="table-browser-heading"><h2>Table Browser</h2><n-button @click="back">Back</n-button></div>
     <n-card>
       <div class="table-browser-tools"><n-select v-model:value="tableName" :options="tableOptions" filterable placeholder="Business table"/><n-input v-model:value="search" placeholder="Search" @keyup.enter="load"/><n-button @click="load">Search</n-button><n-button :disabled="!table" @click="editing = {}">New</n-button></div>
-      <BusinessDataTable class="table-browser-desktop" :columns="columns" :data="rows" :row-key="(r: Row) => r.id" />
+      <BusinessDataTable class="table-browser-desktop" :columns="columns" :data="rows" :row-key="(r: Row) => r.id" :storage-key="`table-browser:${tableName}`" />
       <div class="table-browser-mobile">
         <button v-for="row in rows" :key="row.id" class="table-browser-record" @click="editing = { ...row }"><span><small>ID</small>{{ row.id }}</span><span v-for="field in table?.fields" :key="field.name"><small>{{ field.label ?? field.name }}</small>{{ row[field.name] ?? '—' }}</span><strong>Edit</strong></button>
         <div v-if="!rows.length" class="table-browser-empty">No data</div>

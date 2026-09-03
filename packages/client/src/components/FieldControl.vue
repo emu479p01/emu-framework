@@ -3,6 +3,7 @@ import { computed, h, ref, watch } from 'vue';
 import { NInput, NInputNumber, NSwitch, NSelect, NDatePicker, NTooltip, type SelectOption } from 'naive-ui';
 import { api, type Row } from '../api';
 import { useMeta, type FieldMeta } from '../stores/meta';
+import { ENCRYPTED_FIELD_MASK } from '@emu/core/browser';
 
 const props = defineProps<{
   field: FieldMeta;
@@ -18,6 +19,8 @@ const meta = useMeta();
 const refOptions = ref<SelectOption[]>([]);
 
 const isDisabled = computed(() => props.disabled || props.field.readOnly || (props.createMode ? props.field.allowEditOnCreate === false : props.field.allowEdit === false));
+const stringValue = computed(() => props.field.encrypted && props.modelValue === ENCRYPTED_FIELD_MASK ? '' : props.modelValue as string | null);
+const stringType = computed(() => props.field.encrypted || props.field.name.toLowerCase().includes('password') ? 'password' : props.field.multiline ? 'textarea' : 'text');
 
 const enumOptions = computed<SelectOption[]>(() => {
   if (props.field.type !== 'enum' || !props.field.enumName) return [];
@@ -92,11 +95,13 @@ function renderLookupLabel(option: SelectOption) {
 <template>
   <n-input
     v-if="field.type === 'string'"
-    :type="field.name.toLowerCase().includes('password') ? 'password' : 'text'"
-    :show-password-on="field.name.toLowerCase().includes('password') ? 'click' : undefined"
-    :value="(modelValue as string | null)"
+    :type="stringType"
+    :show-password-on="stringType === 'password' ? 'click' : undefined"
+    :value="stringValue"
     :disabled="isDisabled"
     :maxlength="field.maxLength"
+    :autosize="field.multiline && !field.encrypted ? { minRows: 4, maxRows: 12 } : undefined"
+    :placeholder="field.encrypted && modelValue === ENCRYPTED_FIELD_MASK ? 'Configured — leave blank to keep the current value' : undefined"
     @update:value="update"
   />
   <n-input-number

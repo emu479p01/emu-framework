@@ -62,7 +62,7 @@ function display(field: (typeof listFields.value)[number], row: Row): string {
 }
 const columns = computed<DataTableColumns<Row>>(() => [
   ...shownFields.value.map((field) => ({
-    title: field.label ?? field.name, key: field.name, sorter: true,
+    title: field.label ?? field.name, key: field.name, sorter: !field.encrypted,
     sortOrder: sortKey.value === field.name ? (sortDir.value === 'asc' ? 'ascend' as const : 'descend' as const) : false as const,
     render: (row: Row) => display(field, row),
   })),
@@ -134,7 +134,7 @@ function back() { window.history.length > 1 ? router.back() : router.push(formPa
       <n-popover trigger="click" placement="bottom-end"><template #trigger><n-button>Columns</n-button></template><n-checkbox-group v-model:value="visibleFields"><n-space vertical><n-checkbox v-for="field in listFields" :key="field.name" :value="field.name" :label="field.label ?? field.name" /></n-space></n-checkbox-group></n-popover>
     </div>
     <n-empty v-if="!loading && !errorMessage && rows.length === 0" :description="appliedSearch ? 'No records match your search.' : 'No records yet. Create the first one to get started.'" class="list-empty" />
-    <BusinessDataTable v-show="rows.length" class="list-table" :columns="columns" :data="rows" :loading="loading" :row-props="rowProps" :pagination="{ page, pageSize, itemCount: total, prefix: () => `${Math.min((page - 1) * pageSize + 1, total)}–${Math.min(page * pageSize, total)} of ${total}`, 'onUpdate:page': (value: number) => (page = value) }" remote @update:sorter="onSorterChange" />
+    <BusinessDataTable v-show="rows.length" class="list-table" :columns="columns" :data="rows" :loading="loading" :row-props="rowProps" :storage-key="`list:${appName ?? 'legacy'}:${formName}`" :pagination="{ page, pageSize, itemCount: total, prefix: () => `${Math.min((page - 1) * pageSize + 1, total)}–${Math.min(page * pageSize, total)} of ${total}`, 'onUpdate:page': (value: number) => (page = value) }" remote @update:sorter="onSorterChange" />
     <ImportDialog v-model:show="showImport" :table-name="table.name" @imported="load" />
     <ActionDialog :show="selectedReport !== null" :action="reportAction" @update:show="(value) => { if (!value) selectedReport = null }" />
   </div>

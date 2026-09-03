@@ -1,6 +1,3 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 import nodemailer from 'nodemailer';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { EmailSendInput, FunctionServices, HttpRequestInput, HttpResponseOutput, Kernel } from '@emu/core';
@@ -42,38 +39,6 @@ function ensureSettingsTable(kernel: Kernel): void {
       modifiedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
-}
-
-function secretKey(designerDbPath?: string): Buffer {
-  const configured = process.env.EMU_SECRET_KEY_PATH;
-  const keyPath = configured ?? (designerDbPath && designerDbPath !== ':memory:' ? join(dirname(designerDbPath), '.emu-secret.key') : undefined);
-  if (!keyPath) return randomBytes(32);
-  if (existsSync(keyPath)) {
-    const value = readFileSync(keyPath, 'utf8').trim();
-    const key = Buffer.from(value, 'hex');
-    if (key.length !== 32) throw new Error(`Invalid integration secret key at '${keyPath}'`);
-    return key;
-  }
-  mkdirSync(dirname(keyPath), { recursive: true });
-  const key = randomBytes(32);
-  writeFileSync(keyPath, key.toString('hex'), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-  try { chmodSync(keyPath, 0o600); } catch { /* Windows permissions are inherited. */ }
-  return key;
-}
-
-function encrypt(value: string, key: Buffer): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
-  return ['v1', iv.toString('base64'), cipher.getAuthTag().toString('base64'), encrypted.toString('base64')].join(':');
-}
-
-function decrypt(value: string, key: Buffer): string {
-  const [version, iv, tag, encrypted] = value.split(':');
-  if (version !== 'v1' || !iv || !tag || !encrypted) throw new Error('SMTP password cannot be decrypted; restore the integration secret key or enter the password again');
-  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
-  decipher.setAuthTag(Buffer.from(tag, 'base64'));
-  return Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64')), decipher.final()]).toString('utf8');
 }
 
 async function boundedBody(response: Response): Promise<string> {
@@ -130,8 +95,8 @@ function addresses(value: string | string[] | undefined): string[] {
 }
 
 export function createIntegrationManager(kernel: Kernel, designerDbPath?: string) {
+  void designerDbPath;
   ensureSettingsTable(kernel);
-  const key = secretKey(designerDbPath);
   const readSettings = (): SmtpSettings | null => {
     const row = kernel.designerDb.prepare(`SELECT value FROM "${SETTINGS_TABLE}" WHERE name = ?`).get(SMTP_SETTING) as { value: string } | undefined;
     if (!row) return null;
@@ -154,7 +119,7 @@ export function createIntegrationManager(kernel: Kernel, designerDbPath?: string
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw Object.assign(new Error('SMTP port must be between 1 and 65535'), { statusCode: 422 });
     const settings: SmtpSettings = {
       host, port, secure: Boolean(input.secure), username: String(input.username ?? '').trim() || undefined,
-      encryptedPassword: input.password ? encrypt(input.password, key) : existing?.encryptedPassword,
+      encryptedPassword: input.password ? kernel.fieldEncryption.encrypt(input.password) : existing?.encryptedPassword,
       fromAddress, fromName: String(input.fromName ?? '').trim() || undefined,
     };
     kernel.designerDb.prepare(`INSERT INTO "${SETTINGS_TABLE}"(name,value) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value, modifiedAt=CURRENT_TIMESTAMP`).run(SMTP_SETTING, JSON.stringify(settings));
@@ -163,7 +128,7 @@ export function createIntegrationManager(kernel: Kernel, designerDbPath?: string
   const transport = () => {
     const settings = readSettings();
     if (!settings?.host || !settings.fromAddress) throw Object.assign(new Error('SMTP is not configured'), { statusCode: 503 });
-    const password = settings.encryptedPassword ? decrypt(settings.encryptedPassword, key) : undefined;
+    const password = settings.encryptedPassword ? kernel.fieldEncryption.decrypt(settings.encryptedPassword) : undefined;
     return {
       settings,
       client: nodemailer.createTransport({
