@@ -37,6 +37,15 @@ async function setStatus(jobId, status, error) {
   await writeFile(statePath, JSON.stringify(state, null, 2));
 }
 
+const restoreStatePath = process.env.EMU_RESTORE_STATE_PATH ?? '/data/restore-status.json';
+async function setRestoreStatus(jobId, status, error) {
+  const state = JSON.parse(await readFile(restoreStatePath, 'utf8'));
+  if (state.id !== jobId) throw new Error('Restore job no longer matches shared state');
+  state.status = status; state.updatedAt = new Date().toISOString();
+  if (error) state.error = String(error).slice(0, 500);
+  await writeFile(restoreStatePath, JSON.stringify(state, null, 2));
+}
+
 async function waitHealthy(name) {
   for (let attempt = 0; attempt < 90; attempt += 1) {
     const info = await docker('GET', `/containers/${name}/json`);
@@ -52,29 +61,36 @@ async function update({ jobId, version }) {
   const image = `${imageRepository}:${version}`;
   const oldName = `${appContainer}-rollback-${jobId.slice(0, 8)}`;
   await setStatus(jobId, 'running');
-  await docker('POST', `/images/create?fromImage=${encodeURIComponent(imageRepository)}&tag=${encodeURIComponent(version)}`);
-  await docker('GET', `/images/${encodeURIComponent(image)}/json`);
-  const old = await docker('GET', `/containers/${appContainer}/json`);
-  const config = { ...old.Config, Image: image, HostConfig: old.HostConfig, NetworkingConfig: { EndpointsConfig: old.NetworkSettings.Networks } };
-  delete config.Hostname; delete config.Domainname; delete config.AttachStdin; delete config.AttachStdout; delete config.AttachStderr;
-  for (const endpoint of Object.values(config.NetworkingConfig.EndpointsConfig)) {
-    delete endpoint.IPAddress; delete endpoint.GlobalIPv6Address; delete endpoint.MacAddress;
-  }
-  await setStatus(jobId, 'restarting');
-  await docker('POST', `/containers/${appContainer}/stop?t=30`).catch(() => undefined);
-  await docker('POST', `/containers/${appContainer}/rename?name=${encodeURIComponent(oldName)}`);
-  let created = false;
+  let stopped = false; let renamed = false; let created = false; let committed = false;
   try {
+    try { await docker('POST', `/images/create?fromImage=${encodeURIComponent(imageRepository)}&tag=${encodeURIComponent(version)}`); }
+    catch (error) {
+      if (String(error).includes('returned 404')) throw new Error(`Container image ${image} is not published in GHCR. No container was changed; publish the release image and retry.`);
+      throw error;
+    }
+    await docker('GET', `/images/${encodeURIComponent(image)}/json`);
+    const old = await docker('GET', `/containers/${appContainer}/json`);
+    const config = { ...old.Config, Image: image, HostConfig: old.HostConfig, NetworkingConfig: { EndpointsConfig: old.NetworkSettings.Networks } };
+    delete config.Hostname; delete config.Domainname; delete config.AttachStdin; delete config.AttachStdout; delete config.AttachStderr;
+    for (const endpoint of Object.values(config.NetworkingConfig.EndpointsConfig)) {
+      delete endpoint.IPAddress; delete endpoint.GlobalIPv6Address; delete endpoint.MacAddress;
+    }
+    await setStatus(jobId, 'restarting');
+    await docker('POST', `/containers/${appContainer}/stop?t=30`); stopped = true;
+    await docker('POST', `/containers/${appContainer}/rename?name=${encodeURIComponent(oldName)}`); renamed = true;
     await docker('POST', `/containers/create?name=${encodeURIComponent(appContainer)}`, config); created = true;
     await docker('POST', `/containers/${appContainer}/start`);
     await waitHealthy(appContainer);
-    await docker('DELETE', `/containers/${oldName}?force=true`);
+    committed = true;
     await setStatus(jobId, 'succeeded');
+    await docker('DELETE', `/containers/${oldName}?force=true`).catch((error) => console.error('Could not remove rollback container:', error));
   } catch (error) {
-    if (created) await docker('DELETE', `/containers/${appContainer}?force=true`).catch(() => undefined);
-    await docker('POST', `/containers/${oldName}/rename?name=${encodeURIComponent(appContainer)}`).catch(() => undefined);
-    await docker('POST', `/containers/${appContainer}/start`).catch(() => undefined);
-    await setStatus(jobId, 'failed', error instanceof Error ? error.message : error);
+    if (!committed) {
+      if (created) await docker('DELETE', `/containers/${appContainer}?force=true`).catch(() => undefined);
+      if (renamed) await docker('POST', `/containers/${oldName}/rename?name=${encodeURIComponent(appContainer)}`).catch(() => undefined);
+      if (stopped) await docker('POST', `/containers/${appContainer}/start`).catch(() => undefined);
+    }
+    throw error;
   }
 }
 
@@ -87,15 +103,8 @@ async function replaceFile(source, target) {
 async function restore({ jobId, stagePath, components }) {
   if (!Array.isArray(components) || components.some((item) => !['data', 'designer', 'fonts'].includes(item))) throw new Error('Invalid restore components');
   if (typeof stagePath !== 'string' || !stagePath.startsWith('/data/') || stagePath.includes('..')) throw new Error('Invalid restore stage path');
-  const restoreState = process.env.EMU_RESTORE_STATE_PATH ?? '/data/restore-status.json';
-  const setRestoreStatus = async (status, error) => {
-    const state = JSON.parse(await readFile(restoreState, 'utf8'));
-    if (state.id !== jobId) throw new Error('Restore job no longer matches shared state');
-    state.status = status; state.updatedAt = new Date().toISOString(); if (error) state.error = String(error).slice(0, 500);
-    await writeFile(restoreState, JSON.stringify(state, null, 2));
-  };
   const recovery = `/data/pre-restore-${jobId}`;
-  await setRestoreStatus('running'); await mkdir(recovery, { recursive: true });
+  await setRestoreStatus(jobId, 'running'); await mkdir(recovery, { recursive: true });
   await docker('POST', `/containers/${appContainer}/stop?t=30`).catch(() => undefined);
   try {
     if (components.includes('data')) { if (existsSync('/data/data.db')) await copyFile('/data/data.db', join(recovery, 'data.db')); await replaceFile(join(stagePath, 'data.db'), '/data/data.db'); }
@@ -105,19 +114,54 @@ async function restore({ jobId, stagePath, components }) {
       await rm('/data/fonts', { recursive: true, force: true });
       if (existsSync(join(stagePath, 'fonts'))) await cp(join(stagePath, 'fonts'), '/data/fonts', { recursive: true }); else await mkdir('/data/fonts', { recursive: true });
     }
-    await setRestoreStatus('restarting'); await docker('POST', `/containers/${appContainer}/start`); await waitHealthy(appContainer);
-    await setRestoreStatus('succeeded'); await rm(stagePath, { recursive: true, force: true }); await rm(recovery, { recursive: true, force: true });
+    await setRestoreStatus(jobId, 'restarting'); await docker('POST', `/containers/${appContainer}/start`); await waitHealthy(appContainer);
+    await setRestoreStatus(jobId, 'succeeded'); await rm(stagePath, { recursive: true, force: true }); await rm(recovery, { recursive: true, force: true });
   } catch (error) {
     await docker('POST', `/containers/${appContainer}/stop?t=30`).catch(() => undefined);
     if (components.includes('data') && existsSync(join(recovery, 'data.db'))) await replaceFile(join(recovery, 'data.db'), '/data/data.db');
     if (components.includes('designer') && existsSync(join(recovery, 'designer.db'))) await replaceFile(join(recovery, 'designer.db'), '/data/designer.db');
     if (components.includes('fonts')) { await rm('/data/fonts', { recursive: true, force: true }); if (existsSync(join(recovery, 'fonts'))) await cp(join(recovery, 'fonts'), '/data/fonts', { recursive: true }); }
-    await docker('POST', `/containers/${appContainer}/start`).catch(() => undefined); await setRestoreStatus('failed', error instanceof Error ? error.message : error);
+    await docker('POST', `/containers/${appContainer}/start`).catch(() => undefined); await setRestoreStatus(jobId, 'failed', error instanceof Error ? error.message : error);
   }
 }
 
+async function runBackground(task, markFailed) {
+  try { await task(); }
+  catch (error) {
+    console.error(error);
+    try { await markFailed(error instanceof Error ? error.message : error); }
+    catch (statusError) { console.error('Could not persist failed job status:', statusError); }
+  } finally { busy = false; }
+}
+
+async function recoverInterruptedJobs() {
+  const recover = async (path, setter, label, rollbackContainer = false) => {
+    try {
+      const state = JSON.parse(await readFile(path, 'utf8'));
+      if (!state?.id || !['pending', 'running', 'restarting'].includes(state.status)) return;
+      if (rollbackContainer && state.status === 'restarting') {
+        const oldName = `${appContainer}-rollback-${String(state.id).slice(0, 8)}`;
+        const old = await docker('GET', `/containers/${oldName}/json`).catch(() => null);
+        if (old) {
+          const current = await docker('GET', `/containers/${appContainer}/json`).catch(() => null);
+          if (current) await docker('DELETE', `/containers/${appContainer}?force=true`).catch(() => undefined);
+          await docker('POST', `/containers/${oldName}/rename?name=${encodeURIComponent(appContainer)}`);
+        }
+      }
+      await docker('POST', `/containers/${appContainer}/start`).catch(() => undefined);
+      await setter(state.id, 'failed', `${label} was interrupted because the updater restarted. The application container was started again; review the backup and retry.`);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') console.error(`Could not recover interrupted ${label.toLowerCase()}:`, error);
+    }
+  };
+  await recover(statePath, setStatus, 'Update', true);
+  await recover(restoreStatePath, setRestoreStatus, 'Restore');
+}
+
 let busy = false;
+await recoverInterruptedJobs();
 http.createServer(async (request, response) => {
+  if (request.method === 'GET' && request.url === '/health') { response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true, busy })); return; }
   if (request.method !== 'POST' || !['/update', '/restore'].includes(request.url ?? '')) { response.writeHead(404).end(); return; }
   if (request.headers.authorization !== `Bearer ${token}`) { response.writeHead(401).end(); return; }
   if (busy) { response.writeHead(409).end(); return; }
@@ -127,10 +171,10 @@ http.createServer(async (request, response) => {
     if (!body.jobId) throw new Error('Invalid job request');
     if (request.url === '/update') {
       if (!body.version || Object.keys(body).some((key) => !['jobId', 'version', 'backupPath'].includes(key))) throw new Error('Invalid update request');
-      busy = true; void update(body).finally(() => { busy = false; });
+      busy = true; void runBackground(() => update(body), (error) => setStatus(body.jobId, 'failed', error));
     } else {
       if (!body.stagePath || !body.components || Object.keys(body).some((key) => !['jobId', 'stagePath', 'components'].includes(key))) throw new Error('Invalid restore request');
-      busy = true; void restore(body).finally(() => { busy = false; });
+      busy = true; void runBackground(() => restore(body), (error) => setRestoreStatus(body.jobId, 'failed', error));
     }
     response.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ accepted: true }));
   } catch (error) { response.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: error instanceof Error ? error.message : 'Invalid request' })); }

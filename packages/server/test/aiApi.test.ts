@@ -27,10 +27,14 @@ describe('AI proposal REST API', () => {
     const id = proposal.json().id;
     const inbox = await app.inject({ method: 'GET', url: '/api/designer/ai-proposals', headers: admin });
     expect(inbox.json().data.some((item: any) => item.id === id && item.status === 'pending')).toBe(true);
+    expect((await app.inject({ method: 'DELETE', url: `/api/designer/ai-proposals/${id}`, headers: admin })).statusCode).toBe(409);
     expect((await app.inject({ method: 'POST', url: `/api/designer/ai-proposals/${id}/approve`, headers: admin })).statusCode).toBe(200);
     const refreshed = (await app.inject({ method: 'GET', url: '/api/v1/ai/workspace?app=web', headers: { authorization } })).json();
     expect(refreshed.artifacts.some((artifact: any) => artifact.name === 'WEB_AiFunction')).toBe(true);
     expect((await app.inject({ method: 'POST', url: `/api/designer/ai-proposals/${id}/approve`, headers: admin })).statusCode).toBe(409);
+    expect((await app.inject({ method: 'DELETE', url: `/api/designer/ai-proposals/${id}`, headers: admin })).statusCode).toBe(200);
+    const managed = await app.inject({ method: 'GET', url: '/api/designer/ai-proposals', headers: admin });
+    expect(managed.json().data.some((item: any) => item.id === id)).toBe(false);
   });
 
   it('revokes tokens immediately', async () => {

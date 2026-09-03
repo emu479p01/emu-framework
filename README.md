@@ -4,11 +4,11 @@
 
 EmuFramework is a metadata-driven TypeScript framework for building business applications. It includes a browser-based Web Designer, generated forms and lists, layered customization, role-based security, SQLite storage, reporting, import/export, reviewed AI proposals, and Docker deployment.
 
-Current framework version: **1.0.0**
+Current framework version: **1.0.1**
 
-## Release notes — v1.0.0
+## Release notes — v1.0.1
 
-EmuFramework v1.0.0 is a complete metadata-driven platform for building and operating business applications without maintaining a separate frontend and backend for every App. It provides:
+EmuFramework v1.0.1 is a complete metadata-driven platform for building and operating business applications without maintaining a separate frontend and backend for every App. It provides:
 
 - A browser-based Web Designer for defining Apps, data models, forms, lists, line grids, menus, permissions, reports, views, Functions, and Scripts.
 - Automatically generated responsive business UIs backed by SQLite, including validation, lookups, navigation, resizable grids, multiline text, import/export, and reporting.
@@ -30,7 +30,7 @@ Requirements:
 
    ```dotenv
    EMU_UPDATER_TOKEN=replace-with-a-long-random-secret
-   EMU_VERSION=1.0.0
+   EMU_VERSION=1.0.1
    PORT=3399
    ```
 
@@ -63,7 +63,7 @@ Do not run multiple writer containers against the same SQLite volume.
 2. Create a full backup of `data.db` and `designer.db`.
 3. Preserve `.emu-secret.key` or the Docker secret configured by `EMU_SECRET_KEY_PATH`; this key is intentionally not included in database backups.
 4. Copy or mount the existing files into the persistent Docker volume as `/data/data.db` and `/data/designer.db`.
-5. Set `EMU_VERSION=1.0.0`, then pull and start the Docker stack.
+5. Set `EMU_VERSION=1.0.1`, then pull and start the Docker stack.
 6. Allow the idempotent metadata/index migration to finish and verify login, business data, important Scripts/Functions, and **Settings → System Maintenance** diagnostics.
 
 When a string field is changed to `encrypted: true`, existing plaintext values are migrated transactionally. Preserve `.emu-secret.key` (or the file configured by `EMU_SECRET_KEY_PATH`) across every update and restore; losing it makes encrypted business fields and integration passwords unrecoverable. Encrypted fields cannot be title, index, filter, sort, search, or import-key fields.
