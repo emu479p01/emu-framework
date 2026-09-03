@@ -4,7 +4,7 @@ import { readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { MetadataRegistry } from './metadata/registry.js';
-import type { AnyMeta, AppManifest } from './metadata/types.js';
+import type { AnyMeta, AppManifest, TableMeta } from './metadata/types.js';
 import { LAYER_ORDER } from './metadata/types.js';
 import { syncSchema, type SyncResult } from './db/schemaSync.js';
 import { ValidationError } from './data/hooks.js';
@@ -12,6 +12,7 @@ import { DataEventCancelled, EventBus } from './data/events.js';
 import { HookRegistry } from './data/hooks.js';
 import { DataContext, type SessionInfo } from './data/context.js';
 import { allowAll, type SecurityPolicy } from './security/policy.js';
+import { FieldEncryption } from './security/fieldEncryption.js';
 
 export interface HttpRequestInput {
   url: string;
@@ -116,6 +117,7 @@ export class Kernel {
   readonly hooks = new HookRegistry();
   readonly actions = new Map<string, ActionHandler>();
   readonly actionModes = new Map<string, 'transactional' | 'async'>();
+  readonly fieldEncryption: FieldEncryption;
 
   private _registry = new MetadataRegistry();
   private bootSteps: BootStep[] = [];
@@ -136,6 +138,7 @@ export class Kernel {
     this.db.pragma('wal_autocheckpoint = 1000');
 
     const ddp = designerDbPath ?? (dbPath === ':memory:' ? ':memory:' : dbPath.replace(/\.sqlite$|\.db$/i, '.designer.sqlite'));
+    this.fieldEncryption = new FieldEncryption(ddp);
     this.designerDb = new DatabaseCtor(ddp);
     this.designerDb.pragma('journal_mode = WAL');
     this.designerDb.pragma('foreign_keys = ON');
@@ -194,7 +197,12 @@ export class Kernel {
 
   /** Sync data DB schema. */
   sync(): SyncResult {
-    return syncSchema(this.db, this._registry);
+    let result!: SyncResult;
+    this.db.transaction(() => {
+      result = syncSchema(this.db, this._registry);
+      this.migrateEncryptedFields(undefined, this._registry.allTables());
+    })();
+    return result;
   }
 
   /** Sync designer DB for FW_WebArtifact table. */
@@ -433,14 +441,20 @@ export class Kernel {
     }
     const registryFinishedAt = performance.now();
     // Sync data DB for all tables EXCEPT FW_WebArtifact
-    {
-      const result: SyncResult = { createdTables: [], addedColumns: [] };
-      const previous = new Map(this._registry.allTables().map((table) => [table.name, JSON.stringify(table)]));
-      for (const table of final.allTables()) {
-        if (table.name === 'FW_WebArtifact') continue;
-        if (previous.get(table.name) === JSON.stringify(table)) continue;
-        syncSchema(this.db, final, { onlyTable: table.name });
-      }
+    try {
+      const previousTables = this._registry.allTables();
+      this.db.transaction(() => {
+        const previous = new Map(previousTables.map((table) => [table.name, JSON.stringify(table)]));
+        for (const table of final.allTables()) {
+          if (table.name === 'FW_WebArtifact') continue;
+          if (previous.get(table.name) === JSON.stringify(table)) continue;
+          syncSchema(this.db, final, { onlyTable: table.name });
+        }
+        this.migrateEncryptedFields(previousTables, final.allTables());
+      })();
+    } catch (err) {
+      errors.push({ kind: 'table', name: 'encrypted-field-migration', error: err instanceof Error ? err.message : String(err) });
+      return errors;
     }
     // Sync designer DB for FW_WebArtifact only
     this.syncDesigner();
@@ -592,11 +606,31 @@ export class Kernel {
 
   /** DataContext connected to the data database. */
   context(session: SessionInfo = { user: 'system' }, policy: SecurityPolicy = allowAll): DataContext {
-    return new DataContext(this.db, this.registry, session, this.events, this.hooks, policy);
+    return new DataContext(this.db, this.registry, session, this.events, this.hooks, policy, this.fieldEncryption);
   }
 
   /** DataContext connected to the designer database. */
   designerContext(): DataContext {
-    return new DataContext(this.designerDb, this.registry, { user: 'system' }, this.events, this.hooks, allowAll);
+    return new DataContext(this.designerDb, this.registry, { user: 'system' }, this.events, this.hooks, allowAll, this.fieldEncryption);
+  }
+
+  private migrateEncryptedFields(previousTables: TableMeta[] | undefined, nextTables: TableMeta[]): void {
+    const previous = new Map((previousTables ?? []).map((table) => [table.name, table]));
+    for (const table of nextTables) {
+      if (table.name === 'FW_WebArtifact') continue;
+      const prior = previous.get(table.name);
+      for (const field of table.fields) {
+        const wasEncrypted = Boolean(prior?.fields.find((candidate) => candidate.name === field.name)?.encrypted);
+        if (prior && Boolean(field.encrypted) === wasEncrypted) continue;
+        if (!prior && !field.encrypted) continue;
+        const rows = this.db.prepare(`SELECT id, "${field.name}" AS value FROM "${table.name}" WHERE "${field.name}" IS NOT NULL`).all() as Array<{ id: number; value: unknown }>;
+        const update = this.db.prepare(`UPDATE "${table.name}" SET "${field.name}" = ? WHERE id = ?`);
+        for (const row of rows) {
+          if (typeof row.value !== 'string') continue;
+          if (field.encrypted && !this.fieldEncryption.isEncrypted(row.value)) update.run(this.fieldEncryption.encrypt(row.value), row.id);
+          if (!field.encrypted && wasEncrypted && this.fieldEncryption.isEncrypted(row.value)) update.run(this.fieldEncryption.decrypt(row.value), row.id);
+        }
+      }
+    }
   }
 }

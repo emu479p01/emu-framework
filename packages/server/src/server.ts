@@ -15,12 +15,14 @@ import {
   allowAll,
   buildRolePolicy,
   canonicalExtensionName,
+  ENCRYPTED_FIELD_MASK,
   normalizeLegacyArtifact,
   type DataContext,
   type FieldValue,
   type MenuItemMeta,
   isMenuItemVisible,
   type SecurityPolicy,
+  type TableMeta,
 } from '@emu/core';
 import { registerSystemApp, registerSystemHooks } from './systemApp.js';
 import { hashPassword, login, logout, resolveSession, verifyPassword, type AuthUser } from './auth.js';
@@ -67,6 +69,14 @@ interface ListQuery {
   offset?: string;
   sort?: string;
   [key: `filter.${string}`]: string | undefined;
+}
+
+function publicRecord(table: TableMeta, value: { [field: string]: FieldValue }): { [field: string]: FieldValue } {
+  const output = { ...value };
+  for (const field of table.fields) {
+    if (field.encrypted) output[field.name] = value[field.name] === null || value[field.name] === undefined || value[field.name] === '' ? null : ENCRYPTED_FIELD_MASK;
+  }
+  return output;
 }
 
 function tableExists(db: { prepare: (sql: string) => any }, name: string): boolean {
@@ -508,6 +518,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       if (!field) throw new ValidationError(`${tableName}: unknown field '${name}'`);
       const editable = !field.readOnly && (operation === 'create' ? field.allowEditOnCreate !== false : field.allowEdit !== false);
       if (!editable) throw new ValidationError(`${tableName}.${name} cannot be edited ${operation === 'create' ? 'during creation' : 'after creation'}`);
+      if (field.encrypted && value === ENCRYPTED_FIELD_MASK) {
+        if (operation === 'update') continue;
+        throw new ValidationError(`${tableName}.${name}: configured-value mask is not a valid new secret`);
+      }
+      if (field.encrypted && (value === '' || value === null)) continue;
       output[name] = value;
     }
     return output;
@@ -829,13 +844,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       const table = dataTable(req.params.table, req);
       const ctx = userCtx(req);
       const query = req.query as unknown as { [key: string]: string | undefined };
-      const searchable = table.fields.filter((field) => field.type === 'string' || field.type === 'int' || field.type === 'real').map((field) => field.name);
+      const searchable = table.fields.filter((field) => !field.encrypted && (field.type === 'string' || field.type === 'int' || field.type === 'real')).map((field) => field.name);
       const q = buildFilteredQuery(ctx, table.name, query, coerce, searchable);
       const countQ = buildFilteredQuery(ctx, table.name, query, coerce, searchable);
       const limit = Math.min(Number(req.query.limit ?? 50), 500);
       const offset = Number(req.query.offset ?? 0);
       q.limit(limit, offset);
-      return { data: q.toArray().map((r) => r.toObject()), total: countQ.count() };
+      return { data: q.toArray().map((r) => publicRecord(table, r.toObject())), total: countQ.count() };
     },
   );
 
@@ -846,7 +861,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const table = dataTable(req.params.table, req);
     const rec = userCtx(req).find(table.name, Number(req.params.id));
     if (!rec) throw Object.assign(new Error('Not found'), { statusCode: 404 });
-    return rec.toObject();
+    return publicRecord(table, rec.toObject());
   });
 
   app.post<{ Params: { table: string }; Body: { [field: string]: FieldValue } }>(
@@ -857,7 +872,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       rec.setMany(writableBody(table.name, req.body, 'create'));
       rec.insert();
       reply.status(201);
-      return rec.toObject();
+      return publicRecord(table, rec.toObject());
     },
   );
 
@@ -870,7 +885,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       if (!rec) throw Object.assign(new Error('Not found'), { statusCode: 404 });
       rec.setMany(writableBody(table.name, req.body, 'update'));
       rec.update();
-      return rec.toObject();
+      return publicRecord(table, rec.toObject());
     },
   );
 

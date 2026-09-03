@@ -1,6 +1,6 @@
 services:
   app:
-    image: ghcr.io/emu479p01/emu-framework:${EMU_VERSION:-latest}
+    image: ghcr.io/emu479p01/emu-framework:${EMU_VERSION:-1.0.0}
     container_name: emuframework-app
     ports:
       - "${PORT:-3399}:3399"
@@ -24,7 +24,7 @@ services:
       - updater
 
   updater:
-    image: ghcr.io/emu479p01/emu-framework-updater:${EMU_VERSION:-latest}
+    image: ghcr.io/emu479p01/emu-framework-updater:${EMU_VERSION:-1.0.0}
     container_name: emuframework-updater
     environment:
       EMU_UPDATER_TOKEN: ${EMU_UPDATER_TOKEN:?Set EMU_UPDATER_TOKEN in .env}

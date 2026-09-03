@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server.js';
 import { hashPassword } from '../src/auth.js';
-import type { Kernel } from '@emu/core';
+import { ENCRYPTED_FIELD_MASK, type Kernel } from '@emu/core';
 import { applyErpSample } from './fixtures/erpSample.js';
 import { completeTestSetup, TEST_ADMIN_PASSWORD, TEST_SETUP_CODE } from './setupHelper.js';
 
@@ -249,5 +249,42 @@ describe('server', () => {
     await app.inject({ method: 'POST', url: '/api/logout', headers: { cookie: c } });
     const me = await app.inject({ method: 'GET', url: '/api/me', headers: { cookie: c } });
     expect(me.statusCode).toBe(401);
+  });
+});
+
+describe('encrypted business field API', () => {
+  it('masks generic APIs and exports while trusted Functions can read plaintext', async () => {
+    const app = buildServer({ setupCode: TEST_SETUP_CODE });
+    await app.ready();
+    const { cookie } = await completeTestSetup(app);
+    const headers = { cookie };
+    const kernel = (app as unknown as { kernel: Kernel }).kernel;
+    expect(kernel.applyWebArtifacts([...kernel.webArtifacts,
+      { kind: 'app', name: 'vault', models: [{ name: 'Core', layer: 'CUS' }] },
+      { kind: 'table', name: 'VAULT_Config', app: 'vault', model: 'Core', layer: 'CUS', fields: [{ name: 'name', type: 'string' }, { name: 'apiKey', type: 'string', encrypted: true }] },
+      { kind: 'form', name: 'VAULT_ConfigForm', app: 'vault', model: 'Core', layer: 'CUS', table: 'VAULT_Config', listFields: ['name', 'apiKey'] },
+      { kind: 'function', name: 'VAULT_ReadInternally', app: 'vault', model: 'Core', layer: 'CUS', code: 'return ctx.find("VAULT_Config", Number(args.id))?.f.apiKey;' },
+    ] as any)).toEqual([]);
+    const ctx = kernel.context();
+    const admin = ctx.select('FW_User').whereEq({ username: 'admin' }).firstOnly()!;
+    ctx.newRecord('FW_AppAccess').setMany({ userId: admin.id, appName: 'vault', canOpen: true, canCustomize: true }).insert();
+
+    const created = await app.inject({ method: 'POST', url: '/api/data/VAULT_Config', headers, payload: { name: 'Service', apiKey: 'private-key' } });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().apiKey).toBe(ENCRYPTED_FIELD_MASK);
+    const id = created.json().id;
+    const stored = kernel.db.prepare('SELECT apiKey FROM "VAULT_Config" WHERE id=?').get(id) as { apiKey: string };
+    expect(stored.apiKey).toMatch(/^v1:/);
+    expect(stored.apiKey).not.toContain('private-key');
+    expect(kernel.actions.get('VAULT_ReadInternally')!(kernel.context(), { id })).toBe('private-key');
+
+    const unchanged = await app.inject({ method: 'PATCH', url: `/api/data/VAULT_Config/${id}`, headers, payload: { name: 'Renamed', apiKey: ENCRYPTED_FIELD_MASK } });
+    expect(unchanged.json().apiKey).toBe(ENCRYPTED_FIELD_MASK);
+    expect(kernel.actions.get('VAULT_ReadInternally')!(kernel.context(), { id })).toBe('private-key');
+    const blank = await app.inject({ method: 'PATCH', url: `/api/data/VAULT_Config/${id}`, headers, payload: { apiKey: '' } });
+    expect(blank.json().apiKey).toBe(ENCRYPTED_FIELD_MASK);
+    const exported = await app.inject({ method: 'GET', url: '/api/data/VAULT_Config/export?format=csv', headers });
+    expect(exported.body).not.toContain('private-key');
+    await app.close();
   });
 });

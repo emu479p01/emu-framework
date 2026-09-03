@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { NCard, NForm, NFormItem, NInput, NButton, NAlert } from 'naive-ui';
 import { useSession } from '../stores/session';
 import { useMeta } from '../stores/meta';
 import { ApiError } from '../api';
+import { safeInternalRedirect } from '../internalRedirect';
 
 const session = useSession();
 const meta = useMeta();
 const router = useRouter();
+const route = useRoute();
 const username = ref('');
 const password = ref('');
 const error = ref('');
@@ -21,7 +23,7 @@ async function submit() {
   busy.value = true;
   try {
     await session.login(username.value, password.value);
-    router.push('/');
+    await router.replace(safeInternalRedirect(route.query.redirect));
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Login failed';
   } finally {

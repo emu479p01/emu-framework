@@ -6,6 +6,7 @@ import { HookRegistry, ValidationError } from './hooks.js';
 import { Record, type FieldValue } from './record.js';
 import { Query } from './query.js';
 import { allowAll, SecurityError, type SecurityPolicy } from '../security/policy.js';
+import type { FieldEncryption } from '../security/fieldEncryption.js';
 
 export interface SessionInfo {
   user: string;
@@ -28,6 +29,7 @@ export class DataContext {
     events?: EventBus,
     hooks?: HookRegistry,
     readonly policy: SecurityPolicy = allowAll,
+    private readonly fieldEncryption?: FieldEncryption,
   ) {
     // events/hooks are usually shared kernel-wide so app logic registered at
     // boot applies to every request context
@@ -130,7 +132,7 @@ export class DataContext {
 
     const cols = ['createdAt', 'createdBy', 'modifiedAt', 'modifiedBy', ...table.fields.map((f) => f.name)];
     const sql = `INSERT INTO "${table.name}" (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
-    const info = this.db.prepare(sql).run(...cols.map((c) => normalize(rec.get(c))));
+    const info = this.db.prepare(sql).run(...cols.map((c) => this.storageValue(table, c, rec.get(c))));
     rec.set('id', Number(info.lastInsertRowid));
 
     this.events.emit(table.name, 'onInserted', rec, this);
@@ -147,7 +149,7 @@ export class DataContext {
 
     const cols = ['modifiedAt', 'modifiedBy', ...table.fields.map((f) => f.name)];
     const sql = `UPDATE "${table.name}" SET ${cols.map((c) => `"${c}" = ?`).join(', ')} WHERE id = ?`;
-    this.db.prepare(sql).run(...cols.map((c) => normalize(rec.get(c))), rec.id);
+    this.db.prepare(sql).run(...cols.map((c) => this.storageValue(table, c, rec.get(c))), rec.id);
 
     this.events.emit(table.name, 'onUpdated', rec, this);
   }
@@ -207,7 +209,15 @@ export class DataContext {
   _query(table: TableMeta, sql: string, params: FieldValue[]): Record[] {
     this.assertAllowed(table.name, 'read');
     const rows = this.db.prepare(sql).all(...params) as { [column: string]: unknown }[];
-    return rows.map((row) => new Record(this, table)._hydrate(row));
+    return rows.map((row) => {
+      if (this.fieldEncryption) {
+        for (const field of table.fields) {
+          const value = row[field.name];
+          if (field.encrypted && typeof value === 'string' && this.fieldEncryption.isEncrypted(value)) row[field.name] = this.fieldEncryption.decrypt(value);
+        }
+      }
+      return new Record(this, table)._hydrate(row);
+    });
   }
 
   _assertRead(table: TableMeta): void {
@@ -217,6 +227,15 @@ export class DataContext {
   _scalar(sql: string, params: FieldValue[]): unknown {
     const row = this.db.prepare(sql).get(...params) as { [column: string]: unknown } | undefined;
     return row ? Object.values(row)[0] : null;
+  }
+
+  private storageValue(table: TableMeta, column: string, value: FieldValue): string | number | null {
+    const field = table.fields.find((candidate) => candidate.name === column);
+    if (field?.encrypted && typeof value === 'string') {
+      if (!this.fieldEncryption) throw new ValidationError(`${table.name}.${field.name}: encryption is not configured`);
+      return this.fieldEncryption.encrypt(value);
+    }
+    return normalize(value);
   }
 }
 

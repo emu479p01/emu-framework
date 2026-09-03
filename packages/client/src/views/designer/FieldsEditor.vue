@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NAlert, NButton, NCard, NCheckbox, NFormItem, NInput, NSelect, NSpace } from 'naive-ui';
+import { NAlert, NButton, NCard, NCheckbox, NFormItem, NInput, NInputNumber, NSelect, NSpace } from 'naive-ui';
 import { computed } from 'vue';
 import { useDesigner } from '../../stores/designer';
 
@@ -11,6 +11,9 @@ export interface EditableField {
   readOnly?: boolean;
   allowEdit?: boolean;
   allowEditOnCreate?: boolean;
+  maxLength?: number;
+  multiline?: boolean;
+  encrypted?: boolean;
   enumName?: string;
   reference?: { table: string; displayField?: string; displayFields?: string[]; onDelete?: 'restrict' | 'cascade' | 'setNull'; filters?: { field: string; operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains'; value: string | { source: 'record'; field: string } | { source: 'lookup'; field: string; lookupField: string } }[]; copyFields?: { from: string; to: string }[] };
 }
@@ -73,6 +76,7 @@ function onTypeChange(field: EditableField) {
   if (field.type !== 'reference') delete field.reference;
   if (field.type === 'reference' && !field.reference) field.reference = { table: '' };
   if (field.type === 'enum') delete field.mandatory;
+  if (field.type !== 'string') { delete field.multiline; delete field.encrypted; delete field.maxLength; }
 }
 
 function onReadOnlyChange(field: EditableField, value: boolean) {
@@ -90,6 +94,8 @@ function fieldIssues(field: EditableField): string[] {
   if (field.type === 'enum' && !field.enumName) issues.push('Select an enum.');
   if (field.type === 'reference' && !field.reference?.table) issues.push('Select the related table.');
   if (field.mandatory && field.reference?.onDelete === 'setNull') issues.push('Required references cannot use Set null.');
+  if (field.multiline && field.type !== 'string') issues.push('Multiline is supported only for string fields.');
+  if (field.encrypted && field.type !== 'string') issues.push('Encryption is supported only for string fields.');
   return issues;
 }
 </script>
@@ -110,7 +116,11 @@ function fieldIssues(field: EditableField): string[] {
         <div><n-checkbox :checked="field.readOnly === true" @update:checked="(v: boolean) => onReadOnlyChange(field, v)">Read only</n-checkbox><small>Blocks UI and REST editing; Functions and Scripts may write.</small></div>
         <div><n-checkbox :checked="!field.readOnly && field.allowEdit !== false" :disabled="field.readOnly" @update:checked="(v: boolean) => (field.allowEdit = v ? undefined : false)">Allow edit</n-checkbox><small>User may change an existing record.</small></div>
         <div><n-checkbox :checked="!field.readOnly && field.allowEditOnCreate !== false" :disabled="field.readOnly" @update:checked="(v: boolean) => (field.allowEditOnCreate = v ? undefined : false)">Allow edit on create</n-checkbox><small>User may enter a value on a new record.</small></div>
+        <div><n-checkbox :checked="field.multiline === true" :disabled="field.type !== 'string'" @update:checked="(v: boolean) => (field.multiline = v || undefined)">Long text</n-checkbox><small>Use a multi-line editor and preserve blank lines.</small></div>
+        <div><n-checkbox :checked="field.encrypted === true" :disabled="field.type !== 'string'" @update:checked="(v: boolean) => (field.encrypted = v || undefined)">Encrypted</n-checkbox><small>Encrypt at rest; REST and UI show only a configured mask.</small></div>
       </div>
+
+      <n-form-item v-if="field.type === 'string'" label="Maximum length" class="special-setting"><n-input-number v-model:value="field.maxLength" :min="1" :precision="0" clearable placeholder="Unlimited" style="width:100%" /></n-form-item>
 
       <n-form-item v-if="field.type === 'enum'" label="Enum" required class="special-setting">
         <n-select v-model:value="field.enumName" :options="enumOptions" placeholder="Select enum" filterable />

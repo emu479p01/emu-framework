@@ -39,8 +39,15 @@ export class Query implements Iterable<Record> {
     if (!ok) throw new ValidationError(`Table '${this.table.name}' has no field '${name}'`);
   }
 
+  private assertQueryable(name: string): void {
+    this.assertField(name);
+    if (this.table.fields.find((field) => field.name === name)?.encrypted) {
+      throw new ValidationError(`${this.table.name}.${name}: encrypted fields cannot be filtered, searched, or sorted`);
+    }
+  }
+
   where(field: string, op: Op, value: FieldValue | FieldValue[]): this {
-    this.assertField(field);
+    this.assertQueryable(field);
     this.conditions.push({ field, op, value });
     return this;
   }
@@ -53,13 +60,13 @@ export class Query implements Iterable<Record> {
 
   /** Case-insensitive free-text search across metadata-defined fields. */
   search(fields: string[], value: string): this {
-    for (const field of fields) this.assertField(field);
+    for (const field of fields) this.assertQueryable(field);
     if (fields.length > 0 && value.trim()) this.anyLike = { fields, value: `%${value.trim()}%` };
     return this;
   }
 
   orderBy(field: string, dir: 'asc' | 'desc' = 'asc'): this {
-    this.assertField(field);
+    this.assertQueryable(field);
     this.orderings.push({ field, dir: dir.toUpperCase() as 'ASC' | 'DESC' });
     return this;
   }

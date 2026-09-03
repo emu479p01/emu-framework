@@ -14,6 +14,9 @@ export type FieldType =
   | 'enum'
   | 'reference';
 
+/** Stable generic-API representation for a configured encrypted field. */
+export const ENCRYPTED_FIELD_MASK = '••••••••';
+
 export interface FieldReferenceMeta {
   table: string;
   displayField?: string;
@@ -44,6 +47,10 @@ export interface FieldMeta {
   allowEdit?: boolean;
   allowEditOnCreate?: boolean;
   maxLength?: number;
+  /** Render this string as a multi-line editor while preserving newline characters. */
+  multiline?: boolean;
+  /** Encrypt this string at rest. Generic APIs expose only a configured-value mask. */
+  encrypted?: boolean;
   enumName?: string;
   reference?: FieldReferenceMeta;
   default?: string | number | boolean | null;
@@ -541,6 +548,8 @@ export interface FieldUiOverrideMeta {
   readOnly?: boolean;
   allowEdit?: boolean;
   allowEditOnCreate?: boolean;
+  multiline?: boolean;
+  encrypted?: boolean;
 }
 
 // ---- declarative views and reusable charts ----

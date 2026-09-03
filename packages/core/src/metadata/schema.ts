@@ -24,6 +24,8 @@ export const fieldSchema = Type.Object({
   allowEdit: Type.Optional(Type.Boolean()),
   allowEditOnCreate: Type.Optional(Type.Boolean()),
   maxLength: Type.Optional(Type.Integer({ minimum: 1 })),
+  multiline: Type.Optional(Type.Boolean()),
+  encrypted: Type.Optional(Type.Boolean()),
   enumName: Type.Optional(Type.String({ minLength: 1 })),
   reference: Type.Optional(Type.Object({
     table: Type.String({ minLength: 1 }),
@@ -132,6 +134,7 @@ const fieldOverrideSchema = Type.Object({
   field: Type.String({ minLength: 1 }), label: Type.Optional(Type.String()),
   readOnly: Type.Optional(Type.Boolean()), allowEdit: Type.Optional(Type.Boolean()),
   allowEditOnCreate: Type.Optional(Type.Boolean()),
+  multiline: Type.Optional(Type.Boolean()), encrypted: Type.Optional(Type.Boolean()),
 }, { additionalProperties: false });
 const menuItemOverrideSchema = Type.Object({
   targetId: Type.String({ minLength: 1 }), label: Type.Optional(Type.String()), icon,
@@ -294,7 +297,7 @@ function diagnostics(errors: ErrorObject[] | null | undefined): SchemaDiagnostic
 }
 export function validateMetadataArtifact(value: unknown): SchemaDiagnostic[] {
   if (!artifactValidator(value)) return diagnostics(artifactValidator.errors);
-  const artifact = value as { kind?: string; fields?: Array<{ name?: string; type?: string; mandatory?: boolean; readOnly?: boolean }> };
+  const artifact = value as { kind?: string; fields?: Array<{ name?: string; type?: string; mandatory?: boolean; readOnly?: boolean; multiline?: boolean; encrypted?: boolean; default?: unknown }> };
   if (artifact.kind === 'table' || artifact.kind === 'tableExtension') {
     const issues: SchemaDiagnostic[] = [];
     for (const [index, field] of (artifact.fields ?? []).entries()) {
@@ -303,6 +306,15 @@ export function validateMetadataArtifact(value: unknown): SchemaDiagnostic[] {
       }
       if (field.readOnly && field.mandatory) {
         issues.push({ path: `/fields/${index}/mandatory`, code: 'readonly_optional', message: `Read-only field '${field.name ?? index}' cannot be required` });
+      }
+      if (field.multiline && field.type !== 'string') {
+        issues.push({ path: `/fields/${index}/multiline`, code: 'field_rules', message: 'multiline is supported only on string fields' });
+      }
+      if (field.encrypted && field.type !== 'string') {
+        issues.push({ path: `/fields/${index}/encrypted`, code: 'field_rules', message: 'encrypted is supported only on string fields' });
+      }
+      if (field.encrypted && field.default !== undefined) {
+        issues.push({ path: `/fields/${index}/default`, code: 'field_rules', message: 'encrypted fields cannot define a default' });
       }
     }
     return issues;

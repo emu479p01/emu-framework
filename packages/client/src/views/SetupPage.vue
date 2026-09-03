@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { NAlert, NButton, NCard, NForm, NFormItem, NInput } from 'naive-ui';
 import { ApiError } from '../api';
 import { useSession } from '../stores/session';
+import { safeInternalRedirect } from '../internalRedirect';
 
 const session = useSession();
 const router = useRouter();
+const route = useRoute();
 const code = ref('');
 const username = ref(session.setupUsername ?? '');
 const displayName = ref('Administrator');
@@ -21,7 +23,7 @@ async function submit() {
   busy.value = true;
   try {
     await session.completeSetup({ code: code.value, username: username.value, displayName: displayName.value, password: password.value });
-    await router.push('/');
+    await router.replace(safeInternalRedirect(route.query.redirect));
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Setup failed';
   } finally { busy.value = false; }

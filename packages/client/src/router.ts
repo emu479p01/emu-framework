@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useSession } from './stores/session';
 import { useMeta, type Metadata } from './stores/meta';
+import { safeInternalRedirect } from './internalRedirect';
 const LoginPage = () => import('./views/LoginPage.vue');
 const SetupPage = () => import('./views/SetupPage.vue');
 const HomePage = () => import('./views/HomePage.vue');
@@ -62,10 +63,16 @@ export const router = createRouter({
 router.beforeEach(async (to) => {
   const session = useSession();
   if (!session.checked) await session.check();
-  if (session.setupRequired && to.path !== '/setup') return '/setup';
-  if (!session.setupRequired && to.path === '/setup') return session.user ? '/' : '/login';
-  if (to.meta.public) return true;
-  if (!session.user) return '/login';
+  if (session.setupRequired && to.path !== '/setup') return { path: '/setup', query: { redirect: to.fullPath } };
+  if (!session.setupRequired && to.path === '/setup') {
+    const redirect = safeInternalRedirect(to.query.redirect);
+    return session.user ? redirect : { path: '/login', query: redirect === '/' ? {} : { redirect } };
+  }
+  if (to.meta.public) {
+    if (to.path === '/login' && session.user) return safeInternalRedirect(to.query.redirect);
+    return true;
+  }
+  if (!session.user) return { path: '/login', query: { redirect: to.fullPath } };
   const meta = useMeta();
   if (!meta.meta) await meta.load();
   const capability = to.meta.capability as keyof Metadata['capabilities'] | undefined;

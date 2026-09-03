@@ -377,7 +377,7 @@ export class MetadataRegistry {
       for (const override of e.fieldOverrides ?? []) {
         const field = base.fields.find((candidate: any) => candidate.name === override.field);
         if (!field) throw new MetadataError(`Extension '${e.name}': unknown field '${override.field}' on '${e.table}'`);
-        for (const key of ['label', 'readOnly', 'allowEdit', 'allowEditOnCreate'] as const) {
+        for (const key of ['label', 'readOnly', 'allowEdit', 'allowEditOnCreate', 'multiline', 'encrypted'] as const) {
           if (override[key] !== undefined) (field as any)[key] = override[key];
         }
         if (field.readOnly) {
@@ -531,14 +531,23 @@ export class MetadataRegistry {
             `${table.name}.${f.name}: unknown reference table '${f.reference?.table}'`,
           );
         }
+        if (f.multiline && f.type !== 'string') throw new MetadataError(`${table.name}.${f.name}: multiline is supported only on string fields`);
+        if (f.encrypted && f.type !== 'string') throw new MetadataError(`${table.name}.${f.name}: encrypted is supported only on string fields`);
+        if (f.encrypted && f.default !== undefined) throw new MetadataError(`${table.name}.${f.name}: encrypted fields cannot define a default`);
       }
       if (table.titleField && !table.fields.some((f) => f.name === table.titleField)) {
         throw new MetadataError(`${table.name}: titleField '${table.titleField}' does not exist`);
+      }
+      if (table.titleField && table.fields.find((f) => f.name === table.titleField)?.encrypted) {
+        throw new MetadataError(`${table.name}: encrypted field '${table.titleField}' cannot be the titleField`);
       }
       for (const idx of table.indexes ?? []) {
         for (const fname of idx.fields) {
           if (!seen.has(fname)) {
             throw new MetadataError(`${table.name}: index '${idx.name}' uses unknown field '${fname}'`);
+          }
+          if (table.fields.find((f) => f.name === fname)?.encrypted) {
+            throw new MetadataError(`${table.name}: index '${idx.name}' cannot use encrypted field '${fname}'`);
           }
         }
       }
@@ -553,6 +562,9 @@ export class MetadataRegistry {
               `${table.name}.${f.name}: copyFields 'from' unknown field '${cf.from}' on '${f.reference!.table}'`,
             );
           }
+          if (refTable?.fields.find((candidate) => candidate.name === cf.from)?.encrypted) {
+            throw new MetadataError(`${table.name}.${f.name}: copyFields cannot read encrypted field '${cf.from}'`);
+          }
           if (cf.to === f.name || !table.fields.some((x) => x.name === cf.to)) {
             throw new MetadataError(
               `${table.name}.${f.name}: copyFields 'to' unknown/invalid field '${cf.to}'`,
@@ -565,10 +577,16 @@ export class MetadataRegistry {
             if (display !== 'id' && !refTable.fields.some((x) => x.name === display)) {
               throw new MetadataError(`${table.name}.${f.name}: unknown lookup display field '${display}' on '${refTable.name}'`);
             }
+            if (refTable.fields.find((candidate) => candidate.name === display)?.encrypted) {
+              throw new MetadataError(`${table.name}.${f.name}: encrypted field '${display}' cannot be a lookup display field`);
+            }
           }
           for (const filter of f.reference.filters ?? []) {
             if (filter.field !== 'id' && !refTable.fields.some((x) => x.name === filter.field)) {
               throw new MetadataError(`${table.name}.${f.name}: lookup filter uses unknown field '${filter.field}' on '${refTable.name}'`);
+            }
+            if (refTable.fields.find((candidate) => candidate.name === filter.field)?.encrypted) {
+              throw new MetadataError(`${table.name}.${f.name}: lookup filters cannot use encrypted field '${filter.field}'`);
             }
             if (typeof filter.value === 'object' && filter.value !== null && 'source' in filter.value) {
               const dynamicValue = filter.value;
@@ -609,6 +627,11 @@ export class MetadataRegistry {
       };
       checkFields(form.listFields, 'listFields');
       checkFields(form.filterFields, 'filterFields');
+      for (const name of form.filterFields ?? []) {
+        if (table.fields.find((field) => field.name === name)?.encrypted) {
+          throw new MetadataError(`Form '${form.name}' filterFields cannot use encrypted field '${name}'`);
+        }
+      }
       for (const g of form.groups ?? []) checkFields(g.fields, 'group');
       for (const action of form.actions ?? []) this.validateFormAction(action, table, undefined, `Form '${form.name}'`);
       for (const embedded of form.charts ?? []) {
@@ -737,9 +760,11 @@ export class MetadataRegistry {
       const table = this.tables.get(report.dataSource);
       if (!table) throw new MetadataError(`Report '${report.name}': unknown dataSource table '${report.dataSource}'`);
       const mainFieldNames = new Set([...table.fields.map((f) => f.name), ...(SYSTEM_FIELDS as readonly string[])]);
-      this.validateReportBands(report.bands, mainFieldNames, `Report '${report.name}'`);
+      const mainEncryptedFields = new Set(table.fields.filter((field) => field.encrypted).map((field) => field.name));
+      this.validateReportBands(report.bands, mainFieldNames, mainEncryptedFields, `Report '${report.name}'`);
       for (const parameter of report.parameters ?? []) {
         if (!mainFieldNames.has(parameter.field)) throw new MetadataError(`Report '${report.name}': parameter uses unknown field '${parameter.field}'`);
+        if (mainEncryptedFields.has(parameter.field)) throw new MetadataError(`Report '${report.name}': parameter cannot use encrypted field '${parameter.field}'`);
       }
       for (const line of report.lineSources ?? []) {
         const lineTable = this.tables.get(line.table);
@@ -752,7 +777,8 @@ export class MetadataRegistry {
           );
         }
         const lineFieldNames = new Set([...lineTable.fields.map((f) => f.name), ...(SYSTEM_FIELDS as readonly string[])]);
-        this.validateReportBands(line.bands, lineFieldNames, `Report '${report.name}' lineSource '${line.table}'`);
+        const lineEncryptedFields = new Set(lineTable.fields.filter((field) => field.encrypted).map((field) => field.name));
+        this.validateReportBands(line.bands, lineFieldNames, lineEncryptedFields, `Report '${report.name}' lineSource '${line.table}'`);
       }
     }
     for (const view of this.views.values()) this.validateView(view);
@@ -780,7 +806,7 @@ export class MetadataRegistry {
     }
   }
 
-  private validateReportBands(bands: ReportBandMeta[], fieldNames: Set<string>, context: string): void {
+  private validateReportBands(bands: ReportBandMeta[], fieldNames: Set<string>, encryptedFields: Set<string>, context: string): void {
     for (const band of bands) {
       const tablix = band.tablix;
       if (band.kind === 'detail' && band.displayOn) {
@@ -802,11 +828,13 @@ export class MetadataRegistry {
         if (!fieldNames.has(column.field)) {
           throw new MetadataError(`${context}: unknown tablix field '${column.field}' in ${band.kind} band`);
         }
+        if (encryptedFields.has(column.field)) throw new MetadataError(`${context}: encrypted field '${column.field}' cannot be rendered in a report`);
       }
       for (const el of band.elements) {
         if (el.type === 'field' && el.field && !fieldNames.has(el.field)) {
           throw new MetadataError(`${context}: unknown field '${el.field}' in ${band.kind} band`);
         }
+        if (el.type === 'field' && el.field && encryptedFields.has(el.field)) throw new MetadataError(`${context}: encrypted field '${el.field}' cannot be rendered in a report`);
       }
     }
   }
@@ -826,6 +854,7 @@ export class MetadataRegistry {
       if (field === 'id') return { type: 'int' as const, field };
       const meta = table.fields.find((candidate) => candidate.name === field);
       if (!meta) throw new MetadataError(`View '${view.name}': unknown field '${ref}'`);
+      if (meta.encrypted) throw new MetadataError(`View '${view.name}': encrypted field '${ref}' cannot be used in a View`);
       return meta;
     };
 

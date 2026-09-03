@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import ExcelJS from 'exceljs';
 import { parse as parseCsvSync } from 'csv-parse/sync';
 import { stringify as stringifyCsvSync } from 'csv-stringify/sync';
-import { SecurityError, type DataContext, type FieldValue, type Kernel, type TableMeta } from '@emu/core';
+import { ENCRYPTED_FIELD_MASK, SecurityError, type DataContext, type FieldValue, type Kernel, type TableMeta } from '@emu/core';
 
 /** Rows beyond this are silently truncated on export — a safety cap, not an expected ceiling. */
 const EXPORT_ROW_CAP = 50_000;
@@ -43,6 +43,7 @@ function formatExportCell(kernel: Kernel, table: TableMeta, fieldName: string, v
   if (fieldName === 'id') return value;
   const field = table.fields.find((f) => f.name === fieldName);
   if (!field) return value;
+  if (field.encrypted) return '';
   if (value === null || value === undefined) return '';
   if (field.type === 'boolean') return value ? 'TRUE' : 'FALSE';
   if (field.type === 'enum' && field.enumName) {
@@ -150,7 +151,7 @@ export function registerImportExportRoutes(app: FastifyInstance, kernel: Kernel,
     async (req, reply) => {
       const table = dataTable(req.params.table, req);
       const ctx = userCtx(req);
-      const q = buildFilteredQuery(ctx, table.name, req.query, coerce, table.fields.map((field) => field.name));
+      const q = buildFilteredQuery(ctx, table.name, req.query, coerce, table.fields.filter((field) => !field.encrypted).map((field) => field.name));
       q.limit(EXPORT_ROW_CAP);
       const rows = q.toArray().map((r) => r.toObject());
       const columns = ['id', ...table.fields.map((f) => f.name)];
@@ -190,11 +191,12 @@ export function registerImportExportRoutes(app: FastifyInstance, kernel: Kernel,
     const buffer = await file.toBuffer();
     const parsed = await parseUploadedFile(file.filename, buffer);
     const suggestedMapping = parsed.columns.map((column) => ({ column, field: suggestField(table, column) }));
+    const encryptedColumns = new Set(suggestedMapping.filter(({ field }) => table.fields.find((candidate) => candidate.name === field)?.encrypted).map(({ column }) => column));
     return {
       columns: parsed.columns,
       suggestedMapping,
       rowCount: parsed.rows.length,
-      sampleRows: parsed.rows.slice(0, 20),
+      sampleRows: parsed.rows.slice(0, 20).map((row) => Object.fromEntries(Object.entries(row).map(([column, value]) => [column, encryptedColumns.has(column) && value !== null && value !== '' ? ENCRYPTED_FIELD_MASK : value]))),
     };
   });
 
@@ -230,6 +232,9 @@ export function registerImportExportRoutes(app: FastifyInstance, kernel: Kernel,
     if (!fileBuffer) return reply.status(400).send({ error: 'No file uploaded' });
     if (mode === 'upsert' && !keyField) {
       return reply.status(400).send({ error: 'keyField is required for upsert mode' });
+    }
+    if (mode === 'upsert' && table.fields.find((field) => field.name === keyField)?.encrypted) {
+      return reply.status(422).send({ error: 'Encrypted fields cannot be used as an import key' });
     }
     if (mode === 'insert' && !ctx.policy.can(table.name, 'create')) throw new SecurityError(`Access denied: import '${table.name}'`);
     if (mode === 'upsert' && (!ctx.policy.can(table.name, 'create') || !ctx.policy.can(table.name, 'update'))) {

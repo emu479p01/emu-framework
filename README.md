@@ -4,18 +4,19 @@
 
 EmuFramework is a metadata-driven TypeScript framework for building business applications. It includes a browser-based Web Designer, generated forms and lists, layered customization, role-based security, SQLite storage, reporting, import/export, reviewed AI proposals, and Docker deployment.
 
-Current framework version: **0.5.0.0**
+Current framework version: **1.0.0**
 
-## Release notes — v0.5.0.0
+## Release notes — v1.0.0
 
-- Supports 5,000+ mixed metadata Artifacts on a single Docker instance through a single-pass dependency pipeline, content-hash caching, affected-table schema synchronization, indexed Designer metadata, and incremental metadata persistence.
-- Adds effective Form Extension Line editing. Extensions can add Line grids or override inherited fields, aggregates, actions, labels, visibility, and order while saving only the current Layer's `lineOverrides` delta.
-- Separates paginated Artifact listing from the effective catalog, supports filtering and ETags, and paginates large Web Designer workspaces.
-- Keeps SQLite as the only database through `data.db` and `designer.db`, with WAL, foreign keys, lock timeout, automatic checkpoints, integrity diagnostics, and synchronous DataContext compatibility.
-- Replaces MCP with scoped, versioned AI REST APIs. AI can inspect metadata, validate ChangeSets, and submit proposals—including Scripts and Functions—but cannot apply changes or read business records.
-- Adds dedicated hashed AI tokens, expiry/revocation, allowed-App scopes, audit logs, and a Proposal Inbox where a user reviews, revalidates, approves, or rejects a complete ChangeSet.
-- Runs in production through Docker only. The user CLI, MCP package, host launchers, installers, and host update/restore scripts have been removed.
-- Preserves documented 0.1.x metadata, Function, Script, backup, and synchronous DataContext compatibility. Direct use of private SQLite handles such as `kernel.db.prepare()` is not guaranteed.
+EmuFramework v1.0.0 is a complete metadata-driven platform for building and operating business applications without maintaining a separate frontend and backend for every App. It provides:
+
+- A browser-based Web Designer for defining Apps, data models, forms, lists, line grids, menus, permissions, reports, views, Functions, and Scripts.
+- Automatically generated responsive business UIs backed by SQLite, including validation, lookups, navigation, resizable grids, multiline text, import/export, and reporting.
+- Layered metadata customization so standard solutions can be extended without modifying their original definitions.
+- Role-based access control, record and Function permissions, audit-friendly workflows, encrypted fields and integration secrets, and safe authenticated deep links.
+- Server-side Functions and Scripts for business rules, transactions, integrations, asynchronous work, and confirm-before-run Function deep links with arguments.
+- REST APIs for business applications, external reporting and Power BI Views, plus a reviewed AI proposal workflow that never applies metadata changes automatically.
+- Docker-based deployment with persistent storage, backup and restore, health diagnostics, and an idempotent upgrade path for existing EmuFramework installations.
 
 ## Quick start with Docker
 
@@ -29,7 +30,7 @@ Requirements:
 
    ```dotenv
    EMU_UPDATER_TOKEN=replace-with-a-long-random-secret
-   EMU_VERSION=0.5.0.0
+   EMU_VERSION=1.0.0
    PORT=3399
    ```
 
@@ -62,8 +63,10 @@ Do not run multiple writer containers against the same SQLite volume.
 2. Create a full backup of `data.db` and `designer.db`.
 3. Preserve `.emu-secret.key` or the Docker secret configured by `EMU_SECRET_KEY_PATH`; this key is intentionally not included in database backups.
 4. Copy or mount the existing files into the persistent Docker volume as `/data/data.db` and `/data/designer.db`.
-5. Set `EMU_VERSION=0.5.0.0`, then pull and start the Docker stack.
+5. Set `EMU_VERSION=1.0.0`, then pull and start the Docker stack.
 6. Allow the idempotent metadata/index migration to finish and verify login, business data, important Scripts/Functions, and **Settings → System Maintenance** diagnostics.
+
+When a string field is changed to `encrypted: true`, existing plaintext values are migrated transactionally. Preserve `.emu-secret.key` (or the file configured by `EMU_SECRET_KEY_PATH`) across every update and restore; losing it makes encrypted business fields and integration passwords unrecoverable. Encrypted fields cannot be title, index, filter, sort, search, or import-key fields.
 
 If migration or health checks fail, stop the new container and restore the untouched backup. Never open the same database volume with the old and new versions simultaneously.
 
