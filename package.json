@@ -13,7 +13,10 @@
   "scripts": {
     "postinstall": "pnpm --filter @emu/core build",
     "dev": "concurrently -n server,client -c blue,green \"pnpm --filter @emu/server dev\" \"pnpm --filter @emu/client dev\"",
-    "test": "pnpm -r test",
+    "check:release": "node scripts/release-policy.mjs",
+    "check:versions": "node scripts/release-policy.mjs --versions-only",
+    "test:release-policy": "node --test scripts/release-policy.test.mjs",
+    "test": "pnpm test:release-policy && pnpm -r test",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
   },

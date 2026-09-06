@@ -6,17 +6,41 @@ EmuFramework is a metadata-driven TypeScript framework for building business app
 
 Current framework version: **1.0.1**
 
-## Release notes — v1.0.1
+<!-- release-notes:start -->
+## PU — EmuFramework v1.0.1
 
-EmuFramework v1.0.1 is a complete metadata-driven platform for building and operating business applications without maintaining a separate frontend and backend for every App. It provides:
+### Summary
 
-- A browser-based Web Designer for defining Apps, data models, forms, lists, line grids, menus, permissions, reports, views, Functions, and Scripts.
-- Automatically generated responsive business UIs backed by SQLite, including validation, lookups, navigation, resizable grids, multiline text, import/export, and reporting.
-- Layered metadata customization so standard solutions can be extended without modifying their original definitions.
-- Role-based access control, record and Function permissions, audit-friendly workflows, encrypted fields and integration secrets, and safe authenticated deep links.
-- Server-side Functions and Scripts for business rules, transactions, integrations, asynchronous work, and confirm-before-run Function deep links with arguments.
-- REST APIs for business applications, external reporting and Power BI Views, plus a reviewed AI proposal workflow that never applies metadata changes automatically.
-- Docker-based deployment with persistent storage, backup and restore, health diagnostics, and an idempotent upgrade path for existing EmuFramework installations.
+This proactive update improves the AI Proposal Inbox and makes container-based framework updates and restores safer to operate and recover.
+
+### Improvements
+
+- Adds status filtering, refresh controls, expand/collapse controls, clearer loading states, and responsive proposal cards to the AI Proposal Inbox.
+- Allows reviewed proposals to be removed from the Inbox without removing applied metadata or AI audit records.
+- Adds a health endpoint and container health check for the updater service.
+
+### Fixes
+
+- Rejects unpublished update images before changing the running application container.
+- Restores the previous container when an update fails after restart begins, and records background update failures reliably.
+- Detects interrupted update and restore jobs when the updater restarts, recovers the application container where possible, and marks the interrupted job as failed with an actionable message.
+
+### Breaking changes and migration
+
+None. This release does not require a metadata or business-data migration.
+
+### Upgrade notes
+
+Back up `data.db` and `designer.db`, preserve `.emu-secret.key`, and update both the application and updater images to `1.0.1`. After restart, verify login and **Settings → System Maintenance** diagnostics.
+
+### Validation
+
+The release workflow runs the automated tests, type checking, and production builds before publishing the application and updater images.
+
+### Known issues
+
+None known.
+<!-- release-notes:end -->
 
 ## Quick start with Docker
 

@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['v*', '*']
+    tags: ['*']
 
 permissions:
   contents: write
@@ -13,16 +13,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: pnpm/action-setup@v4
         with: { version: 11.12.0 }
       - uses: actions/setup-node@v4
         with: { node-version: 24.18.0, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - name: Verify release tag
+      - name: Validate version policy and release notes
+        id: release_policy
         shell: bash
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          test "${GITHUB_REF_NAME#v}" = "$VERSION"
+          node scripts/release-policy.mjs \
+            --tag "$GITHUB_REF_NAME" \
+            --output "$RUNNER_TEMP/release-notes.md"
       - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm build
@@ -44,4 +47,6 @@ jobs:
             --tag "ghcr.io/emu479p01/emu-framework-updater:latest" .
       - uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          name: ${{ steps.release_policy.outputs.release_name }}
+          body_path: ${{ runner.temp }}/release-notes.md
+          generate_release_notes: false
