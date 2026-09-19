@@ -2,9 +2,43 @@
 
 # EmuFramework
 
-EmuFramework is a metadata-driven TypeScript framework for building business applications. It includes a browser-based Web Designer, generated forms and lists, layered customization, role-based security, SQLite storage, reporting, import/export, reviewed AI proposals, and Docker deployment.
+EmuFramework is a metadata-driven TypeScript framework for building and operating business applications. This repository contains the framework source, tests, container definitions, and release tooling. Installation guides, tutorials, usage instructions, and detailed reference material live in the separate [EmuFramework documentation repository](https://github.com/emu479p01/emu-framework-docs).
 
 Current framework version: **1.0.1**
+
+## What it provides
+
+- A browser-based Web Designer for defining Apps, models, forms, lists, menus, views, reports, Functions, Scripts, and permissions.
+- Generated responsive business interfaces backed by SQLite, including validation, lookups, line grids, import/export, charts, and reporting.
+- Layered metadata customization so solutions can be extended without modifying their original definitions.
+- Role-based access control, record and Function permissions, encrypted fields and integration secrets, and authenticated deep links.
+- Server-side Functions and Scripts for business rules, transactions, integrations, and asynchronous work.
+- REST integration, external reporting and Power BI Views, plus an AI proposal workflow in which metadata changes require human review and approval.
+- Docker deployment with persistent storage, backup and restore, health diagnostics, and guarded update recovery.
+
+These capabilities are implemented and tested in the `@emu/core`, `@emu/server`, and `@emu/client` packages in this repository.
+
+## Documentation
+
+Use the [Documentation Index](https://github.com/emu479p01/emu-framework-docs) for:
+
+- installation and upgrade guides;
+- user and administrator tutorials;
+- Web Designer and framework usage;
+- APIs, security, architecture, testing, and other detailed reference material.
+
+This README is intentionally a project landing page rather than a second copy of the manual.
+
+## Versioning and release types
+
+New framework releases use exactly three components: **`Major.Minor.Patch`**.
+
+- **FU — Framework Update:** a breaking structural change increments `Major` and resets `Minor.Patch` to `0.0`; important backward-compatible functionality increments `Minor` and resets `Patch` to `0`.
+- **PU — Proactive Update:** bug fixes, hotfixes, and security fixes increment `Patch`.
+- A release containing more than one kind of change is classified by its highest-impact change.
+- Legacy four-component tags are immutable history. They remain available but are not extended or reused.
+
+The latest canonical English release note remains below because the release workflow copies this marked block into the GitHub Release. The [release-note archive](release-notes/README.md) contains historical notes and guidance for future releases.
 
 <!-- release-notes:start -->
 ## PU — EmuFramework v1.0.1
@@ -42,99 +76,19 @@ The release workflow runs the automated tests, type checking, and production bui
 None known.
 <!-- release-notes:end -->
 
-## Quick start with Docker
+## Repository structure
 
-Requirements:
+- `packages/core` — metadata registry, SQLite data access, schema synchronization, security, and business logic.
+- `packages/server` — Fastify APIs, Web Designer services, AI proposal workflow, backup/restore, and system maintenance.
+- `packages/client` — Vue web application and Web Designer.
+- `release-notes` — release-note archive, authoring template, and maintenance guidance.
 
-- Docker Engine or Docker Desktop with Docker Compose
-- Port `3399` available, or set a different `PORT`
+## Framework development
 
-1. Download `docker-compose.yml` from this repository.
-2. Create a `.env` file beside it and set an updater token containing at least 24 characters:
-
-   ```dotenv
-   EMU_UPDATER_TOKEN=replace-with-a-long-random-secret
-   EMU_VERSION=1.0.1
-   PORT=3399
-   ```
-
-3. Pull and start the application:
-
-   ```console
-   docker compose pull
-   docker compose up -d
-   ```
-
-4. Read the one-time administrator setup code:
-
-   ```console
-   docker compose logs app
-   ```
-
-5. Open `http://localhost:3399`, complete administrator setup, and create Apps, Models, and Artifacts through the Web Designer.
-
-Production data is stored in the persistent `emu-data` Docker volume:
-
-- `/data/data.db` — business and framework records
-- `/data/designer.db` — metadata, Designer state, AI tokens, proposals, and audit records
-- `/data/.emu-secret.key` — encryption key stored separately from database backups
-
-Do not run multiple writer containers against the same SQLite volume.
-
-## Upgrade from an earlier version
-
-1. Stop the earlier application so no process can write either SQLite database.
-2. Create a full backup of `data.db` and `designer.db`.
-3. Preserve `.emu-secret.key` or the Docker secret configured by `EMU_SECRET_KEY_PATH`; this key is intentionally not included in database backups.
-4. Copy or mount the existing files into the persistent Docker volume as `/data/data.db` and `/data/designer.db`.
-5. Set `EMU_VERSION=1.0.1`, then pull and start the Docker stack.
-6. Allow the idempotent metadata/index migration to finish and verify login, business data, important Scripts/Functions, and **Settings → System Maintenance** diagnostics.
-
-When a string field is changed to `encrypted: true`, existing plaintext values are migrated transactionally. Preserve `.emu-secret.key` (or the file configured by `EMU_SECRET_KEY_PATH`) across every update and restore; losing it makes encrypted business fields and integration passwords unrecoverable. Encrypted fields cannot be title, index, filter, sort, search, or import-key fields.
-
-If migration or health checks fail, stop the new container and restore the untouched backup. Never open the same database volume with the old and new versions simultaneously.
-
-## Web Designer and AI REST API
-
-Users create and maintain Apps, Models, and Artifacts through the Web Designer. Existing session-cookie CRUD endpoints remain reserved for the Designer.
-
-AI integrations use dedicated Bearer tokens and the versioned endpoints below:
-
-- `GET /api/v1/ai/capabilities`
-- `GET /api/v1/ai/schemas/artifact`
-- `GET /api/v1/ai/schemas/change-set`
-- `GET /api/v1/ai/workspace`
-- `POST /api/v1/ai/change-sets/validate`
-- `POST /api/v1/ai/proposals`
-
-AI tokens support `inspect`, `validate`, and `propose` scopes and can be restricted to selected Apps. There is no AI apply endpoint and no AI business-record endpoint. Every proposal requires review and approval in the Web Designer.
-
-## Documentation
-
-Open the [Documentation Index](https://github.com/emu479p01/emu-framework-docs) and choose a path:
-
-- **User:** sign in, navigate, and build Apps in the Web Designer.
-- **Administrator:** deploy with Docker, configure access, update, back up, restore, and inspect SQLite health.
-- **Developer:** understand metadata, Layer behavior, Function/Script APIs, REST integration, and framework architecture.
-
-Additional references:
-
-- [Security and permission matrix](https://github.com/emu479p01/emu-framework-docs/blob/main/developer/security.md)
-- [Power BI View API guide](https://github.com/emu479p01/emu-framework-docs/blob/main/admin/power-bi-view-api.md)
-- [Docker installation guide](https://github.com/emu479p01/emu-framework-docs/blob/main/admin/docker-install.md)
-
-## Project packages
-
-- `@emu/core` — metadata registry, SQLite data access, schema synchronization, security, and business logic.
-- `@emu/server` — Fastify APIs, Web Designer services, AI proposal workflow, backup/restore, and system maintenance.
-- `@emu/client` — Vue web application and Web Designer.
-
-## Development
-
-The repository toolchain uses Node.js 24.18.0 and pnpm 11.12.0. Production execution is Docker-only; local commands are intended for framework development and verification:
+The repository toolchain uses Node.js 24.18.0 and pnpm 11.12.0. See [Contributing](CONTRIBUTING.md) before proposing a change. The standard verification commands are:
 
 ```console
-pnpm install --frozen-lockfile
+pnpm check:versions
 pnpm typecheck
 pnpm test
 pnpm build
@@ -142,7 +96,8 @@ pnpm build
 
 ## Project links
 
-- [Releases](https://github.com/emu479p01/emu-framework/releases)
 - [Documentation](https://github.com/emu479p01/emu-framework-docs)
+- [Release-note archive](release-notes/README.md)
+- [GitHub Releases](https://github.com/emu479p01/emu-framework/releases)
 - [Contributing](CONTRIBUTING.md)
 - [MIT License](LICENSE)
