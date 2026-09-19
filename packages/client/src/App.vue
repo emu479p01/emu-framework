@@ -2,8 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
-  NButton, NConfigProvider, NDialogProvider, NDrawer, NDrawerContent, NDropdown,
-  NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NMessageProvider,
+  NAlert, NButton, NConfigProvider, NDialogProvider, NDrawer, NDrawerContent, NDropdown,
+  NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NMessageProvider, NSpace,
   type GlobalThemeOverrides,
 } from 'naive-ui';
 import { useSession } from './stores/session';
@@ -23,22 +23,20 @@ const selectedNavRoot = ref<string | null>(null);
 const desktopExpandedKeys = ref<string[]>([]);
 type NavigationPreference = { menuName: string; itemId: string; lastOpenedAt: string|null };
 const navigationPreferences = ref<{ favorites: NavigationPreference[]; recent: NavigationPreference[] }>({ favorites: [], recent: [] });
-const favoriteKeys = computed(() => new Set(navigationPreferences.value.favorites.map((item) => `${item.menuName}\0${item.itemId}`)));
 async function loadNavigationPreferences() {
   if (!session.user) return;
   navigationPreferences.value = await api.get('/api/navigation/preferences');
 }
-async function recordNavigation(menuName?: string, itemId?: string) {
+/** Records the recent item in click order without ever blocking navigation:
+ * a failing history call must not stop the target screen from opening. */
+function recordNavigation(menuName?: string, itemId?: string) {
   drawerOpen.value = false;
   selectedNavRoot.value = null;
   if (menuName && itemId) {
-    await api.post('/api/navigation/recent', { menuName, itemId });
-    await loadNavigationPreferences();
+    void api.post('/api/navigation/recent', { menuName, itemId })
+      .then(loadNavigationPreferences)
+      .catch(() => undefined);
   }
-}
-async function setFavorite(menuName: string, itemId: string, favorite: boolean) {
-  await api.put(`/api/navigation/favorites/${encodeURIComponent(menuName)}/${encodeURIComponent(itemId)}`, { favorite });
-  await loadNavigationPreferences();
 }
 const themeOverrides: GlobalThemeOverrides = {
   common: {
@@ -52,13 +50,13 @@ const themeOverrides: GlobalThemeOverrides = {
 
 const menuOptions = computed<NavMenuOption[]>(() => {
   return buildNavigationOptions({
-    settingsLabel: t('nav.settings'),
+    settingsLabel: t('ui.nav.settings'),
+    recentLabel: t('ui.nav.recent'),
+    recentEmptyLabel: t('ui.nav.recentEmpty'),
     frameworkMenus: meta.frameworkMenus,
     apps: meta.apps,
     onNavigate: recordNavigation,
-    favoriteKeys: favoriteKeys.value,
     recentKeys: navigationPreferences.value.recent.map((item) => `${item.menuName}\0${item.itemId}`),
-    onFavorite: setFavorite,
   });
 });
 const activeKey = computed(() => findActiveKey(menuOptions.value, String(route.params.formName ?? ''), route.path) ?? '');
@@ -73,7 +71,7 @@ const desktopRootOptions = computed<NavMenuOption[]>(() => menuOptions.value.map
 }));
 const desktopChildren = computed(() => (menuOptions.value.find((option) => option.key === selectedNavRoot.value)?.children ?? []) as NavMenuOption[]);
 const desktopPanelTitle = computed(() => {
-  if (selectedNavRoot.value === 'framework-settings') return t('nav.settings');
+  if (selectedNavRoot.value === 'framework-settings') return t('ui.nav.settings');
   const appName = String(selectedNavRoot.value ?? '').replace(/^app-/, '');
   return meta.apps.find((app) => app.name === appName)?.label ?? appName;
 });
@@ -99,31 +97,71 @@ function updateDesktopExpansion(keys: Array<string | number>) {
 }
 watch(activeKey, () => { if (selectedNavRoot.value && activeNavRoot.value === selectedNavRoot.value) restoreDesktopExpansion(selectedNavRoot.value); });
 const breadcrumb = computed(() => {
-  if (route.path === '/') return t('home.title');
-  if (route.path.startsWith('/designer')) return t('designer.title');
-  if (route.path.startsWith('/system/maintenance')) return 'System Maintenance';
-  if (route.path.startsWith('/system/app-data')) return 'App Data Management';
-  if (route.path.startsWith('/system/fonts')) return 'Report Fonts';
-  if (route.path.startsWith('/system/integrations/smtp')) return 'SMTP Settings';
-  if (route.path.startsWith('/system/security/users')) return 'Users & Security';
-  if (route.path.startsWith('/account/password')) return 'Change Password';
+  if (route.path === '/') return t('ui.home.title');
+  if (route.path.startsWith('/designer')) return t('ui.designer.title');
+  if (route.path.startsWith('/system/maintenance')) return t('ui.nav.systemMaintenance');
+  if (route.path.startsWith('/system/app-data')) return t('ui.nav.appData');
+  if (route.path.startsWith('/system/fonts')) return t('ui.nav.reportFonts');
+  if (route.path.startsWith('/system/integrations/smtp')) return t('ui.nav.smtp');
+  if (route.path.startsWith('/system/security/users')) return t('ui.nav.usersSecurity');
+  if (route.path.startsWith('/account/password')) return t('ui.nav.changePassword');
   const form = meta.form(String(route.params.formName ?? ''));
-  return form?.label ?? form?.name ?? t('home.title');
+  return form?.label ?? form?.name ?? t('ui.home.title');
 });
+
+// ---- language switching ----
+const localeBusy = ref(false);
+const localeReloadFailed = ref(false);
+/** Display name for a locale in its own language; falls back to the raw code. */
+function localeLabel(code: string): string {
+  try {
+    const name = new Intl.DisplayNames([code], { type: 'language' }).of(code);
+    if (name && name.toLowerCase() !== code.toLowerCase()) return name;
+  } catch { /* Intl.DisplayNames is unavailable — show the code */ }
+  return code;
+}
+const localeOptions = computed(() => (meta.meta?.availableLocales ?? []).map((code) => ({
+  key: `locale:${code}`,
+  label: `${session.user?.locale === code ? '✓ ' : ''}${localeLabel(code)}`,
+  disabled: localeBusy.value,
+})));
 const userOptions = computed(() => [
-  { key: 'account', label: 'Change password' },
-  { key: 'locale:en', label: `${session.user?.locale === 'en' ? '✓ ' : ''}Metadata: English` },
-  { key: 'locale:th', label: `${session.user?.locale === 'th' ? '✓ ' : ''}Metadata: ไทย` },
-  { key: 'logout', label: t('auth.logout') },
+  { key: 'account', label: t('ui.auth.changePassword'), disabled: localeBusy.value },
+  ...localeOptions.value,
+  { key: 'logout', label: t('ui.auth.logout'), disabled: localeBusy.value },
 ]);
+async function applyLocale(locale: string) {
+  const previous = session.user?.locale;
+  localeBusy.value = true;
+  localeReloadFailed.value = false;
+  try {
+    const saved = await api.patch<{ locale: string }>('/api/me/locale', { locale });
+    if (session.user) session.user.locale = saved.locale ?? locale;
+    try {
+      await meta.load();
+      window.dispatchEvent(new CustomEvent('emu:locale-changed', { detail: saved.locale ?? locale }));
+    } catch {
+      // The preference is stored but the screen texts could not be refreshed.
+      localeReloadFailed.value = true;
+    }
+  } catch {
+    if (session.user) session.user.locale = previous ?? session.user.locale;
+  } finally {
+    localeBusy.value = false;
+  }
+}
+async function retryLocaleReload() {
+  localeBusy.value = true;
+  try {
+    await meta.load();
+    localeReloadFailed.value = false;
+    window.dispatchEvent(new CustomEvent('emu:locale-changed', { detail: session.user?.locale }));
+  } catch { localeReloadFailed.value = true; }
+  finally { localeBusy.value = false; }
+}
 async function onUserAction(key: string) {
   if (key === 'account') router.push('/account/password');
-  if (key.startsWith('locale:')) {
-    const locale = key.slice('locale:'.length);
-    await api.patch('/api/me/locale', { locale });
-    if (session.user) session.user.locale = locale;
-    await meta.load();
-  }
+  if (key.startsWith('locale:')) await applyLocale(key.slice('locale:'.length));
   if (key === 'logout') { await session.logout(); router.push('/login'); }
 }
 function updateViewport() {
@@ -166,12 +204,18 @@ onBeforeUnmount(() => { window.removeEventListener('resize', updateViewport); wi
           </n-drawer>
           <n-layout class="main-layout">
             <n-layout-header bordered class="topbar">
-              <n-button quaternary circle :aria-label="mobile ? t('nav.openMenu') : t('nav.collapseMenu')" @click="mobile ? (drawerOpen = true) : (siderCollapsed = !siderCollapsed)">☰</n-button>
+              <n-button quaternary circle :aria-label="mobile ? t('ui.nav.openMenu') : t('ui.nav.collapseMenu')" @click="mobile ? (drawerOpen = true) : (siderCollapsed = !siderCollapsed)">☰</n-button>
               <div class="page-context"><span class="crumb">{{ breadcrumb }}</span></div>
               <n-dropdown :options="userOptions" @select="onUserAction">
-                <n-button quaternary class="user-button" data-testid="user-menu">{{ session.user.displayName }} ▾</n-button>
+                <n-button quaternary class="user-button" :disabled="localeBusy" data-testid="user-menu">{{ session.user.displayName }} ▾</n-button>
               </n-dropdown>
             </n-layout-header>
+            <n-alert v-if="localeReloadFailed" type="warning" class="locale-reload-alert" :show-icon="true">
+              <n-space align="center" justify="space-between" :wrap="false">
+                <span>{{ t('ui.auth.localePartial') }}</span>
+                <n-button size="small" :loading="localeBusy" data-testid="locale-retry" @click="retryLocaleReload">{{ t('ui.common.retry') }}</n-button>
+              </n-space>
+            </n-alert>
             <n-layout-content class="page-content"><router-view /></n-layout-content>
           </n-layout>
         </n-layout>
@@ -187,7 +231,6 @@ onBeforeUnmount(() => { window.removeEventListener('resize', updateViewport); wi
 body { margin:0; color:var(--emu-text); background:var(--emu-bg); font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; }
 .app-shell { height:100vh; height:100dvh; min-height:0; overflow:hidden; }
 .app-shell > .n-layout-scroll-container,.main-layout > .n-layout-scroll-container{overflow:hidden}
-.nav-favorite{border:0;background:transparent;color:#f59e0b;cursor:pointer;font-size:17px;line-height:1;padding:4px}
 .main-layout { height:100%; min-width:0; }
 .main-layout > .n-layout-scroll-container{display:flex;flex-direction:column}
 .app-sider { background:linear-gradient(180deg,#111827 0%,#172033 100%)!important; }
@@ -198,8 +241,13 @@ body { margin:0; color:var(--emu-text); background:var(--emu-bg); font-family:In
 .page-context { flex:1; min-width:0; }
 .crumb { font-size:14px; font-weight:700;letter-spacing:-.01em; }
 .user-button { max-width:220px; }
+.locale-reload-alert { margin:12px 28px 0; border-radius:10px; }
 .page-content { flex:1 1 auto; min-height:0; overflow-x:hidden; overflow-y:auto; padding:32px; background:radial-gradient(circle at 100% 0,rgba(99,102,241,.055),transparent 28%),var(--emu-bg); }
-:focus-visible { outline:3px solid rgba(79,70,229,.45) !important; outline-offset:2px; }
-@media (max-width:899px) { .topbar{padding:0 10px;gap:8px}.page-content{padding:16px 10px}.user-button{max-width:130px;min-width:0}.user-button .n-button__content{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.crumb{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.n-modal{max-width:calc(100vw - 16px)} input,textarea,select{font-size:16px!important} }
+:focus-visible { outline:3px solid rgba(79,70,229,.45) !important; outline-offset:2px !important; }
+/* Navigation rows keep readable text on phones: no hover-only affordances. */
+.nav-panel-menu .n-menu-item-content-header,.n-drawer .n-menu-item-content-header{font-size:16px;line-height:1.35;white-space:normal;overflow-wrap:anywhere;display:inline-block;max-width:100%}
+.nav-panel-menu .n-menu-item-content,.n-drawer .n-menu-item{min-height:44px}
+.nav-recent-empty{color:var(--emu-muted);font-size:14px}
+@media (max-width:899px) { .topbar{padding:0 10px;gap:8px}.page-content{padding:16px 10px}.user-button{max-width:130px;min-width:0}.user-button .n-button__content{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.crumb{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.n-modal{max-width:calc(100vw - 16px)} input,textarea,select{font-size:16px!important}.locale-reload-alert{margin:10px 10px 0} }
 @media (max-width:380px) { .topbar{height:60px;flex-basis:60px}.page-content{padding:12px 8px}.user-button{max-width:108px} }
 </style>

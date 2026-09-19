@@ -11,16 +11,21 @@ import {
   NInput,
   NSelect,
   NSpace,
+  NSwitch,
   NTable,
   NTabs,
   NTabPane,
   useMessage,
 } from 'naive-ui';
 import { useDesigner, type Artifact, type CustomizationChain } from '../../stores/designer';
+import { useMeta } from '../../stores/meta';
+import { t } from '../../i18n';
+import { normalizeLocale } from '@emu/core/browser';
 import { ApiError } from '../../api';
 import FieldsEditor, { type EditableField } from './FieldsEditor.vue';
 import IndexesEditor, { type EditableIndex } from './IndexesEditor.vue';
 import MenuItemsEditor, { type EditableMenuItem } from './MenuItemsEditor.vue';
+import TranslationEditor from './TranslationEditor.vue';
 import {
   buildMenuExtensionTree,
   newMenuItem,
@@ -65,6 +70,7 @@ const DESIGN_KINDS = new Set([
   'privilege', 'duty', 'role', 'view', 'chart',
   'privilegeExtension', 'dutyExtension', 'roleExtension', 'scriptExtension',
   'functionExtension', 'viewExtension', 'chartExtension',
+  'translation', 'dataEntity', 'dataEntityExtension',
 ]);
 
 // Table creation conveniences
@@ -116,6 +122,12 @@ function blank(kind: string): Artifact {
       return { kind, name: '', function: (route.query.target as string) ?? '', code: '// Chain of Command extension\nreturn next(args);\n' };
     case 'app':
       return { kind, name: '', label: '', models: [] };
+    case 'translation':
+      return { kind, name: '', label: '', locale: '', resources: {} };
+    case 'dataEntity':
+      return { kind, name: '', label: '', rootTable: '', businessKey: [], fields: [], lines: [], archiveEligible: false };
+    case 'dataEntityExtension':
+      return { kind, name: '', dataEntity: (route.query.target as string) ?? '', fields: [], lines: [], lineExtensions: [] };
     case 'script':
       return { kind, name: '', label: '', code: '// register events, hooks, and actions\n// kernel.actions.set("MyAction", (ctx, args) => { ... });\n// kernel.events.on("MyTable", "onInserting", (e) => { ... });\n// kernel.hooks.register("MyTable", { validateWrite(rec) { ... } });\n' };
     case 'function':
@@ -257,6 +269,7 @@ const extensionScriptOptions = computed(() => extensionOptions(designer.catalog.
 const extensionViewOptions = computed(() => extensionOptions(designer.catalog.views as any));
 const extensionChartOptions = computed(() => extensionOptions(designer.catalog.charts as any));
 const extensionFunctionOptions = computed(() => extensionOptions(designer.catalog.functions as any));
+const extensionDataEntityOptions = computed(() => extensionOptions(designer.catalog.dataEntities as any));
 const legacyExtensionWarning = computed(() => {
   if (!isExtension.value || isNew.value) return '';
   const target = artifact.value[EXT_TARGET_FIELD[props.kind]] as string | undefined;
@@ -345,6 +358,96 @@ const reportOptions = computed(() => designer.catalog.reports.map((report) => ({
 const viewOptions = computed(() => designer.catalog.views.map((view) => ({ label: String(view.label ?? view.name), value: view.name })));
 const functionOptions = computed(() => designer.catalog.functions.map((item) => ({ label: String(item.label ?? item.name), value: item.name })));
 
+// ---- app default locale ----
+const metaStore = useMeta();
+const localeOptions = computed(() => {
+  const codes = new Set<string>(metaStore.meta?.availableLocales ?? []);
+  const current = String(artifact.value.defaultLocale ?? '');
+  if (current) codes.add(current);
+  return [...codes].sort().map((code) => ({ label: code, value: code }));
+});
+const defaultLocaleMissingResources = computed(() => {
+  if (props.kind !== 'app' || !isNew.value) return false;
+  const locale = String(artifact.value.defaultLocale ?? '').toLowerCase();
+  if (!locale) return false;
+  const base = locale.split('-')[0];
+  return !designer.artifacts.some((entry) => {
+    if (entry.kind !== 'translation') return false;
+    const art = entry.artifact as { app?: string; locale?: string };
+    return art.app === artifact.value.name && String(art.locale ?? '').toLowerCase().split('-')[0] === base;
+  });
+});
+
+// ---- data entity editor ----
+interface EditableEntityLine { name: string; table: string; parentReference: string; fields: string[]; lineKeys: string[] }
+const entityLines = computed(() => {
+  if (!artifact.value.lines) artifact.value.lines = [];
+  return artifact.value.lines as EditableEntityLine[];
+});
+function addEntityLine() { entityLines.value.push({ name: '', table: '', parentReference: '', fields: [], lineKeys: [] }); }
+function removeEntityLine(index: number) { entityLines.value.splice(index, 1); }
+function fieldsOfTable(tableName: string) {
+  return fieldOptionsFor(tableName);
+}
+function dateFieldsOfTable(tableName: string) {
+  const table = designer.catalog.tables.find((entry) => entry.name === tableName);
+  return ((table?.fields ?? []) as any[]).filter((field) => field.type === 'date' || field.type === 'datetime').map((field) => ({ label: field.name, value: field.name }));
+}
+/** Blocking issues for the current data entity draft. Values the user picked
+ * are never silently dropped — problems surface here and block Save. */
+const entityIssues = computed<string[]>(() => {
+  if (props.kind !== 'dataEntity') return [];
+  const issues: string[] = [];
+  const rootTable = String(artifact.value.rootTable ?? '');
+  const table = designer.catalog.tables.find((entry) => entry.name === rootTable);
+  if (!table) { issues.push(`${t('ui.designer.dataEntity.rootTable')}: —`); return issues; }
+  const fieldNames = new Set(((table as any).fields ?? []).map((field: any) => field.name));
+  for (const field of [...(artifact.value.businessKey as string[] ?? []), ...(artifact.value.fields as string[] ?? [])]) {
+    if (!fieldNames.has(field)) issues.push(`${rootTable} › ${field}`);
+  }
+  if (artifact.value.businessDateField && !fieldNames.has(String(artifact.value.businessDateField))) issues.push(`${t('ui.designer.dataEntity.businessDateField')}: ${String(artifact.value.businessDateField)}`);
+  for (const [index, line] of entityLines.value.entries()) {
+    const lineTable = designer.catalog.tables.find((entry) => entry.name === line.table);
+    if (!lineTable) { issues.push(`${t('ui.designer.dataEntity.lines')} #${index + 1}: ${line.table || '—'}`); continue; }
+    const lineFieldNames = new Set(((lineTable as any).fields ?? []).map((field: any) => field.name));
+    if (!lineFieldNames.has(line.parentReference)) issues.push(`${t('ui.designer.dataEntity.lines')} #${index + 1} › ${line.parentReference || '—'}`);
+    for (const field of [...line.fields, ...line.lineKeys]) {
+      if (!lineFieldNames.has(field)) issues.push(`${line.table} › ${field}`);
+    }
+  }
+  return issues;
+});
+
+// ---- data entity extension editor ----
+interface EditableLineExtension { name: string; fields: string[] }
+const extensionTargetEntity = computed(() => designer.catalog.dataEntities.find((entry) => entry.name === (artifact.value.dataEntity as string)));
+const extensionRootFieldOptions = computed(() => {
+  const entity = extensionTargetEntity.value;
+  if (!entity) return [];
+  const existing = new Set((entity.fields as string[]) ?? []);
+  return fieldsOfTable(String(entity.rootTable)).filter((option) => !existing.has(String(option.value)));
+});
+const extensionLineOptions = computed(() => ((extensionTargetEntity.value?.lines ?? []) as { name: string }[]).map((line) => ({ label: line.name, value: line.name })));
+const extensionLines = computed(() => {
+  if (!artifact.value.lines) artifact.value.lines = [];
+  return artifact.value.lines as EditableEntityLine[];
+});
+const extensionLineExtensions = computed(() => {
+  if (!artifact.value.lineExtensions) artifact.value.lineExtensions = [];
+  return artifact.value.lineExtensions as EditableLineExtension[];
+});
+function addExtensionLine() { extensionLines.value.push({ name: '', table: '', parentReference: '', fields: [], lineKeys: [] }); }
+function removeExtensionLine(index: number) { extensionLines.value.splice(index, 1); }
+function addLineExtension() { extensionLineExtensions.value.push({ name: '', fields: [] }); }
+function removeLineExtension(index: number) { extensionLineExtensions.value.splice(index, 1); }
+function extensionLineFieldOptions(lineName: string) {
+  const entity = extensionTargetEntity.value;
+  const line = ((entity?.lines ?? []) as { name: string; table: string; fields?: string[] }[]).find((entry) => entry.name === lineName);
+  if (!line) return [];
+  const existing = new Set(line.fields ?? []);
+  return fieldsOfTable(line.table).filter((option) => !existing.has(String(option.value)));
+}
+
 async function save() {
   busy.value = true;
   saveError.value = '';
@@ -384,6 +487,29 @@ async function save() {
         message.error('App name must be lowercase, no spaces (use dots for extensions: erp.credit)');
         return;
       }
+      const defaultLocale = (art as any).defaultLocale;
+      if (defaultLocale) {
+        try { (art as any).defaultLocale = normalizeLocale(String(defaultLocale), 'defaultLocale'); }
+        catch (error) { message.error((error as Error).message); return; }
+      }
+    }
+
+    // Locale validation for translations
+    if (props.kind === 'translation') {
+      try { (art as any).locale = normalizeLocale(String((art as any).locale ?? ''), 'locale'); }
+      catch (error) { message.error((error as Error).message); return; }
+    }
+
+    // Data Entity client-side guard; Core validation is the final judge
+    if (props.kind === 'dataEntity') {
+      if (!art.rootTable) { message.error(`${t('ui.designer.dataEntity.rootTable')}: —`); return; }
+      if (!(art.businessKey as string[])?.length) { message.error(`${t('ui.designer.dataEntity.businessKey')}: —`); return; }
+      if (art.archiveEligible && !art.businessDateField) { message.error(`${t('ui.designer.dataEntity.businessDateField')}: —`); return; }
+      if (entityIssues.value.length) { message.error(entityIssues.value.join(' · ')); return; }
+    }
+    if (props.kind === 'dataEntityExtension' && !art.dataEntity) {
+      message.error('Select the Data Entity to extend');
+      return;
     }
 
     const saved = await designer.save(art);
@@ -701,6 +827,11 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
               <n-space v-if="kind === 'functionExtension'" :size="24" style="margin-top: 8px">
                 <n-form-item label="Function" required><n-select v-model:value="(artifact.function as string)" :options="extensionFunctionOptions" style="min-width:260px" filterable /></n-form-item>
               </n-space>
+              <n-space v-if="kind === 'dataEntityExtension'" :size="24" style="margin-top: 8px">
+                <n-form-item label="Data Entity" required>
+                  <n-select v-model:value="(artifact.dataEntity as string)" :options="extensionDataEntityOptions" style="min-width:260px" filterable />
+                </n-form-item>
+              </n-space>
             </n-card>
 
             <n-card v-if="isExtension && customizationChain && kind !== 'menuExtension'" size="small" title="Inherited layers (read-only)">
@@ -777,6 +908,11 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
                 <n-form-item label="Description">
                   <n-input v-model:value="(artifact.label as string)" placeholder="Display name for this app" />
                 </n-form-item>
+                <n-form-item :label="t('ui.designer.appDefaultLocale')">
+                  <n-select v-model:value="(artifact.defaultLocale as string)" :options="localeOptions" clearable filterable tag placeholder="en" data-testid="app-default-locale" />
+                </n-form-item>
+                <p class="hint">{{ t('ui.designer.appDefaultLocaleHint') }}</p>
+                <n-alert v-if="defaultLocaleMissingResources" type="warning" :show-icon="true">{{ t('ui.designer.translation.noLocaleWarning') }}</n-alert>
                 <n-form-item label="App icon">
                   <n-select v-model:value="(artifact.icon as string)" :options="ICON_OPTIONS" clearable placeholder="Automatic monogram" />
                 </n-form-item>
@@ -980,6 +1116,116 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
                 <n-select v-model:value="selectedPrivileges" :options="privilegeOptions" multiple filterable />
               </n-form-item>
             </n-card>
+
+            <!-- Translation editor -->
+            <n-card v-if="kind === 'translation'" size="small" :title="t('ui.designer.kind.translation')">
+              <n-space vertical :size="12">
+                <n-form-item :label="t('ui.designer.translation.locale')" required>
+                  <n-select v-model:value="(artifact.locale as string)" :options="localeOptions" filterable tag clearable placeholder="th" data-testid="translation-locale" />
+                </n-form-item>
+                <p class="hint">{{ t('ui.designer.translation.resourceKey') }}: table.X.field.y.label · form.F.action.a.label · menu.M.item.i.label · ui.* (framework only)</p>
+                <TranslationEditor :artifact="artifact" :app="selectedApp" :model="selectedModel" />
+              </n-space>
+            </n-card>
+
+            <!-- Data Entity editor -->
+            <n-card v-if="kind === 'dataEntity'" size="small" :title="t('ui.designer.kind.dataEntity')">
+              <n-space vertical :size="12">
+                <n-space :size="24" align="start">
+                  <n-form-item :label="t('ui.designer.dataEntity.rootTable')" required>
+                    <n-select v-model:value="(artifact.rootTable as string)" :options="tableOptions" style="min-width:240px" filterable />
+                  </n-form-item>
+                  <n-form-item :label="t('ui.designer.dataEntity.businessKey')" required>
+                    <n-select v-model:value="(artifact.businessKey as string[])" :options="fieldsOfTable(String(artifact.rootTable ?? ''))" multiple style="min-width:240px" />
+                  </n-form-item>
+                  <n-form-item :label="t('ui.designer.dataEntity.fields')">
+                    <n-select v-model:value="(artifact.fields as string[])" :options="fieldsOfTable(String(artifact.rootTable ?? ''))" multiple style="min-width:280px" />
+                  </n-form-item>
+                </n-space>
+                <n-space :size="24" align="center">
+                  <n-form-item :label="t('ui.designer.dataEntity.archiveEligible')">
+                    <n-switch v-model:value="(artifact.archiveEligible as boolean)" />
+                  </n-form-item>
+                  <n-form-item :label="t('ui.designer.dataEntity.businessDateField')" :required="Boolean(artifact.archiveEligible)">
+                    <n-select v-model:value="(artifact.businessDateField as string)" :options="dateFieldsOfTable(String(artifact.rootTable ?? ''))" clearable style="min-width:200px" />
+                  </n-form-item>
+                </n-space>
+                <n-alert v-if="entityIssues.length" type="error" :show-icon="true">
+                  {{ entityIssues.join(' · ') }}
+                </n-alert>
+                <h4 style="margin:8px 0 0">{{ t('ui.designer.dataEntity.lines') }}</h4>
+                <n-card v-for="(line, index) in entityLines" :key="index" size="small" :bordered="true">
+                  <n-space :size="16" align="start" style="margin-bottom:8px">
+                    <n-form-item label="Name" required>
+                      <n-input v-model:value="line.name" size="small" style="width:160px" />
+                    </n-form-item>
+                    <n-form-item :label="t('ui.designer.dataEntity.rootTable')">
+                      <n-select v-model:value="line.table" :options="tableOptions" size="small" style="min-width:200px" filterable />
+                    </n-form-item>
+                    <n-form-item label="Parent reference">
+                      <n-select v-model:value="line.parentReference" :options="fieldsOfTable(line.table).filter((option) => !line.fields.includes(String(option.value)))" size="small" style="min-width:180px" />
+                    </n-form-item>
+                    <n-button size="tiny" quaternary type="error" @click="removeEntityLine(index)">✕</n-button>
+                  </n-space>
+                  <n-space align="center" style="margin-bottom:8px">
+                    <n-form-item :label="t('ui.designer.dataEntity.fields')" style="margin:0">
+                      <n-select v-model:value="line.fields" :options="fieldsOfTable(line.table)" multiple size="small" style="min-width:280px" />
+                    </n-form-item>
+                    <n-form-item label="Line keys" style="margin:0">
+                      <n-select v-model:value="line.lineKeys" :options="line.fields.map((field) => ({ label: field, value: field }))" multiple size="small" style="min-width:200px" />
+                    </n-form-item>
+                  </n-space>
+                </n-card>
+                <n-button size="small" @click="addEntityLine">{{ t('ui.designer.dataEntity.addLine') }}</n-button>
+              </n-space>
+            </n-card>
+
+            <!-- Data Entity Extension editor -->
+            <n-card v-if="kind === 'dataEntityExtension'" size="small" :title="t('ui.designer.kind.dataEntity') + ' ' + t('ui.designer.kind.extensionSuffix')">
+              <n-alert type="info" style="margin-bottom:12px">
+                Extensions append root fields, new lines, or fields on existing lines. Root table, business key, line relationships and archive settings stay with the base entity.
+              </n-alert>
+              <n-space vertical :size="12">
+                <n-form-item :label="t('ui.designer.dataEntity.extensionFields')">
+                  <n-select v-model:value="(artifact.fields as string[])" :options="extensionRootFieldOptions" multiple style="min-width:320px" />
+                </n-form-item>
+                <h4 style="margin:8px 0 0">{{ t('ui.designer.dataEntity.lines') }}</h4>
+                <n-card v-for="(line, index) in extensionLines" :key="index" size="small" :bordered="true">
+                  <n-space :size="16" align="start" style="margin-bottom:8px">
+                    <n-form-item label="Name" required>
+                      <n-input v-model:value="line.name" size="small" style="width:160px" />
+                    </n-form-item>
+                    <n-form-item :label="t('ui.designer.dataEntity.rootTable')">
+                      <n-select v-model:value="line.table" :options="tableOptions" size="small" style="min-width:200px" filterable />
+                    </n-form-item>
+                    <n-form-item label="Parent reference">
+                      <n-select v-model:value="line.parentReference" :options="fieldsOfTable(line.table).filter((option) => !line.fields.includes(String(option.value)))" size="small" style="min-width:180px" />
+                    </n-form-item>
+                    <n-button size="tiny" quaternary type="error" @click="removeExtensionLine(index)">✕</n-button>
+                  </n-space>
+                  <n-space align="center">
+                    <n-form-item :label="t('ui.designer.dataEntity.fields')" style="margin:0">
+                      <n-select v-model:value="line.fields" :options="fieldsOfTable(line.table)" multiple size="small" style="min-width:280px" />
+                    </n-form-item>
+                    <n-form-item label="Line keys" style="margin:0">
+                      <n-select v-model:value="line.lineKeys" :options="line.fields.map((field) => ({ label: field, value: field }))" multiple size="small" style="min-width:200px" />
+                    </n-form-item>
+                  </n-space>
+                </n-card>
+                <n-button size="small" @click="addExtensionLine">{{ t('ui.designer.dataEntity.addLine') }}</n-button>
+                <h4 style="margin:8px 0 0">{{ t('ui.designer.dataEntity.lineExtensions') }}</h4>
+                <n-space v-for="(extension, index) in extensionLineExtensions" :key="index" align="center">
+                  <n-form-item :label="t('ui.designer.dataEntity.lines')" style="margin:0">
+                    <n-select v-model:value="extension.name" :options="extensionLineOptions" size="small" style="min-width:180px" />
+                  </n-form-item>
+                  <n-form-item :label="t('ui.designer.dataEntity.fields')" style="margin:0">
+                    <n-select v-model:value="extension.fields" :options="extensionLineFieldOptions(extension.name)" multiple size="small" style="min-width:280px" />
+                  </n-form-item>
+                  <n-button size="tiny" quaternary type="error" @click="removeLineExtension(index)">✕</n-button>
+                </n-space>
+                <n-button size="small" @click="addLineExtension">+ {{ t('ui.designer.dataEntity.lineExtensions') }}</n-button>
+              </n-space>
+            </n-card>
           </n-space>
         </n-form>
       </n-tab-pane>
@@ -993,6 +1239,7 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
 </template>
 
 <style scoped>
+.hint{color:var(--emu-muted);font-size:13px;line-height:1.5;margin:0 0 8px}
 .inherited-layer{border:1px solid var(--emu-border);border-radius:8px;padding:10px;background:#f8fafc}.inherited-layer pre{max-height:240px;margin:8px 0 0;padding:10px;overflow:auto;background:#111827;color:#e5e7eb;border-radius:6px;font-size:11px;white-space:pre-wrap}
 @media(max-width:700px){.designer-edit-heading{display:block!important}.designer-edit-heading h2{font-size:21px;overflow-wrap:anywhere}.designer-edit-heading>.n-space{display:grid!important;grid-template-columns:1fr 1fr;margin-top:12px}.designer-edit-heading :deep(.n-button){width:100%;min-height:44px}.designer-edit :deep(.n-card__content){padding:14px}.designer-edit :deep(.n-space:not(.n-space--vertical)){flex-wrap:wrap!important;width:100%}.designer-edit :deep(.n-form-item){width:100%!important;min-width:0!important}.designer-edit :deep(.n-select),.designer-edit :deep(.n-input),.designer-edit :deep(.n-input-number){width:100%!important;min-width:0!important;max-width:100%}.designer-edit :deep(.n-table){display:block;max-width:100%;overflow-x:auto}.designer-edit :deep(.n-table table){min-width:560px}.designer-edit :deep(.n-button){min-height:40px}.designer-edit :deep(.n-card-header){flex-wrap:wrap}}
 </style>

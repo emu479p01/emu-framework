@@ -29,7 +29,7 @@ describe('deriveExtensionName', () => {
 describe('EXT_TARGET_FIELD', () => {
   it('covers all extension kinds', () => {
     expect(Object.keys(EXT_TARGET_FIELD).sort()).toEqual([
-      'chartExtension', 'dutyExtension', 'enumExtension', 'formExtension', 'functionExtension', 'menuExtension',
+      'chartExtension', 'dataEntityExtension', 'dutyExtension', 'enumExtension', 'formExtension', 'functionExtension', 'menuExtension',
       'privilegeExtension', 'roleExtension', 'scriptExtension', 'tableExtension', 'viewExtension',
     ]);
   });

@@ -30,12 +30,12 @@ const appCards = computed(() =>
 
 <template>
   <div class="home-page">
-    <div class="home-heading"><div><span>WORKSPACE</span><h1>{{ t('home.title') }}</h1><p>Choose an app to continue your work.</p></div></div>
+    <div class="home-heading"><div><span>WORKSPACE</span><h1>{{ t('ui.home.title') }}</h1><p>{{ t('ui.home.subtitle') }}</p></div></div>
     <n-card v-if="appCards.length === 0" class="onboarding-card" data-testid="empty-onboarding">
-      <n-empty :description="t('home.emptyDescription')">
+      <n-empty :description="t('ui.home.emptyDescription')">
         <template #extra>
-          <h2>{{ t('home.emptyTitle') }}</h2>
-          <router-link to="/designer?mode=simple"><n-button type="primary" size="large" data-testid="create-first-app">{{ t('home.create') }}</n-button></router-link>
+          <h2>{{ t('ui.home.emptyTitle') }}</h2>
+          <router-link to="/designer?mode=simple"><n-button type="primary" size="large" data-testid="create-first-app">{{ t('ui.home.create') }}</n-button></router-link>
         </template>
       </n-empty>
     </n-card>

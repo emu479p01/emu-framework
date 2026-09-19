@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import type { DataEntityMeta, Kernel } from '@emu/core';
 import { attachmentStoragePath } from './attachments.js';
 import { importEntityDocument } from './dataEntities.js';
+import { localizeArchiveEntities } from './localization.js';
 import { fontCachePath } from './fontManager.js';
 import { archiveStoragePath } from './storagePaths.js';
 
@@ -120,7 +121,14 @@ export function registerArchiveRoutes(app: FastifyInstance, kernel: Kernel, requ
     } finally { schedulerRunning = false; }
   };
   const scheduler = setInterval(() => { void runScheduled(); }, 60 * 60_000); scheduler.unref();
-  app.get('/api/system/archive/policies', (request) => { requireAdmin(request); const policies = kernel.db.prepare('SELECT * FROM "FW_ArchivePolicy" ORDER BY entityName').all(); return { eligibleEntities: kernel.registry.allDataEntities().filter((entity) => entity.archiveEligible).map((entity) => ({ name: entity.name, label: entity.label, businessDateField: entity.businessDateField })), policies }; });
+  app.get('/api/system/archive/policies', (request) => {
+    const actor = requireAdmin(request);
+    const policies = kernel.db.prepare('SELECT * FROM "FW_ArchivePolicy" ORDER BY entityName').all();
+    const locale = String((kernel.db.prepare('SELECT locale FROM "FW_User" WHERE username=?').get(actor) as { locale?: string } | undefined)?.locale ?? 'en');
+    const eligibleEntities = kernel.registry.allDataEntities().filter((entity) => entity.archiveEligible)
+      .map((entity) => ({ name: entity.name, label: entity.label, businessDateField: entity.businessDateField }));
+    return { eligibleEntities: localizeArchiveEntities(kernel, eligibleEntities, locale), policies };
+  });
   app.get<{ Querystring: { type?: string; limit?: string } }>('/api/system/data-jobs', (request) => { requireAdmin(request); const limit=Math.max(1,Math.min(500,Number(request.query.limit)||100));return {items:request.query.type?kernel.db.prepare('SELECT jobId,type,entityName,status,requestedBy,summaryJson,error,createdAt,modifiedAt FROM "FW_DataJob" WHERE type=? ORDER BY createdAt DESC LIMIT ?').all(request.query.type,limit):kernel.db.prepare('SELECT jobId,type,entityName,status,requestedBy,summaryJson,error,createdAt,modifiedAt FROM "FW_DataJob" ORDER BY createdAt DESC LIMIT ?').all(limit)}; });
   app.put<{ Params: { entity: string }; Body: PolicyBody }>('/api/system/archive/policies/:entity', (request) => {
     const actor = requireAdmin(request); const entity = entityOrThrow(kernel, request.params.entity); const dateField = String(request.body.businessDateField ?? entity.businessDateField ?? '');

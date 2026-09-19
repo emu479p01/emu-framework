@@ -8,6 +8,7 @@ import fastifyStatic from '@fastify/static';
 import multipart from '@fastify/multipart';
 import {
   Kernel,
+  LocaleResolver,
   MetadataError,
   ValidationError,
   DataEventCancelled,
@@ -17,6 +18,7 @@ import {
   canonicalExtensionName,
   ENCRYPTED_FIELD_MASK,
   normalizeLegacyArtifact,
+  normalizeLocale,
   type DataContext,
   type FieldValue,
   type MenuItemMeta,
@@ -632,8 +634,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.patch<{ Body: { locale?: string } }>('/api/me/locale', (req, reply) => {
     const user = requireUser(req);
-    const locale = String(req.body?.locale ?? '');
-    if (!/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(locale)) return reply.status(400).send({ error: 'Locale must be a BCP-47 language tag' });
+    const raw = String(req.body?.locale ?? '').trim();
+    let locale: string;
+    try { locale = normalizeLocale(raw, 'locale'); }
+    catch (error) { return reply.status(400).send({ error: (error as Error).message }); }
     kernel.db.prepare('UPDATE "FW_User" SET locale=?, modifiedAt=CURRENT_TIMESTAMP, modifiedBy=? WHERE username=?').run(locale, user.username, user.username);
     return { ok: true, locale };
   });
@@ -728,12 +732,15 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const allMenus = kernel.registry.allMenus();
     const isFrameworkAdmin = isSystemAdmin;
     const access = appAccessOf(user.username);
+    const localeResolver = new LocaleResolver(kernel.registry);
     const frameworkMenus: typeof allMenus = [];
-    const appMap = new Map<string, { name: string; label: string; icon?: import('@emu/core').IconName; dependsOn?: string[]; models?: { name: string; label?: string; layer: import('@emu/core').LayerType }[]; modules: string[]; menus: typeof allMenus }>();
+    const appMap = new Map<string, { name: string; label: string; defaultLocale: string; availableLocales: string[]; icon?: import('@emu/core').IconName; dependsOn?: string[]; models?: { name: string; label?: string; layer: import('@emu/core').LayerType }[]; modules: string[]; menus: typeof allMenus }>();
     for (const app of kernel.registry.loadedApps()) {
       appMap.set(app.name, {
         name: app.name,
         label: app.label ?? app.name,
+        defaultLocale: kernel.registry.defaultLocaleOf(app.name),
+        availableLocales: localeResolver.localesForApp(app.name),
         icon: app.icon,
         dependsOn: app.dependsOn,
         models: app.models,

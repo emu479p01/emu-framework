@@ -4,6 +4,13 @@ import type { Kernel, MenuItemMeta, SecurityPolicy } from '@emu/core';
 
 interface NavigationKey { menuName: string; itemId: string }
 
+/** Parses SQLite 'YYYY-MM-DD HH:MM:SS' (UTC) and ISO timestamps consistently. */
+function parseTimestamp(value: string | null | undefined): number {
+  if (!value) return Number.NaN;
+  const text = String(value);
+  return Date.parse(text.includes('T') ? text : `${text.replace(' ', 'T')}Z`);
+}
+
 export function registerNavigationPreferenceRoutes(app: FastifyInstance, kernel: Kernel, deps: {
   requireUser: (request: FastifyRequest) => AuthUser;
   policyOf: (username: string) => SecurityPolicy;
@@ -66,19 +73,37 @@ export function registerNavigationPreferenceRoutes(app: FastifyInstance, kernel:
       return false;
     });
     const shape = (row: typeof visible[number]) => ({ menuName: row.menuName, itemId: row.itemId, lastOpenedAt: row.lastOpenedAt ?? null });
-    return { favorites: visible.filter((row) => Boolean(row.favorite)).map(shape), recent: visible.filter((row) => row.lastOpenedAt).slice(0, 10).map(shape) };
+    const byRecent = (a: typeof visible[number], b: typeof visible[number]) => (parseTimestamp(b.lastOpenedAt) || 0) - (parseTimestamp(a.lastOpenedAt) || 0);
+    return {
+      favorites: visible.filter((row) => Boolean(row.favorite)).map(shape),
+      recent: visible.filter((row) => row.lastOpenedAt).sort(byRecent).slice(0, 10).map(shape),
+    };
   });
 
   app.post<{ Body: NavigationKey }>('/api/navigation/recent', (request) => {
     const user = deps.requireUser(request); const key = request.body; assertAllowed(user.username, key); const id = userId(user.username);
-    kernel.db.prepare(`INSERT INTO "FW_NavigationItem" (createdAt,createdBy,modifiedAt,modifiedBy,userId,menuName,itemId,favorite,lastOpenedAt)
-      VALUES (CURRENT_TIMESTAMP,?,CURRENT_TIMESTAMP,?,?,?,?,0,CURRENT_TIMESTAMP)
-      ON CONFLICT(userId,menuName,itemId) DO UPDATE SET lastOpenedAt=CURRENT_TIMESTAMP,modifiedAt=CURRENT_TIMESTAMP,modifiedBy=excluded.modifiedBy`)
-      .run(user.username, user.username, id, key.menuName, key.itemId);
-    const stale = kernel.db.prepare('SELECT id,favorite FROM "FW_NavigationItem" WHERE userId=? AND lastOpenedAt IS NOT NULL ORDER BY lastOpenedAt DESC LIMIT -1 OFFSET 10').all(id) as Array<{ id: number; favorite: number }>;
-    for (const row of stale) {
-      if (row.favorite) kernel.db.prepare('UPDATE "FW_NavigationItem" SET lastOpenedAt=NULL WHERE id=?').run(row.id);
-      else kernel.db.prepare('DELETE FROM "FW_NavigationItem" WHERE id=?').run(row.id);
+    // Millisecond precision with a strict "greater than the user's previous
+    // maximum" rule keeps ordering deterministic even when several menus are
+    // opened within the same second or the clock steps backwards.
+    kernel.db.exec('BEGIN');
+    try {
+      const maxRow = kernel.db.prepare('SELECT MAX(lastOpenedAt) m FROM "FW_NavigationItem" WHERE userId=?').get(id) as { m?: string | null };
+      const maxMs = parseTimestamp(maxRow?.m ?? null);
+      const stamp = new Date(Math.max(Date.now(), (Number.isFinite(maxMs) ? maxMs : 0) + 1)).toISOString();
+      kernel.db.prepare(`INSERT INTO "FW_NavigationItem" (createdAt,createdBy,modifiedAt,modifiedBy,userId,menuName,itemId,favorite,lastOpenedAt)
+        VALUES (CURRENT_TIMESTAMP,?,CURRENT_TIMESTAMP,?,?,?,?,0,?)
+        ON CONFLICT(userId,menuName,itemId) DO UPDATE SET lastOpenedAt=excluded.lastOpenedAt,modifiedAt=CURRENT_TIMESTAMP,modifiedBy=excluded.modifiedBy`)
+        .run(user.username, user.username, id, key.menuName, key.itemId, stamp);
+      const stale = kernel.db.prepare('SELECT id,favorite,lastOpenedAt FROM "FW_NavigationItem" WHERE userId=? AND lastOpenedAt IS NOT NULL').all(id) as Array<{ id: number; favorite: number; lastOpenedAt: string }>;
+      stale.sort((a, b) => parseTimestamp(b.lastOpenedAt) - parseTimestamp(a.lastOpenedAt));
+      for (const row of stale.slice(10)) {
+        if (row.favorite) kernel.db.prepare('UPDATE "FW_NavigationItem" SET lastOpenedAt=NULL WHERE id=?').run(row.id);
+        else kernel.db.prepare('DELETE FROM "FW_NavigationItem" WHERE id=?').run(row.id);
+      }
+      kernel.db.exec('COMMIT');
+    } catch (error) {
+      kernel.db.exec('ROLLBACK');
+      throw error;
     }
     return { ok: true };
   });

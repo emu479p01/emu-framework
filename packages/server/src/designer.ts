@@ -5,6 +5,7 @@ import {
   metadataChangeSetSchema,
   metadataRevision,
   previewMetadataChangeSet,
+  translationDiagnostics,
   validateMetadataArtifact,
   validateReportLayout,
   type AnyMeta,
@@ -68,6 +69,9 @@ const DESIGNER_KINDS = new Set([
   'viewExtension',
   'chartExtension',
   'functionExtension',
+  'translation',
+  'dataEntity',
+  'dataEntityExtension',
 ]);
 
 function loadStored(kernel: Kernel): MetadataArtifact[] {
@@ -265,6 +269,8 @@ export function registerDesignerRoutes(
         reports: kernel.registry.allReports().filter(readableCatalogItem),
         views: kernel.registry.allViews().filter(readableCatalogItem),
         charts: kernel.registry.allCharts().filter(readableCatalogItem),
+        dataEntities: kernel.registry.allDataEntities().filter(readableCatalogItem),
+        translations: kernel.registry.allTranslations().filter(readableCatalogItem),
       },
     };
   };
@@ -372,6 +378,7 @@ export function registerDesignerRoutes(
         : kind === 'role' ? kernel.registry.getRole(name)
         : kind === 'script' ? kernel.registry.getScript(name)
         : kind === 'function' ? kernel.registry.getFunction(name)
+        : kind === 'dataEntity' ? kernel.registry.allDataEntities().find((item) => item.name === name)
         : undefined;
       if (!effective) return reply.status(404).send({ error: `Unknown ${kind} '${name}'` });
       const layers = kernel.registry.customizationLayers(kind, name).map((artifact: any) => ({
@@ -396,6 +403,13 @@ export function registerDesignerRoutes(
       ai: { inspect: true, validate: true, apply: false, businessData: false, scripts: false },
       schemas: { artifact: metadataArtifactSchema, changeSet: metadataChangeSetSchema },
     };
+  });
+
+  // Translation key warnings for the Label Designer: duplicate keys per locale
+  // and resources whose metadata target no longer exists.
+  app.get('/api/designer/translations/diagnostics', (req) => {
+    requireDesigner(req);
+    return { diagnostics: translationDiagnostics(kernel.registry) };
   });
 
   app.post<{ Body: { artifact?: AnyMeta } }>('/api/designer/reports/validate', (req, reply) => {

@@ -1,4 +1,5 @@
 import { metadataRevision, normalizeLegacyArtifact, type AnyMeta, type Kernel } from '@emu/core';
+import { FRAMEWORK_UI_EN, FRAMEWORK_UI_TH } from './frameworkUi.js';
 
 const FW_MODEL = 'Framework';
 
@@ -50,6 +51,8 @@ export function seedDesignerDb(kernel: Kernel): void {
       { label: 'SMTP Settings', icon: 'settings', route: '/system/integrations/smtp' },
       { label: 'Table Browser', icon: 'table', route: '/system/tables' },
     ] } as any,
+    { kind: 'translation', name: 'FW_UiEn', ...fw, locale: 'en', resources: FRAMEWORK_UI_EN } as any,
+    { kind: 'translation', name: 'FW_UiTh', ...fw, locale: 'th', resources: FRAMEWORK_UI_TH } as any,
   ];
 
   // v0.1.1.0 replaces generic security forms/reports with dedicated APIs and
@@ -58,7 +61,7 @@ export function seedDesignerDb(kernel: Kernel): void {
     ctx.select('FW_WebArtifact').whereEq({ name }).firstOnly()?.delete();
   }
 
-  const order = ['enum', 'table', 'privilege', 'duty', 'role', 'form', 'menu', 'report'];
+  const order = ['enum', 'table', 'privilege', 'duty', 'role', 'form', 'menu', 'report', 'translation'];
   const tableOrder = ['FW_UserRole', 'FW_AppAccess'];
   artifacts.sort((a, b) => {
     const ak = order.indexOf(a.kind);

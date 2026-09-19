@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { api } from '../api';
+import { setUiMessages } from '../i18n';
 import type {
   AggregateMeta, DutyMeta, EnumMeta, FieldMeta, FormMeta, MenuItemMeta, MenuMeta,
   PrivilegeMeta, ReportMeta, RoleMeta, TableMeta, ViewMeta, ChartMeta,
@@ -9,7 +10,7 @@ export type { AggregateMeta, EnumMeta, FieldMeta, FormMeta, MenuMeta, ReportMeta
 export type MenuItem = MenuItemMeta;
 export type SecurityMeta = Pick<PrivilegeMeta | DutyMeta | RoleMeta, 'name' | 'label' | 'app' | 'model' | 'layer'>;
 export interface ModelEntry { name: string; label?: string; layer: string }
-export interface AppEntry { name: string; label: string; icon?: import('@emu/core').IconName; dependsOn?: string[]; models?: ModelEntry[]; modules: string[]; menus: MenuMeta[] }
+export interface AppEntry { name: string; label: string; defaultLocale: string; availableLocales: string[]; icon?: import('@emu/core').IconName; dependsOn?: string[]; models?: ModelEntry[]; modules: string[]; menus: MenuMeta[] }
 export interface Metadata {
   branding: { title: string };
   capabilities: { designer: boolean; maintenance: boolean; tableBrowser: boolean; securityAdmin: boolean; myAccount: boolean };
@@ -17,7 +18,7 @@ export interface Metadata {
   privileges: SecurityMeta[]; duties: SecurityMeta[]; roles: SecurityMeta[];
   actions: string[];
   frameworkMenus: MenuMeta[]; apps: AppEntry[];
-  locale: string; availableLocales: string[];
+  locale: string; availableLocales: string[]; uiMessages: Record<string, string>;
 }
 
 export const useMeta = defineStore('meta', {
@@ -34,7 +35,10 @@ export const useMeta = defineStore('meta', {
     reportsFor: (state) => (tableName: string) => (state.meta?.reports ?? []).filter((report) => report.dataSource === tableName),
   },
   actions: {
-    async load() { this.meta = await api.get<Metadata>('/api/metadata'); },
+    async load() {
+      this.meta = await api.get<Metadata>('/api/metadata');
+      setUiMessages(this.meta.uiMessages ?? {}, this.meta.locale ?? 'en');
+    },
     fieldsFor(form: FormMeta): FieldMeta[] { return this.table(form.table)?.fields ?? []; },
     field(tableName: string, fieldName: string): FieldMeta | undefined { return this.table(tableName)?.fields.find((field) => field.name === fieldName); },
     enumLabel(enumName: string, value: unknown): string {

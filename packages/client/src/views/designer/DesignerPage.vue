@@ -198,6 +198,9 @@ const KIND_META: Record<string, { icon: string; label: string }> = {
   dutyExtension: { icon: '+◆', label: 'Duty Ext' },
   roleExtension: { icon: '+◉', label: 'Role Ext' },
   scriptExtension: { icon: '+⚡', label: 'Script Ext' },
+  dataEntity: { icon: '▦', label: 'Data Entity' },
+  translation: { icon: '⌐A', label: 'Translation' },
+  dataEntityExtension: { icon: '+▦', label: 'Data Entity Ext' },
 };
 
 function layerType(layer: string): 'default' | 'info' | 'success' | 'warning' {
@@ -267,6 +270,8 @@ const NEW_KINDS = [
   { key: 'report', label: 'Report' },
   { key: 'view', label: 'View (query / data source)' },
   { key: 'chart', label: 'Chart' },
+  { key: 'dataEntity', label: 'Data Entity' },
+  { key: 'translation', label: 'Translation' },
   { type: 'divider' as const, key: 'd1' },
   { key: 'tableExtension', label: 'Table Extension' },
   { key: 'formExtension', label: 'Form Extension' },
@@ -277,6 +282,7 @@ const NEW_KINDS = [
   { key: 'roleExtension', label: 'Role Extension' },
   { key: 'viewExtension', label: 'View Extension' },
   { key: 'chartExtension', label: 'Chart Extension' },
+  { key: 'dataEntityExtension', label: 'Data Entity Extension' },
   { type: 'divider' as const, key: 'd2' },
   { key: 'script', label: 'Script' },
   { key: 'scriptExtension', label: 'Script Extension' },
@@ -288,9 +294,10 @@ const NEW_KINDS = [
 
 const KIND_ORDER = [
   'table', 'enum', 'form', 'menu', 'view', 'chart', 'privilege', 'duty', 'role', 'script', 'function', 'report',
+  'dataEntity', 'translation',
   'tableExtension', 'enumExtension', 'formExtension', 'menuExtension',
   'privilegeExtension', 'dutyExtension', 'roleExtension', 'scriptExtension',
-  'viewExtension', 'chartExtension', 'functionExtension',
+  'viewExtension', 'chartExtension', 'functionExtension', 'dataEntityExtension',
 ];
 
 // ---- artifact counting ----

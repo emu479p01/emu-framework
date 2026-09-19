@@ -31,6 +31,7 @@ export interface DesignerCatalog {
   tables: Artifact[]; enums: Artifact[]; forms: Artifact[]; menus: Artifact[];
   privileges: Artifact[]; duties: Artifact[]; roles: Artifact[]; scripts: Artifact[];
   functions: Artifact[]; reports: Artifact[]; views: Artifact[]; charts: Artifact[];
+  dataEntities: Artifact[]; translations: Artifact[];
 }
 export interface CustomizationChain {
   target: { kind: string; name: string; app?: string };
@@ -38,7 +39,7 @@ export interface CustomizationChain {
   effective: Artifact;
   warnings: string[];
 }
-const emptyCatalog = (): DesignerCatalog => ({ tables: [], enums: [], forms: [], menus: [], privileges: [], duties: [], roles: [], scripts: [], functions: [], reports: [], views: [], charts: [] });
+const emptyCatalog = (): DesignerCatalog => ({ tables: [], enums: [], forms: [], menus: [], privileges: [], duties: [], roles: [], scripts: [], functions: [], reports: [], views: [], charts: [], dataEntities: [], translations: [] });
 
 export const useDesigner = defineStore('designer', {
   state: () => ({ artifacts: [] as WebArtifactEntry[], apps: [] as DesignerApp[], catalog: emptyCatalog(), loaded: false }),

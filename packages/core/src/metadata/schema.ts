@@ -1,6 +1,6 @@
 import AjvModule, { type ErrorObject } from 'ajv';
 import { Type, type TSchema } from '@sinclair/typebox';
-import { ICON_NAMES, type AnyMeta, type AppManifest } from './types.js';
+import { ICON_NAMES, normalizeLocale, type AnyMeta, type AppManifest } from './types.js';
 
 const name = Type.String({ minLength: 1, pattern: '^[A-Za-z_][A-Za-z0-9_.-]*$' });
 const layer = Type.Union(['SYS', 'ISV', 'LOC', 'DEV', 'CUS'].map((value) => Type.Literal(value)));
@@ -226,10 +226,11 @@ const dataEntityLineSchema = Type.Object({
 }, { additionalProperties: false });
 
 const artifactSchemas = [
-  Type.Object({ kind: Type.Literal('app'), name, label: Type.Optional(Type.String()), icon, dependsOn: Type.Optional(Type.Array(Type.String())), models: Type.Optional(Type.Array(Type.Object({ name, label: Type.Optional(Type.String()), layer }))) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('app'), name, label: Type.Optional(Type.String()), defaultLocale: Type.Optional(Type.String({ minLength: 2, maxLength: 35 })), icon, dependsOn: Type.Optional(Type.Array(Type.String())), models: Type.Optional(Type.Array(Type.Object({ name, label: Type.Optional(Type.String()), layer }))) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('table'), ...common, fields: Type.Array(fieldSchema), titleField: Type.Optional(Type.String()), indexes: Type.Optional(Type.Array(indexSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('translation'), ...common, locale: Type.String({ pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$' }), resources: Type.Record(Type.String({ minLength: 1 }), Type.String()) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('dataEntity'), ...common, rootTable: Type.String({ minLength: 1 }), businessKey: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), fields: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), lines: Type.Optional(Type.Array(dataEntityLineSchema)), archiveEligible: Type.Optional(Type.Boolean()), businessDateField: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('dataEntityExtension'), ...common, dataEntity: Type.String({ minLength: 1 }), fields: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1 })), lines: Type.Optional(Type.Array(dataEntityLineSchema, { minItems: 1 })), lineExtensions: Type.Optional(Type.Array(Type.Object({ name: Type.String({ minLength: 1 }), fields: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }) }, { additionalProperties: false }), { minItems: 1 })) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('enum'), ...common, values: Type.Array(Type.Object({ name, value: Type.Integer(), label: Type.Optional(Type.String()) }, { additionalProperties: false })) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('form'), ...common, table: Type.String(), actions: Type.Optional(Type.Array(formActionSchema)), listFields: Type.Optional(Type.Array(Type.String())), filterFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), charts: Type.Optional(Type.Array(formChartSchema)), lines: Type.Optional(Type.Array(lineGridSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('menu'), ...common, items: Type.Array(menuItemSchema) }, { additionalProperties: false }),
@@ -313,8 +314,19 @@ function diagnostics(errors: ErrorObject[] | null | undefined): SchemaDiagnostic
 export function validateMetadataArtifact(value: unknown): SchemaDiagnostic[] {
   if (!artifactValidator(value)) return diagnostics(artifactValidator.errors);
   const artifact = value as { kind?: string; fields?: Array<{ name?: string; type?: string; mandatory?: boolean; readOnly?: boolean; multiline?: boolean; encrypted?: boolean; default?: unknown }> };
+  const issues: SchemaDiagnostic[] = [];
+  if (artifact.kind === 'app') {
+    const locale = (value as { defaultLocale?: string }).defaultLocale;
+    if (locale !== undefined) {
+      try { normalizeLocale(locale, 'defaultLocale'); }
+      catch (error) { issues.push({ path: '/defaultLocale', code: 'invalid_locale', message: (error as Error).message }); }
+    }
+  }
+  if (artifact.kind === 'translation') {
+    try { normalizeLocale((value as { locale?: string }).locale ?? '', 'locale'); }
+    catch (error) { issues.push({ path: '/locale', code: 'invalid_locale', message: (error as Error).message }); }
+  }
   if (artifact.kind === 'table' || artifact.kind === 'tableExtension') {
-    const issues: SchemaDiagnostic[] = [];
     for (const [index, field] of (artifact.fields ?? []).entries()) {
       if (field.type === 'enum' && field.mandatory) {
         issues.push({ path: `/fields/${index}/mandatory`, code: 'enum_optional', message: `Enum field '${field.name ?? index}' must be optional` });
@@ -332,9 +344,8 @@ export function validateMetadataArtifact(value: unknown): SchemaDiagnostic[] {
         issues.push({ path: `/fields/${index}/default`, code: 'field_rules', message: 'encrypted fields cannot define a default' });
       }
     }
-    return issues;
   }
-  return [];
+  return issues;
 }
 export function validateMetadataChangeSet(value: unknown): SchemaDiagnostic[] {
   return changeSetValidator(value) ? [] : diagnostics(changeSetValidator.errors);
