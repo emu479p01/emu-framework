@@ -1,0 +1,52 @@
+services:
+  app:
+    image: ${TEST_APP_IMAGE:-emuframework-local:1.0.2-test}
+    pull_policy: never
+    container_name: ${TEST_APP_CONTAINER:-emuframework-test-1-0-2-app}
+    ports:
+      - "${TEST_APP_PORT:-13399}:3399"
+    environment:
+      NODE_ENV: production
+      EMU_APP_TITLE: EmuFramework Local Acceptance
+      EMU_DB_PATH: /data/data.db
+      EMU_DESIGNER_DB_PATH: /data/designer.db
+      EMU_DEPLOYMENT_MODE: docker
+      EMU_UPDATER_URL: http://updater:3400
+      EMU_UPDATER_TOKEN: ${TEST_UPDATER_TOKEN:?Set TEST_UPDATER_TOKEN}
+    volumes:
+      - test-data:/data
+    networks: [test-network]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3399/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  updater:
+    image: emuframework-updater-local:1.0.2-test
+    pull_policy: never
+    container_name: ${TEST_UPDATER_CONTAINER:-emuframework-test-1-0-2-updater}
+    ports:
+      - "127.0.0.1:${TEST_UPDATER_PORT:-13400}:3400"
+    environment:
+      EMU_UPDATER_TOKEN: ${TEST_UPDATER_TOKEN:?Set TEST_UPDATER_TOKEN}
+      EMU_APP_CONTAINER: ${TEST_APP_CONTAINER:-emuframework-test-1-0-2-app}
+      EMU_IMAGE_REPOSITORY: emuframework-local
+      EMU_UPDATER_PULL_POLICY: never
+      EMU_UPDATER_LOCAL_IMAGE: ${TEST_CANDIDATE_IMAGE:-emuframework-local:1.0.2-test}
+      EMU_UPDATE_STATE_PATH: /data/update-status.json
+      EMU_RESTORE_STATE_PATH: /data/restore-status.json
+      EMU_DATA_PATH: /data
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - test-data:/data
+    networks: [test-network]
+    restart: unless-stopped
+
+volumes:
+  test-data:
+
+networks:
+  test-network:
+    driver: bridge

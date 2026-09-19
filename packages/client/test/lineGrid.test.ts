@@ -7,7 +7,14 @@ import LineGrid from '../src/components/LineGrid.vue';
 import { api } from '../src/api';
 import { useMeta, type Metadata } from '../src/stores/meta';
 
-const line = { table: 'TEST_Line', refField: 'headerId', fields: ['headerId', 'item', 'quantity'] };
+const line = {
+  table: 'TEST_Line', refField: 'headerId', fields: ['headerId', 'item', 'quantity'],
+  actions: [
+    { label: 'Visible action', type: 'function' as const, target: 'TEST_Visible' },
+    { label: 'Hidden action', type: 'function' as const, target: 'TEST_Hidden', hidden: true },
+    { label: 'Unauthorized action', type: 'function' as const, target: 'TEST_Denied', disabled: true },
+  ],
+};
 const rows = [{ id: 7, headerId: 1, item: 'โฟมล้างหน้า', quantity: 2 }];
 
 function button(wrapper: ReturnType<typeof mount>, label: string) {
@@ -61,6 +68,9 @@ describe('LineGrid responsive table', () => {
 
     expect(wrapper.get('.line-table').text()).toContain('โฟมล้างหน้า');
     expect(wrapper.get('.line-table').text()).toContain('Quantity');
+    expect(button(wrapper, 'Visible action').exists()).toBe(true);
+    expect(wrapper.get('.line-table').text()).not.toContain('Hidden action');
+    expect(wrapper.get('.line-table').text()).not.toContain('Unauthorized action');
 
     await button(wrapper, 'Edit').trigger('click');
     expect(button(wrapper, 'Save').exists()).toBe(true);

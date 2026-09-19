@@ -139,10 +139,9 @@ function remove() {
       </h1><p>{{ dirty ? 'Unsaved changes' : 'All changes saved' }}</p></div>
       <n-space>
         <n-button
-          v-for="act in (form.actions ?? []).filter((action) => !action.hidden && (!isNew || action.showOnCreate))"
+          v-for="act in (form.actions ?? []).filter((action) => !action.hidden && !action.disabled && (!isNew || action.showOnCreate))"
           :key="act.target ?? act.action"
           :loading="busy"
-          :disabled="act.disabled"
           :data-testid="`action-${act.target ?? act.action}`"
           @click="runAction(act)"
         >

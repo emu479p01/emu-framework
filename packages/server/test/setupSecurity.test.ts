@@ -52,6 +52,44 @@ describe('first setup and role-only administration', () => {
     await app.close();
   });
 
+  it('omits unauthorized form and line actions while direct action calls remain forbidden', async () => {
+    const app = buildServer({ setupCode: TEST_SETUP_CODE }); await app.ready();
+    await completeTestSetup(app, 'owner');
+    const kernel = kernelOf(app); applyErpSample(kernel);
+    const stored = kernel.designerContext().select('FW_WebArtifact').toArray().map((row) => JSON.parse(String(row.f.json)) as AnyMeta);
+    const form = stored.find((item) => item.kind === 'form' && item.name === 'ERP_SalesTableForm') as any;
+    const privilege = stored.find((item) => item.kind === 'privilege' && item.name === 'ERP_SalesOrderProcess') as any;
+    privilege.functions = ['ERP_AllowedAction'];
+    form.actions = [
+      { label: 'Allowed', target: 'ERP_AllowedAction', type: 'function' },
+      { label: 'Denied target', target: 'ERP_DeniedAction', type: 'function', privilege: 'ERP_SalesOrderProcess' },
+      { label: 'Denied explicit privilege', target: 'ERP_AllowedAction', type: 'function', privilege: 'ERP_MasterDataMaintain' },
+    ];
+    form.lines[0].actions = [
+      { label: 'Allowed line', target: 'ERP_AllowedAction', type: 'function' },
+      { label: 'Denied line', target: 'ERP_DeniedAction', type: 'function' },
+    ];
+    const functions = [
+      { kind: 'function', name: 'ERP_AllowedAction', app: 'erp', model: 'MiniERPApplication', layer: 'SYS', code: 'return { ok: true };' },
+      { kind: 'function', name: 'ERP_DeniedAction', app: 'erp', model: 'MiniERPApplication', layer: 'SYS', code: 'return { ok: true };' },
+    ] as AnyMeta[];
+    expect(kernel.applyWebArtifacts([...stored, ...functions])).toEqual([]);
+
+    const ctx = kernel.context();
+    const user = ctx.newRecord('FW_User').setMany({ username: 'action-user', passwordHash: hashPassword('Action-password-123'), enabled: true }); user.insert();
+    ctx.newRecord('FW_UserRole').setMany({ userId: user.id, role: 'ERP_SalesClerk' }).insert();
+    ctx.newRecord('FW_AppAccess').setMany({ userId: user.id, appName: 'erp', canOpen: true }).insert();
+    const login = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'action-user', password: 'Action-password-123' } });
+    const auth = { cookie: (login.headers['set-cookie'] as string).split(';')[0] };
+
+    const metadata = (await app.inject({ method: 'GET', url: '/api/metadata', headers: auth })).json();
+    const salesForm = metadata.forms.find((entry: { name: string }) => entry.name === 'ERP_SalesTableForm');
+    expect(salesForm.actions.map((action: { label: string }) => action.label)).toEqual(['Allowed']);
+    expect(salesForm.lines[0].actions.map((action: { label: string }) => action.label)).toEqual(['Allowed line']);
+    expect((await app.inject({ method: 'POST', url: '/api/action/ERP_DeniedAction', headers: auth, payload: {} })).statusCode).toBe(403);
+    await app.close();
+  });
+
   it('expires setup codes after fifteen minutes', async () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-01-01T00:00:00Z').getTime());
     const app = buildServer({ setupCode: TEST_SETUP_CODE }); await app.ready();

@@ -24,6 +24,7 @@ import { useDesigner } from '../../stores/designer';
 import { useMeta, type FieldMeta } from '../../stores/meta';
 import { useDraggableElement } from './useDraggableElement';
 import TablixEditor from './TablixEditor.vue';
+import { reportCanvasWidth } from './reportGeometry';
 
 interface ReportElement {
   id: string;
@@ -111,14 +112,7 @@ const selectedModel = ref('');
 const selectedLayer = ref('CUS');
 const fontOptions = ref<{ label: string; value: string }[]>([{ label: 'Roboto', value: 'Roboto' }]);
 const THAI_FONT = 'Noto Sans Thai';
-const canvasWidth = computed(() => {
-  const size = report.page?.size ?? 'A4';
-  const orientation = report.page?.orientation ?? 'portrait';
-  const dimensions = size === 'Letter' ? [612, 792] : [595, 842];
-  const pageWidth = orientation === 'landscape' ? dimensions[1] : dimensions[0];
-  const margins = report.page?.margins ?? [40, 40, 40, 40];
-  return Math.max(240, pageWidth - margins[0] - margins[2]);
-});
+const canvasWidth = computed(() => reportCanvasWidth(report.page));
 function previewFont(element: ReportElement): string {
   const selected = element.style?.fontFamily ?? report.defaultFont ?? 'Roboto';
   return [selected, THAI_FONT, 'Roboto', 'sans-serif'].map((font) => font.includes(' ') ? `"${font}"` : font).join(', ');

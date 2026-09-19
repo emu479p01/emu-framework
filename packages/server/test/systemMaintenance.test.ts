@@ -88,12 +88,22 @@ describe('system maintenance', () => {
 
   it('reports the latest stable release without accepting a client-selected version', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
-      tag_name: '1.0.1', name: 'Stable', body: 'Release notes', html_url: 'https://example.test/release',
+      tag_name: '1.0.2', name: 'Stable', body: 'Release notes', html_url: 'https://example.test/release',
       published_at: '2026-07-12T00:00:00Z', draft: false, prerelease: false,
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const response = await app.inject({ method: 'GET', url: '/api/system/update/latest', headers: auth });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ currentVersion: '1.0.1', latestVersion: '1.0.1', updateAvailable: false });
+    expect(response.json()).toMatchObject({ currentVersion: '1.0.2', latestVersion: '1.0.2', updateAvailable: false });
+  });
+
+  it('rejects release tags that are not exactly X.Y.Z', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      tag_name: 'v1.0.3', name: 'Invalid tag', body: '', html_url: 'https://example.test/release',
+      draft: false, prerelease: false,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    const response = await app.inject({ method: 'GET', url: '/api/system/update/latest', headers: auth });
+    expect(response.statusCode).toBe(502);
+    expect(response.json().error).toContain('X.Y.Z');
   });
 
   it('exposes an unauthenticated health check for container supervision', async () => {

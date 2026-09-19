@@ -1,0 +1,4 @@
+ARG BASE_IMAGE=ghcr.io/emu479p01/emu-framework-updater:1.0.1
+FROM ${BASE_IMAGE}
+COPY packages/server/dist/updater.js /updater/updater.js
+COPY packages/server/dist/updaterState.js /updater/updaterState.js
