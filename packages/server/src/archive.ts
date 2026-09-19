@@ -8,6 +8,9 @@ import type { DataEntityMeta, Kernel } from '@emu/core';
 import { attachmentStoragePath } from './attachments.js';
 import { importEntityDocument } from './dataEntities.js';
 import { fontCachePath } from './fontManager.js';
+import { archiveStoragePath } from './storagePaths.js';
+
+export { archiveStoragePath } from './storagePaths.js';
 
 interface ArchivePayload {
   schemaVersion: 1; entity: string; key: Record<string, unknown>; businessDate: unknown;
@@ -16,7 +19,6 @@ interface ArchivePayload {
 }
 interface PolicyBody { enabled?: boolean; businessDateField?: string; ageDays?: number; batchSize?: number; includeAttachments?: boolean; schedule?: string; weekday?: number; timezone?: string }
 
-export function archiveStoragePath(): string { return resolve(process.env.EMU_ARCHIVE_STORAGE_PATH || '/data/archive'); }
 function catalogPath(): string { return join(archiveStoragePath(), 'catalog.db'); }
 function safeRelative(root: string, candidate: string): string {
   const rel = relative(root, resolve(root, candidate)); if (!rel || rel === '..' || rel.startsWith(`..${sep}`)) throw new Error('Unsafe archive path'); return rel;
@@ -100,7 +102,7 @@ async function archiveBatch(kernel: Kernel, entity: DataEntityMeta, policy: Reco
 }
 
 export function registerArchiveRoutes(app: FastifyInstance, kernel: Kernel, requireAdmin: (request: FastifyRequest) => string): void {
-  void mkdir(archiveStoragePath(), { recursive: true });
+  void mkdir(archiveStoragePath(), { recursive: true }).catch((error) => app.log.error(error, 'Archive storage initialization failed'));
   let schedulerRunning = false;
   const runScheduled = async () => {
     if (schedulerRunning) return; schedulerRunning = true;

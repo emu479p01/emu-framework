@@ -7,6 +7,9 @@ import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { DataContext, Kernel } from '@emu/core';
 import { SecurityError } from '@emu/core';
+import { attachmentStoragePath } from './storagePaths.js';
+
+export { attachmentStoragePath } from './storagePaths.js';
 
 type AttachmentKind = 'file' | 'note' | 'url';
 interface ParentParams { table: string; id: string }
@@ -31,10 +34,6 @@ const MIME_BY_EXTENSION: Record<string, Set<string>> = {
   '.jpg': new Set(['image/jpeg']),
   '.jpeg': new Set(['image/jpeg']),
 };
-
-export function attachmentStoragePath(): string {
-  return resolve(process.env.EMU_FILE_STORAGE_PATH || '/data/files');
-}
 
 function configuredMaxBytes(): number {
   const value = Number(process.env.EMU_ATTACHMENT_MAX_BYTES ?? DEFAULT_MAX_BYTES);

@@ -11,6 +11,7 @@ import DatabaseCtor from 'better-sqlite3';
 import { CORE_VERSION, type Kernel } from '@emu/core';
 import { fontCachePath } from './fontManager.js';
 import { lastArtifactReadMetrics, lastMetadataValidationMs } from './designer.js';
+import { archiveStoragePath, attachmentStoragePath } from './storagePaths.js';
 
 const BACKUP_FORMAT = 'emuframework-backup';
 const BACKUP_SCHEMA_VERSION = 4;
@@ -99,8 +100,7 @@ function restoreStageDir(): string {
 function dataDbPath(): string { return process.env.EMU_DB_PATH ?? join(root, 'data.db'); }
 function designerDbPath(): string { return process.env.EMU_DESIGNER_DB_PATH ?? join(root, 'designer.db'); }
 function secretKeyPath(): string { return process.env.EMU_SECRET_KEY_PATH ?? join(dirname(designerDbPath()), '.emu-secret.key'); }
-function fileStoragePath(): string { return process.env.EMU_FILE_STORAGE_PATH ?? '/data/files'; }
-function archiveStoragePath(): string { return process.env.EMU_ARCHIVE_STORAGE_PATH ?? '/data/archive'; }
+function fileStoragePath(): string { return attachmentStoragePath(); }
 
 function backupDir(): string {
   return process.env.EMU_BACKUP_DIR ?? (deploymentMode() === 'docker' ? '/data/backups' : join(root, 'backups'));
