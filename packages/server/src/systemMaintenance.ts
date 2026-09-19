@@ -1,25 +1,26 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import { PassThrough } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { strFromU8, unzipSync, zipSync } from 'fflate';
+import { strFromU8, unzipSync, zipSync, Zip, ZipDeflate } from 'fflate';
 import DatabaseCtor from 'better-sqlite3';
 import { CORE_VERSION, type Kernel } from '@emu/core';
 import { fontCachePath } from './fontManager.js';
 import { lastArtifactReadMetrics, lastMetadataValidationMs } from './designer.js';
 
 const BACKUP_FORMAT = 'emuframework-backup';
-const BACKUP_SCHEMA_VERSION = 3;
+const BACKUP_SCHEMA_VERSION = 4;
 const MAX_BACKUP_BYTES = 512 * 1024 * 1024;
 const REPOSITORY = 'emu479p01/emu-framework';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 const sha256 = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
 
-export type BackupComponent = 'full' | 'data' | 'designer' | 'fonts';
+export type BackupComponent = 'full' | 'data' | 'designer' | 'fonts' | 'files' | 'archive';
 export type MaintenancePhase = 'preparing' | 'stopping' | 'snapshotting' | 'switching' | 'restoring' | 'verifying' | 'completed' | 'rolling_back' | 'rolled_back' | 'recovery_required';
 export type RollbackStatus = 'not_required' | 'running' | 'succeeded' | 'failed';
 
@@ -98,6 +99,8 @@ function restoreStageDir(): string {
 function dataDbPath(): string { return process.env.EMU_DB_PATH ?? join(root, 'data.db'); }
 function designerDbPath(): string { return process.env.EMU_DESIGNER_DB_PATH ?? join(root, 'designer.db'); }
 function secretKeyPath(): string { return process.env.EMU_SECRET_KEY_PATH ?? join(dirname(designerDbPath()), '.emu-secret.key'); }
+function fileStoragePath(): string { return process.env.EMU_FILE_STORAGE_PATH ?? '/data/files'; }
+function archiveStoragePath(): string { return process.env.EMU_ARCHIVE_STORAGE_PATH ?? '/data/archive'; }
 
 function backupDir(): string {
   return process.env.EMU_BACKUP_DIR ?? (deploymentMode() === 'docker' ? '/data/backups' : join(root, 'backups'));
@@ -164,7 +167,7 @@ async function latestRelease(): Promise<GitHubRelease> {
 async function createBackupArchive(kernel: Kernel, output?: string, component: BackupComponent = 'full'): Promise<{ archive: Buffer; manifest: BackupManifest }> {
   const dir = await mkdtemp(join(tmpdir(), 'emu-backup-'));
   try {
-    const components: Exclude<BackupComponent, 'full'>[] = component === 'full' ? ['data', 'designer', 'fonts'] : [component];
+    const components: Exclude<BackupComponent, 'full'>[] = component === 'full' ? ['data', 'designer', 'fonts', 'files', 'archive'] : [component];
     const payload: Record<string, Uint8Array> = {};
     if (components.includes('data')) {
       const path = join(dir, 'data.db'); await kernel.db.backup(path); payload['data.db'] = new Uint8Array(await readFile(path));
@@ -181,6 +184,8 @@ async function createBackupArchive(kernel: Kernel, output?: string, component: B
       }
     };
     if (components.includes('fonts')) await collectFonts(fontCachePath());
+    if (components.includes('files')) await collectFonts(fileStoragePath(), 'files');
+    if (components.includes('archive')) await collectFonts(archiveStoragePath(), 'archive');
     const manifest: BackupManifest = {
       format: BACKUP_FORMAT, schemaVersion: BACKUP_SCHEMA_VERSION, frameworkVersion: CORE_VERSION,
       createdAt: new Date().toISOString(), components,
@@ -195,19 +200,43 @@ async function createBackupArchive(kernel: Kernel, output?: string, component: B
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
 
+/** Streaming download path for large file/archive volumes. SQLite snapshots and
+ * hashes are prepared first, then every payload is fed to ZIP in bounded chunks
+ * instead of being accumulated in one process-wide payload object. */
+async function createBackupDownload(kernel: Kernel, component: BackupComponent): Promise<{ stream: PassThrough; manifest: BackupManifest }> {
+  const temp = await mkdtemp(join(tmpdir(), 'emu-backup-stream-')); const components: Exclude<BackupComponent, 'full'>[] = component === 'full' ? ['data','designer','fonts','files','archive'] : [component];
+  const entries: Array<{ name: string; path: string; bytes: number; sha256: string }> = [];
+  const addFile = async (name: string, path: string) => {
+    const hash=createHash('sha256');let bytes=0;for await(const chunk of createReadStream(path)){const data=Buffer.from(chunk);hash.update(data);bytes+=data.length;}entries.push({name,path,bytes,sha256:hash.digest('hex')});
+  };
+  const collect = async (directory:string,prefix:string):Promise<void>=>{if(!existsSync(directory))return;for(const entry of await readdir(directory,{withFileTypes:true})){const full=join(directory,entry.name);const name=`${prefix}/${entry.name}`;if(entry.isDirectory())await collect(full,name);else if(entry.isFile())await addFile(name,full);}};
+  if(components.includes('data')){const path=join(temp,'data.db');await kernel.db.backup(path);await addFile('data.db',path);}
+  if(components.includes('designer')){const path=join(temp,'designer.db');await kernel.designerDb.backup(path);await addFile('designer.db',path);}
+  if(components.includes('fonts'))await collect(fontCachePath(),'fonts');
+  if(components.includes('files'))await collect(fileStoragePath(),'files');
+  if(components.includes('archive')){const catalog=catalogPathForBackup();if(existsSync(catalog)){const db=new DatabaseCtor(catalog);try{db.pragma('wal_checkpoint(TRUNCATE)');}finally{db.close();}}await collect(archiveStoragePath(),'archive');}
+  const manifest:BackupManifest={format:BACKUP_FORMAT,schemaVersion:BACKUP_SCHEMA_VERSION,frameworkVersion:CORE_VERSION,createdAt:new Date().toISOString(),components,files:entries.map(({name,bytes,sha256})=>({name,bytes,sha256}))};
+  const output=new PassThrough();const zip=new Zip((error,data,final)=>{if(error){output.destroy(error);return;}if(data.length)output.write(Buffer.from(data));if(final)output.end();});
+  const pushBytes=(name:string,data:Uint8Array)=>{const file=new ZipDeflate(name,{level:6});zip.add(file);file.push(data,true);};pushBytes('manifest.json',new TextEncoder().encode(JSON.stringify(manifest,null,2)));
+  void(async()=>{try{for(const entry of entries){const file=new ZipDeflate(entry.name,{level:6});zip.add(file);for await(const chunk of createReadStream(entry.path,{highWaterMark:64*1024}))file.push(new Uint8Array(Buffer.from(chunk)),false);file.push(new Uint8Array(),true);}zip.end();}catch(error){zip.terminate();output.destroy(error instanceof Error?error:new Error(String(error)));}})();
+  output.once('close',()=>{void rm(temp,{recursive:true,force:true});}); return{stream:output,manifest};
+}
+
+function catalogPathForBackup(): string { return join(archiveStoragePath(), 'catalog.db'); }
+
 async function validateArchive(buffer: Buffer): Promise<{ manifest: BackupManifest; files: Record<string, Uint8Array>; components: Exclude<BackupComponent, 'full'>[] }> {
   if (buffer.length > MAX_BACKUP_BYTES) throw new Error('Backup exceeds the 512 MB safety limit');
   const files = unzipSync(buffer);
-  for (const name of Object.keys(files)) if ((name !== 'manifest.json' && name !== 'data.db' && name !== 'designer.db' && !/^fonts\/[A-Za-z0-9 _-]+\/[A-Za-z0-9._-]+$/.test(name)) || name.includes('..') || name.includes('\\')) throw new Error('Backup contains an unsafe file path');
+  for (const name of Object.keys(files)) if ((name !== 'manifest.json' && name !== 'data.db' && name !== 'designer.db' && !/^(?:fonts|files|archive)\/(?:[A-Za-z0-9._ -]+\/)*[A-Za-z0-9._ -]+$/.test(name)) || name.includes('..') || name.includes('\\')) throw new Error('Backup contains an unsafe file path');
   if (!files['manifest.json']) throw new Error('Backup is missing manifest.json');
   let manifest: BackupManifest;
   try { manifest = JSON.parse(strFromU8(files['manifest.json'])) as BackupManifest; }
   catch { throw new Error('Backup manifest is invalid JSON'); }
-  if (manifest.format !== BACKUP_FORMAT || ![1, 2, BACKUP_SCHEMA_VERSION].includes(manifest.schemaVersion)) throw new Error('Unsupported backup format');
+  if (manifest.format !== BACKUP_FORMAT || ![1, 2, 3, BACKUP_SCHEMA_VERSION].includes(manifest.schemaVersion)) throw new Error('Unsupported backup format');
   if (compareVersions(manifest.frameworkVersion, CORE_VERSION) > 0) throw new Error(`Backup requires newer framework ${manifest.frameworkVersion}`);
   const components: Exclude<BackupComponent, 'full'>[] = manifest.schemaVersion < 3
     ? ['data', 'designer', 'fonts']
-    : [...new Set(manifest.components ?? [])].filter((item): item is Exclude<BackupComponent, 'full'> => ['data', 'designer', 'fonts'].includes(item));
+    : [...new Set(manifest.components ?? [])].filter((item): item is Exclude<BackupComponent, 'full'> => ['data', 'designer', 'fonts', 'files', 'archive'].includes(item));
   if (!components.length) throw new Error('Backup does not declare any components');
   if (components.includes('data') && !files['data.db']) throw new Error('Backup is missing data.db');
   if (components.includes('designer') && !files['designer.db']) throw new Error('Backup is missing designer.db');
@@ -221,6 +250,8 @@ async function validateArchive(buffer: Buffer): Promise<{ manifest: BackupManife
   if (!components.includes('data') && files['data.db']) throw new Error('Backup contains undeclared Data component');
   if (!components.includes('designer') && files['designer.db']) throw new Error('Backup contains undeclared Designer component');
   if (!components.includes('fonts') && payloadNames.some((name) => name.startsWith('fonts/'))) throw new Error('Backup contains undeclared Fonts component');
+  if (!components.includes('files') && payloadNames.some((name) => name.startsWith('files/'))) throw new Error('Backup contains undeclared Files component');
+  if (!components.includes('archive') && payloadNames.some((name) => name.startsWith('archive/'))) throw new Error('Backup contains undeclared Archive component');
   const dir = await mkdtemp(join(tmpdir(), 'emu-validate-'));
   try {
     for (const name of ['data.db', 'designer.db']) {
@@ -334,12 +365,12 @@ export function registerSystemMaintenanceRoutes(app: FastifyInstance, kernel: Ke
   app.get<{ Querystring: { component?: BackupComponent } }>('/api/system/backup/export', async (req, reply) => {
     requireFrameworkAdmin(req);
     const component = req.query.component ?? 'full';
-    if (!['full', 'data', 'designer', 'fonts'].includes(component)) return reply.status(400).send({ error: 'Invalid backup component' });
-    const { archive } = await createBackupArchive(kernel, undefined, component);
+    if (!['full', 'data', 'designer', 'fonts', 'files', 'archive'].includes(component)) return reply.status(400).send({ error: 'Invalid backup component' });
+    const { stream } = await createBackupDownload(kernel, component);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     reply.header('Content-Type', 'application/zip');
     reply.header('Content-Disposition', `attachment; filename="emuframework-${component}-${CORE_VERSION}-${stamp}.emubackup"`);
-    return reply.send(archive);
+    return reply.send(stream);
   });
 
   app.post('/api/system/backup/validate', async (req, reply) => {

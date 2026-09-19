@@ -25,6 +25,7 @@ import { useMeta, type FieldMeta } from '../../stores/meta';
 import { useDraggableElement } from './useDraggableElement';
 import TablixEditor from './TablixEditor.vue';
 import { reportCanvasWidth } from './reportGeometry';
+import { pointsToUnit, unitToPoints, validateReportLayout, type ReportDesignUnit } from '@emu/core/browser';
 
 interface ReportElement {
   id: string;
@@ -35,7 +36,8 @@ interface ReportElement {
   height: number;
   text?: string;
   field?: string;
-  style?: { fontSize?: number; bold?: boolean; italic?: boolean; align?: 'left' | 'center' | 'right'; color?: string; borderWidth?: number; fontFamily?: string };
+  style?: { fontSize?: number; bold?: boolean; italic?: boolean; align?: 'left' | 'center' | 'right'; color?: string; borderWidth?: number; borderColor?: string; borderStyle?: 'solid'|'dashed'|'dotted'|'none'; fontFamily?: string };
+  image?: { source: 'asset'|'attachment'; assetId?: string; attachmentIdField?: string; attachmentName?: string; fit?: 'stretch'|'contain'|'cover'|'original'; horizontalAlign?: 'left'|'center'|'right'; verticalAlign?: 'top'|'middle'|'bottom' };
 }
 type ReportBandKind = 'pageHeader' | 'header' | 'detail' | 'footer' | 'pageFooter';
 type ReportBandDisplay = 'firstPage' | 'everyPage' | 'lastPage';
@@ -63,7 +65,10 @@ interface ReportArtifact {
   layer?: string;
   label?: string;
   defaultFont?: string;
-  page?: { size?: 'A4' | 'Letter'; orientation?: 'portrait' | 'landscape'; margins?: [number, number, number, number] };
+  page?: { size?: 'A3'|'A4'|'A5'|'Letter'|'Legal'|'Custom'; orientation?: 'portrait' | 'landscape'; width?: number; height?: number; margins?: [number, number, number, number] };
+  layoutVersion?: 1|2;
+  designUnit?: ReportDesignUnit;
+  assets?: { id: string; name: string; mimeType: 'image/png'|'image/jpeg'; dataBase64: string }[];
   dataSource: string;
   bands: ReportBand[];
   lineSources?: ReportLineSource[];
@@ -99,6 +104,9 @@ function blank(): ReportArtifact {
     kind: 'report',
     name: '',
     label: '',
+    layoutVersion: 2,
+    designUnit: 'cm',
+    page: { size: 'A4', orientation: 'portrait', margins: [40, 40, 40, 40] },
     dataSource: '',
     bands: [{ kind: 'header', displayOn: 'firstPage', height: 30, elements: [] }, { kind: 'detail', layout: 'freeform', height: 20, elements: [] }],
     lineSources: [],
@@ -113,6 +121,22 @@ const selectedLayer = ref('CUS');
 const fontOptions = ref<{ label: string; value: string }[]>([{ label: 'Roboto', value: 'Roboto' }]);
 const THAI_FONT = 'Noto Sans Thai';
 const canvasWidth = computed(() => reportCanvasWidth(report.page));
+const designUnit = computed(() => report.designUnit ?? 'cm');
+const unitOptions = [{ label: 'cm', value: 'cm' }, { label: 'inches', value: 'in' }, { label: 'px', value: 'px' }];
+const paperOptions = ['A3','A4','A5','Letter','Legal','Custom'].map((value) => ({ label: value, value }));
+const orientationOptions = [{ label: 'Portrait', value: 'portrait' }, { label: 'Landscape', value: 'landscape' }];
+const unitValue = (points: number | undefined, fallback = 0) => Number(pointsToUnit(points ?? fallback, designUnit.value).toFixed(3));
+const setUnit = (target: Record<string, unknown>, key: string, value: number | null) => { if (value != null) target[key] = unitToPoints(value, designUnit.value); };
+function setMargin(index: number, value: number | null) { report.page ??= { size: 'A4', margins: [40,40,40,40] }; report.page.margins ??= [40,40,40,40]; if (value != null) report.page.margins[index] = unitToPoints(value, designUnit.value); }
+const layoutDiagnostics = computed(() => validateReportLayout(report as never));
+const assetOptions = computed(() => (report.assets ?? []).map((asset) => ({ label: asset.name, value: asset.id })));
+async function addImageAsset(event: Event, list: ReportElement[], fieldOptions: { label: string; value: string }[]) {
+  const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return;
+  if (!['image/png','image/jpeg'].includes(file.type)) { message.error('Only PNG and JPEG images are supported'); input.value = ''; return; }
+  const dataUrl = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file); });
+  const id = `asset_${Date.now()}_${Math.random().toString(16).slice(2)}`; report.assets ??= []; report.assets.push({ id, name: file.name, mimeType: file.type as 'image/png'|'image/jpeg', dataBase64: dataUrl.split(',')[1] ?? '' });
+  addElement(list, 'image', fieldOptions); selectedElement.value!.image = { source: 'asset', assetId: id, fit: 'contain' }; input.value = '';
+}
 function previewFont(element: ReportElement): string {
   const selected = element.style?.fontFamily ?? report.defaultFont ?? 'Roboto';
   return [selected, THAI_FONT, 'Roboto', 'sans-serif'].map((font) => font.includes(' ') ? `"${font}"` : font).join(', ');
@@ -279,7 +303,9 @@ async function save() {
       const prefix = selectedApp.value === 'system' ? 'FW' : selectedApp.value.replace(/[^a-z0-9]/gi, '').toUpperCase();
       if (!name.startsWith(`${prefix}_`)) name = `${prefix}_${name}`;
     }
-    const artifact = { ...report, name, app: selectedApp.value, model: selectedModel.value, layer: selectedLayer.value };
+    const artifact = { ...report, layoutVersion: 2 as const, name, app: selectedApp.value, model: selectedModel.value, layer: selectedLayer.value };
+    const errors = validateReportLayout(artifact as never).filter((diagnostic) => diagnostic.severity === 'error');
+    if (errors.length) { message.error(errors.map((error) => error.message).join('\n')); return; }
     await designer.save(artifact as unknown as { kind: string; name: string; [k: string]: unknown });
     message.success('Report saved');
     if (isNew.value) router.replace(selectedApp.value && selectedModel.value ? `/designer/app/${encodeURIComponent(selectedApp.value)}/model/${encodeURIComponent(selectedModel.value)}/report/${encodeURIComponent(name)}` : `/designer/report/${encodeURIComponent(name)}`);
@@ -357,6 +383,23 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
           <span style="width: 110px">Default font</span>
           <n-select v-model:value="report.defaultFont" :options="fontOptions" clearable placeholder="Roboto (system default)" style="width: 240px" />
         </n-space>
+        <n-space align="center">
+          <span style="width:110px">Paper</span>
+          <n-select v-model:value="report.page!.size" :options="paperOptions" style="width:140px" />
+          <n-select v-model:value="report.page!.orientation" :options="orientationOptions" style="width:140px" />
+          <span>Unit</span><n-select v-model:value="report.designUnit" :options="unitOptions" style="width:110px" />
+          <template v-if="report.page?.size === 'Custom'">
+            <span>W</span><n-input-number :value="unitValue(report.page.width, 595.28)" :min="0.1" style="width:100px" @update:value="(v) => setUnit(report.page! as unknown as Record<string, unknown>, 'width', v)" />
+            <span>H</span><n-input-number :value="unitValue(report.page.height, 841.89)" :min="0.1" style="width:100px" @update:value="(v) => setUnit(report.page! as unknown as Record<string, unknown>, 'height', v)" />
+          </template>
+        </n-space>
+        <n-space align="center">
+          <span style="width:110px">Margins</span>
+          <template v-for="(label, mi) in ['Top','Right','Bottom','Left']" :key="label"><span>{{ label }}</span><n-input-number :value="unitValue(report.page?.margins?.[mi], 40)" :min="0" style="width:90px" @update:value="(v) => setMargin(mi, v)" /></template>
+        </n-space>
+        <n-alert v-if="layoutDiagnostics.length" :type="layoutDiagnostics.some((item) => item.severity === 'error') ? 'error' : 'warning'" title="Layout validation">
+          <ul class="error-list"><li v-for="item in layoutDiagnostics" :key="`${item.path}:${item.code}`">{{ item.message }}</li></ul>
+        </n-alert>
         <n-space align="start">
           <span style="width:110px">Parameters</span>
           <div class="report-parameters"><n-space v-for="(parameter, pi) in report.parameters ?? []" :key="pi" class="report-parameter" style="margin-bottom:6px">
@@ -388,7 +431,7 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
               <n-checkbox :checked="hasBand(bk.kind)" @update:checked="(v: boolean) => toggleBand(bk.kind, v)">{{ bk.label }}</n-checkbox>
               <template v-if="hasBand(bk.kind)">
                 <span>Height</span>
-                <n-input-number v-model:value="bandFor(bk.kind)!.height" :min="8" size="small" style="width: 90px" />
+                <n-input-number :value="unitValue(bandFor(bk.kind)!.height)" :min="0" size="small" style="width: 90px" @update:value="(v) => setUnit(bandFor(bk.kind)! as unknown as Record<string, unknown>, 'height', v)" /> <span>{{ designUnit }}</span>
                 <n-select v-if="bk.kind === 'header' || bk.kind === 'footer'" v-model:value="bandFor(bk.kind)!.displayOn" :options="DISPLAY_OPTIONS" size="small" style="width:140px" />
                 <n-select v-if="bk.kind === 'detail'" :value="bandFor(bk.kind)!.layout ?? 'freeform'" :options="LAYOUT_OPTIONS" size="small" style="width:120px" @update:value="(value) => setBandLayout(bandFor(bk.kind)!, value)" />
                 <template v-if="bandFor(bk.kind)!.layout !== 'tablix'">
@@ -396,11 +439,12 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
                   <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'field', mainFieldOptions)">+ Field</n-button>
                   <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'line', mainFieldOptions)">+ Line</n-button>
                   <n-button size="tiny" @click="addElement(bandFor(bk.kind)!.elements, 'rect', mainFieldOptions)">+ Box</n-button>
+                  <label class="image-upload">+ Image<input type="file" accept="image/png,image/jpeg" @change="(e) => addImageAsset(e, bandFor(bk.kind)!.elements, mainFieldOptions)" /></label>
                 </template>
               </template>
             </n-space>
           </template>
-          <TablixEditor v-if="hasBand(bk.kind) && bandFor(bk.kind)!.layout === 'tablix' && bandFor(bk.kind)!.tablix" :tablix="bandFor(bk.kind)!.tablix!" :field-options="mainFieldOptions" :font-options="fontOptions" />
+          <TablixEditor v-if="hasBand(bk.kind) && bandFor(bk.kind)!.layout === 'tablix' && bandFor(bk.kind)!.tablix" :tablix="bandFor(bk.kind)!.tablix!" :field-options="mainFieldOptions" :font-options="fontOptions" :unit="designUnit" />
           <div v-else-if="hasBand(bk.kind)" class="report-canvas-scroll"><div class="report-band" :style="{ height: bandFor(bk.kind)!.height + 'px', width: canvasWidth + 'px' }">
             <div
               v-for="(el, i) in bandFor(bk.kind)!.elements"
@@ -414,6 +458,7 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
               <span v-else-if="el.type === 'field'">[{{ el.field ?? '?' }}]</span>
               <div v-else-if="el.type === 'line'" class="report-line" />
               <div v-else-if="el.type === 'rect'" class="report-rect" />
+              <span v-else-if="el.type === 'image'">🖼 {{ report.assets?.find((asset) => asset.id === el.image?.assetId)?.name ?? el.image?.attachmentName ?? 'Image' }}</span>
               <div class="resize-handle" @pointerdown="(e) => dragHandlers(el).onResizeStart(e)" />
             </div>
           </div></div>
@@ -431,9 +476,9 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
               <n-button v-if="line.bands[0].layout !== 'tablix'" size="tiny" @click="addElement(line.bands[0].elements, 'text', lineFieldOptions(line.table))">+ Text</n-button>
               <n-button v-if="line.bands[0].layout !== 'tablix'" size="tiny" @click="addElement(line.bands[0].elements, 'field', lineFieldOptions(line.table))">+ Field</n-button>
               <n-button size="tiny" type="error" quaternary @click="removeLineSource(li)">Remove</n-button>
-              <span>Height</span><n-input-number v-model:value="line.bands[0].height" :min="8" size="small" style="width:90px" />
+              <span>Height</span><n-input-number :value="unitValue(line.bands[0].height)" :min="0" size="small" style="width:90px" @update:value="(v) => setUnit(line.bands[0] as unknown as Record<string, unknown>, 'height', v)" /><span>{{ designUnit }}</span>
             </n-space>
-            <TablixEditor v-if="line.bands[0].layout === 'tablix' && line.bands[0].tablix" :tablix="line.bands[0].tablix!" :field-options="lineFieldOptions(line.table)" :font-options="fontOptions" />
+            <TablixEditor v-if="line.bands[0].layout === 'tablix' && line.bands[0].tablix" :tablix="line.bands[0].tablix!" :field-options="lineFieldOptions(line.table)" :font-options="fontOptions" :unit="designUnit" />
             <div v-else class="report-canvas-scroll"><div class="report-band" :style="{ height: line.bands[0].height + 'px', width: canvasWidth + 'px' }">
               <div
                 v-for="(el, i) in line.bands[0].elements"
@@ -473,12 +518,11 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
             <n-space align="center">
               <span>Size</span>
               <n-input-number
-                :value="selectedElement.style?.fontSize ?? 10"
-                :min="6"
-                :max="72"
+                :value="unitValue(selectedElement.style?.fontSize, 10)"
+                :min="0.01"
                 size="small"
                 style="width: 90px"
-                @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, fontSize: v ?? 10 }; }"
+                @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, fontSize: unitToPoints(v ?? unitValue(10), designUnit) }; }"
               />
             </n-space>
             <n-space align="center">
@@ -507,13 +551,25 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
               @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, color: v }; }"
             />
           </template>
+          <template v-if="selectedElement.type === 'image'">
+            <n-radio-group :value="selectedElement.image?.source ?? 'asset'" @update:value="(v) => { selectedElement!.image = { ...selectedElement!.image, source: v, fit: selectedElement!.image?.fit ?? 'contain' }; }"><n-radio-button value="asset">Design asset</n-radio-button><n-radio-button value="attachment">Record attachment</n-radio-button></n-radio-group>
+            <n-select v-if="selectedElement.image?.source === 'asset'" v-model:value="selectedElement.image.assetId" :options="assetOptions" placeholder="Image asset" />
+            <template v-else><n-select v-model:value="selectedElement.image!.attachmentIdField" :options="selected?.fieldOptions ?? []" clearable placeholder="Field containing attachment ID" /><n-input v-model:value="selectedElement.image!.attachmentName" placeholder="Or attachment name" /></template>
+            <n-select v-model:value="selectedElement.image!.fit" :options="['stretch','contain','cover','original'].map(value => ({ label: value, value }))" />
+            <n-select v-model:value="selectedElement.image!.horizontalAlign" :options="['left','center','right'].map(value => ({ label: value, value }))" placeholder="Horizontal alignment" />
+            <n-select v-model:value="selectedElement.image!.verticalAlign" :options="['top','middle','bottom'].map(value => ({ label: value, value }))" placeholder="Vertical alignment" />
+          </template>
+          <template v-if="selectedElement.type === 'text' || selectedElement.type === 'field'">
+            <n-space align="center"><span>Border</span><n-select :value="selectedElement.style?.borderStyle ?? 'none'" :options="['none','solid','dashed','dotted'].map(value => ({label:value,value}))" style="width:110px" @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, borderStyle: v }; }" /></n-space>
+            <n-space align="center"><span>Width</span><n-input-number :value="unitValue(selectedElement.style?.borderWidth, 0)" :min="0" style="width:90px" @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, borderWidth: unitToPoints(v ?? 0, designUnit) }; }" /><n-color-picker :show-alpha="false" :value="selectedElement.style?.borderColor ?? '#000000'" @update:value="(v) => { selectedElement!.style = { ...selectedElement!.style, borderColor: v }; }" /></n-space>
+          </template>
           <n-space>
-            <span>x</span><n-input-number v-model:value="selectedElement.x" size="small" style="width: 80px" />
-            <span>y</span><n-input-number v-model:value="selectedElement.y" size="small" style="width: 80px" />
+            <span>x</span><n-input-number :value="unitValue(selectedElement.x)" size="small" style="width: 80px" @update:value="(v) => setUnit(selectedElement! as unknown as Record<string, unknown>, 'x', v)" />
+            <span>y</span><n-input-number :value="unitValue(selectedElement.y)" size="small" style="width: 80px" @update:value="(v) => setUnit(selectedElement! as unknown as Record<string, unknown>, 'y', v)" />
           </n-space>
           <n-space>
-            <span>w</span><n-input-number v-model:value="selectedElement.width" size="small" style="width: 80px" />
-            <span>h</span><n-input-number v-model:value="selectedElement.height" size="small" style="width: 80px" />
+            <span>w</span><n-input-number :value="unitValue(selectedElement.width)" size="small" style="width: 80px" @update:value="(v) => setUnit(selectedElement! as unknown as Record<string, unknown>, 'width', v)" />
+            <span>h</span><n-input-number :value="unitValue(selectedElement.height)" size="small" style="width: 80px" @update:value="(v) => setUnit(selectedElement! as unknown as Record<string, unknown>, 'height', v)" />
           </n-space>
           <n-button type="error" quaternary @click="removeSelected">Delete element</n-button>
         </n-space>
@@ -566,6 +622,7 @@ function refreshJsonFromDesign() { jsonText.value = JSON.stringify({ ...report, 
   height: 100%;
   box-sizing: border-box;
 }
+.image-upload{display:inline-flex;align-items:center;padding:0 8px;height:28px;border:1px solid var(--emu-border);border-radius:4px;font-size:12px;cursor:pointer}.image-upload input{display:none}
 .resize-handle {
   position: absolute;
   right: -3px;

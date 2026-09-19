@@ -6,6 +6,7 @@ This directory is the durable archive of EmuFramework release notes. The reposit
 
 | Version | Type | Released | Notes |
 | --- | --- | --- | --- |
+| 1.1.0 | FU — Framework Update | Unreleased | [1.1.0](1.1.0.md) |
 | 1.0.2 | PU — Proactive Update | Unreleased | [1.0.2](1.0.2.md) |
 | 1.0.1 | PU — Proactive Update | 2026-09-03 | [1.0.1](1.0.1.md) |
 | 1.0.0 | FU — Framework Update | 2026-09-03 | [1.0.0](1.0.0.md) |

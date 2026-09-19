@@ -1,6 +1,6 @@
 services:
   app:
-    image: ghcr.io/emu479p01/emu-framework:${EMU_VERSION:-1.0.2}
+    image: ghcr.io/emu479p01/emu-framework:${EMU_VERSION:-1.1.0}
     container_name: emuframework-app
     ports:
       - "${PORT:-3399}:3399"
@@ -9,12 +9,16 @@ services:
       EMU_APP_TITLE: ${EMU_APP_TITLE:-EmuFramework}
       EMU_DB_PATH: /data/data.db
       EMU_DESIGNER_DB_PATH: /data/designer.db
+      EMU_FILE_STORAGE_PATH: /files
+      EMU_ARCHIVE_STORAGE_PATH: /archive
       EMU_SECURE_COOKIES: ${EMU_SECURE_COOKIES:-}
       EMU_DEPLOYMENT_MODE: docker
       EMU_UPDATER_URL: http://updater:3400
       EMU_UPDATER_TOKEN: ${EMU_UPDATER_TOKEN:?Set EMU_UPDATER_TOKEN in .env}
     volumes:
       - emu-data:/data
+      - emu-files:/files
+      - emu-archive:/archive
     networks:
       - emu-network
     labels:
@@ -24,16 +28,20 @@ services:
       - updater
 
   updater:
-    image: ghcr.io/emu479p01/emu-framework-updater:${EMU_VERSION:-1.0.2}
+    image: ghcr.io/emu479p01/emu-framework-updater:${EMU_VERSION:-1.1.0}
     container_name: emuframework-updater
     environment:
       EMU_UPDATER_TOKEN: ${EMU_UPDATER_TOKEN:?Set EMU_UPDATER_TOKEN in .env}
       EMU_APP_CONTAINER: emuframework-app
       EMU_IMAGE_REPOSITORY: ghcr.io/emu479p01/emu-framework
       EMU_UPDATE_STATE_PATH: /data/update-status.json
+      EMU_FILE_STORAGE_PATH: /files
+      EMU_ARCHIVE_STORAGE_PATH: /archive
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - emu-data:/data
+      - emu-files:/files
+      - emu-archive:/archive
     networks:
       - emu-network
     restart: unless-stopped
@@ -41,6 +49,10 @@ services:
 volumes:
   emu-data:
     name: ${EMU_VOLUME_NAME:-emuframework-data}
+  emu-files:
+    name: ${EMU_FILES_VOLUME_NAME:-emuframework-files}
+  emu-archive:
+    name: ${EMU_ARCHIVE_VOLUME_NAME:-emuframework-archive}
 
 networks:
   emu-network:

@@ -10,6 +10,7 @@ import { useMeta } from '../stores/meta';
 import ImportDialog from './ImportDialog.vue';
 import ActionDialog from '../components/ActionDialog.vue';
 import BusinessDataTable from '../components/BusinessDataTable.vue';
+import DataEntityImportDialog from './DataEntityImportDialog.vue';
 import type { FormAction, ReportMeta } from '@emu/core';
 
 const props = defineProps<{ formName: string; appName?: string }>();
@@ -31,11 +32,14 @@ const sortDir = ref<'asc' | 'desc'>('desc');
 const visibleFields = ref<string[]>([]);
 const lookups = ref<Record<string, Record<number, string>>>({});
 const showImport = ref(false);
+const showEntityImport = ref(false);
 const selectedReport = ref<ReportMeta | null>(null);
 const reportAction = computed<FormAction | null>(() => selectedReport.value ? { label: selectedReport.value.label ?? selectedReport.value.name, type: 'report', target: selectedReport.value.name } : null);
 
 const form = computed(() => meta.form(props.formName));
 const table = computed(() => (form.value ? meta.table(form.value.table) : undefined));
+const dataEntities = computed(() => (meta.meta?.dataEntities ?? []).filter((entity) => entity.rootTable === table.value?.name));
+const activeEntity = computed(() => dataEntities.value[0]);
 const listFields = computed(() => {
   if (!form.value || !table.value) return [];
   const names = form.value.listFields ?? table.value.fields.map((field) => field.name);
@@ -112,6 +116,7 @@ function exportData(format: string) {
   if (!table.value) return;
   const link = document.createElement('a'); link.href = api.exportUrl(table.value.name, format as 'csv' | 'xlsx'); link.rel = 'noopener'; document.body.appendChild(link); link.click(); link.remove();
 }
+function exportEntity(format:'xlsx'|'csv'){if(!activeEntity.value)return;const link=document.createElement('a');link.href=`/api/data-entities/${encodeURIComponent(activeEntity.value.name)}/export?format=${format}`;document.body.appendChild(link);link.click();link.remove();}
 function back() { window.history.length > 1 ? router.back() : router.push(formPath.value || '/'); }
 </script>
 
@@ -124,6 +129,8 @@ function back() { window.history.length > 1 ? router.back() : router.push(formPa
         <n-dropdown v-if="reportOptions.length" trigger="click" :options="reportOptions" @select="printReport"><n-button data-testid="print-report">Print</n-button></n-dropdown>
         <n-dropdown trigger="click" :options="exportOptions" @select="exportData"><n-button data-testid="export-data">Export</n-button></n-dropdown>
         <n-button data-testid="import-data" @click="showImport=true">Import</n-button>
+        <n-dropdown v-if="activeEntity" trigger="click" :options="[{label:'Entity Excel',key:'xlsx'},{label:'Entity CSV ZIP',key:'csv'}]" @select="exportEntity"><n-button>Export document</n-button></n-dropdown>
+        <n-button v-if="activeEntity" @click="showEntityImport=true">Import document</n-button>
         <n-button type="primary" data-testid="new-record" @click="router.push(`${formPath}/form/${formName}/new`)">+ New</n-button>
       </n-space>
     </div>
@@ -136,6 +143,7 @@ function back() { window.history.length > 1 ? router.back() : router.push(formPa
     <n-empty v-if="!loading && !errorMessage && rows.length === 0" :description="appliedSearch ? 'No records match your search.' : 'No records yet. Create the first one to get started.'" class="list-empty" />
     <BusinessDataTable v-show="rows.length" class="list-table" :columns="columns" :data="rows" :loading="loading" :row-props="rowProps" :storage-key="`list:${appName ?? 'legacy'}:${formName}`" :pagination="{ page, pageSize, itemCount: total, prefix: () => `${Math.min((page - 1) * pageSize + 1, total)}–${Math.min(page * pageSize, total)} of ${total}`, 'onUpdate:page': (value: number) => (page = value) }" remote @update:sorter="onSorterChange" />
     <ImportDialog v-model:show="showImport" :table-name="table.name" @imported="load" />
+    <DataEntityImportDialog v-if="activeEntity" v-model:show="showEntityImport" :entity-name="activeEntity.name" @imported="load" />
     <ActionDialog :show="selectedReport !== null" :action="reportAction" @update:show="(value) => { if (!value) selectedReport = null }" />
   </div>
 </template>

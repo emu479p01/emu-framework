@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue';
-import { NButton, NCard, NSpace, useDialog, useMessage, type DataTableColumns } from 'naive-ui';
+import { NButton, NCard, NModal, NSpace, useDialog, useMessage, type DataTableColumns } from 'naive-ui';
 import { api, ApiError, type Row } from '../api';
 import { useMeta } from '../stores/meta';
 import FieldControl from './FieldControl.vue';
 import { applyIfBlank } from '../utils/applyDefaults';
 import ActionDialog from './ActionDialog.vue';
 import BusinessDataTable from './BusinessDataTable.vue';
+import AttachmentPanel from './AttachmentPanel.vue';
 import type { FormAction } from '@emu/core';
 
 const props = defineProps<{
@@ -25,6 +26,7 @@ const editingId = ref<number | null>(null);
 const draft = ref<Record<string, unknown>>({});
 const lookups = ref<Record<string, Record<number, string>>>({});
 const selectedAction = ref<FormAction | null>(null); const selectedLine = ref<Row | null>(null); const actionDialogOpen = ref(false);
+const attachmentLine = ref<Row | null>(null);
 function launchAction(action: FormAction, row: Row) { selectedAction.value = action; selectedLine.value = row; actionDialogOpen.value = true; }
 
 const table = computed(() => meta.table(props.line.table));
@@ -152,6 +154,7 @@ const columns = computed<DataTableColumns<Row>>(() => [
       }
       return h(NSpace, {}, () => [
         ...(props.line.actions ?? []).filter((action) => !action.hidden && !action.disabled).map((action) => h(NButton, { size: 'small', onClick: () => launchAction(action, row) }, () => action.label)),
+        h(NButton, { size: 'small', onClick: () => (attachmentLine.value = row) }, () => 'Files'),
         h(NButton, { size: 'small', onClick: () => startEdit(row) }, () => 'Edit'),
         h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => confirmRemove(row) }, () => 'Del'),
       ]);
@@ -187,6 +190,9 @@ const aggregateResults = computed(() =>
     </template>
     <BusinessDataTable class="line-table" :columns="columns" :data="displayRows" :row-key="(r: Row) => r.id" :storage-key="`line:${line.table}:${line.id ?? line.refField}`" size="small" />
     <ActionDialog v-model:show="actionDialogOpen" :action="selectedAction" :record-id="headerId" :record="headerRecord" :line-id="selectedLine?.id" :line-record="selectedLine ?? undefined" @completed="load" />
+    <n-modal :show="Boolean(attachmentLine)" preset="card" title="Line attachments" style="width:min(900px,94vw)" @update:show="(show) => { if (!show) attachmentLine = null }">
+      <AttachmentPanel v-if="attachmentLine" :table="line.table" :record-id="attachmentLine.id" embedded />
+    </n-modal>
   </n-card>
 </template>
 

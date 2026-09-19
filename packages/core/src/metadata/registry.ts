@@ -25,9 +25,12 @@ import type {
   TableMeta,
   ViewMeta,
   ChartMeta,
+  DataEntityMeta,
+  TranslationMeta,
 } from './types.js';
 import { SYSTEM_FIELDS, LAYER_ORDER, DEFAULT_LAYER, EXTENSION_KINDS, isIconName, canExtendLayer, canonicalExtensionName, type LayerType } from './types.js';
 import { validateMetadataArtifact } from './schema.js';
+import { validateReportLayout } from './reportLayout.js';
 
 export class MetadataError extends Error {}
 const loggedWarnings = new Set<string>();
@@ -56,6 +59,8 @@ const META_DIRS: { dir: string; kind: AnyMeta['kind'] }[] = [
   { dir: 'scriptExtensions', kind: 'scriptExtension' },
   { dir: 'functions', kind: 'function' },
   { dir: 'reports', kind: 'report' },
+  { dir: 'translations', kind: 'translation' },
+  { dir: 'dataEntities', kind: 'dataEntity' },
   { dir: 'views', kind: 'view' },
   { dir: 'charts', kind: 'chart' },
   { dir: 'viewExtensions', kind: 'viewExtension' },
@@ -81,6 +86,8 @@ export class MetadataRegistry {
   private scripts = new Map<string, ScriptMeta>();
   private functions = new Map<string, FunctionMeta>();
   private reports = new Map<string, ReportMeta>();
+  private translations = new Map<string, TranslationMeta>();
+  private dataEntities = new Map<string, DataEntityMeta>();
   private views = new Map<string, ViewMeta>();
   private charts = new Map<string, ChartMeta>();
   private extensionNames = new Set<string>();
@@ -314,6 +321,10 @@ export class MetadataRegistry {
         return this.functions as Map<string, AnyMeta>;
       case 'report':
         return this.reports as Map<string, AnyMeta>;
+      case 'translation':
+        return this.translations as Map<string, AnyMeta>;
+      case 'dataEntity':
+        return this.dataEntities as Map<string, AnyMeta>;
       case 'view':
         return this.views as Map<string, AnyMeta>;
       case 'chart':
@@ -757,6 +768,8 @@ export class MetadataRegistry {
       }
     }
     for (const report of this.reports.values()) {
+      const layoutErrors = validateReportLayout(report).filter((diagnostic) => diagnostic.severity === 'error');
+      if (layoutErrors.length) throw new MetadataError(`Report '${report.name}': ${layoutErrors.map((diagnostic) => `${diagnostic.path} ${diagnostic.message}`).join('; ')}`);
       const table = this.tables.get(report.dataSource);
       if (!table) throw new MetadataError(`Report '${report.name}': unknown dataSource table '${report.dataSource}'`);
       const mainFieldNames = new Set([...table.fields.map((f) => f.name), ...(SYSTEM_FIELDS as readonly string[])]);
@@ -779,6 +792,28 @@ export class MetadataRegistry {
         const lineFieldNames = new Set([...lineTable.fields.map((f) => f.name), ...(SYSTEM_FIELDS as readonly string[])]);
         const lineEncryptedFields = new Set(lineTable.fields.filter((field) => field.encrypted).map((field) => field.name));
         this.validateReportBands(line.bands, lineFieldNames, lineEncryptedFields, `Report '${report.name}' lineSource '${line.table}'`);
+      }
+    }
+    for (const entity of this.dataEntities.values()) {
+      const root = this.tables.get(entity.rootTable);
+      if (!root) throw new MetadataError(`Data entity '${entity.name}': unknown root table '${entity.rootTable}'`);
+      const rootFields = new Set(['id', ...(SYSTEM_FIELDS as readonly string[]), ...root.fields.map((field) => field.name)]);
+      for (const field of [...entity.businessKey, ...entity.fields]) {
+        if (!rootFields.has(field)) throw new MetadataError(`Data entity '${entity.name}': unknown root field '${field}'`);
+      }
+      for (const field of entity.businessKey) if (!entity.fields.includes(field)) throw new MetadataError(`Data entity '${entity.name}': business key '${field}' must be included in fields`);
+      if (entity.businessDateField && !rootFields.has(entity.businessDateField)) throw new MetadataError(`Data entity '${entity.name}': unknown business date field '${entity.businessDateField}'`);
+      if (entity.archiveEligible && !entity.businessDateField) throw new MetadataError(`Data entity '${entity.name}': archiveEligible requires businessDateField`);
+      if (entity.businessDateField && !['date', 'datetime'].includes(root.fields.find((field) => field.name === entity.businessDateField)?.type ?? '')) throw new MetadataError(`Data entity '${entity.name}': businessDateField must be date or datetime`);
+      for (const line of entity.lines ?? []) {
+        const table = this.tables.get(line.table);
+        if (!table) throw new MetadataError(`Data entity '${entity.name}': unknown line table '${line.table}'`);
+        const fields = new Set(['id', ...(SYSTEM_FIELDS as readonly string[]), ...table.fields.map((field) => field.name)]);
+        if (!fields.has(line.parentReference)) throw new MetadataError(`Data entity '${entity.name}': unknown parent reference '${line.parentReference}' on '${line.table}'`);
+        const parentField = table.fields.find((field) => field.name === line.parentReference);
+        if (parentField?.type !== 'reference' || parentField.reference?.table !== entity.rootTable) throw new MetadataError(`Data entity '${entity.name}': '${line.table}.${line.parentReference}' must reference '${entity.rootTable}'`);
+        for (const field of [...line.fields, ...line.lineKeys]) if (!fields.has(field)) throw new MetadataError(`Data entity '${entity.name}': unknown line field '${field}' on '${line.table}'`);
+        for (const field of line.lineKeys) if (!line.fields.includes(field)) throw new MetadataError(`Data entity '${entity.name}': line key '${field}' must be included in '${line.name}' fields`);
       }
     }
     for (const view of this.views.values()) this.validateView(view);
@@ -1089,6 +1124,15 @@ export class MetadataRegistry {
   allReports(): ReportMeta[] {
     return [...this.reports.values()];
   }
+
+  getDataEntity(name: string): DataEntityMeta {
+    const entity = this.dataEntities.get(name);
+    if (!entity) throw new MetadataError(`Unknown data entity '${name}'`);
+    return entity;
+  }
+
+  allDataEntities(): DataEntityMeta[] { return [...this.dataEntities.values()]; }
+  allTranslations(): TranslationMeta[] { return [...this.translations.values()]; }
 
   getView(name: string): ViewMeta {
     const view = this.views.get(name);

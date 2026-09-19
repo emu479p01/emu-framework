@@ -20,6 +20,7 @@ export function verifyPassword(password: string, stored: string): boolean {
 export interface AuthUser {
   username: string;
   displayName: string;
+  locale: string;
 }
 
 /** Validates credentials and creates a DB session; returns the token or null. */
@@ -72,5 +73,6 @@ export function resolveSession(ctx: DataContext, token: string | undefined): Aut
   return {
     username: user.f.username as string,
     displayName: (user.f.displayName as string) ?? (user.f.username as string),
+    locale: (user.f.locale as string) || 'en',
   };
 }

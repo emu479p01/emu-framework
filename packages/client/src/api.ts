@@ -88,8 +88,8 @@ export interface AppDataPreview {
 
 export interface BackupPreview {
   previewId: string; expiresAt: string;
-  manifest: { frameworkVersion: string; createdAt: string; components: ('data'|'designer'|'fonts')[]; files: { name: string; bytes: number }[] };
-  components: ('data'|'designer'|'fonts')[]; warnings: string[];
+  manifest: { frameworkVersion: string; createdAt: string; components: ('data'|'designer'|'fonts'|'files'|'archive')[]; files: { name: string; bytes: number }[] };
+  components: ('data'|'designer'|'fonts'|'files'|'archive')[]; warnings: string[];
 }
 
 export const api = {

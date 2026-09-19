@@ -10,6 +10,7 @@ import { useSession } from './stores/session';
 import { useMeta } from './stores/meta';
 import { t } from './i18n';
 import { buildNavigationOptions, findActiveKey, findNavigationKeyPath, type NavMenuOption } from './navigation';
+import { api } from './api';
 
 const session = useSession();
 const meta = useMeta();
@@ -20,6 +21,25 @@ const drawerOpen = ref(false);
 const siderCollapsed = ref(false);
 const selectedNavRoot = ref<string | null>(null);
 const desktopExpandedKeys = ref<string[]>([]);
+type NavigationPreference = { menuName: string; itemId: string; lastOpenedAt: string|null };
+const navigationPreferences = ref<{ favorites: NavigationPreference[]; recent: NavigationPreference[] }>({ favorites: [], recent: [] });
+const favoriteKeys = computed(() => new Set(navigationPreferences.value.favorites.map((item) => `${item.menuName}\0${item.itemId}`)));
+async function loadNavigationPreferences() {
+  if (!session.user) return;
+  navigationPreferences.value = await api.get('/api/navigation/preferences');
+}
+async function recordNavigation(menuName?: string, itemId?: string) {
+  drawerOpen.value = false;
+  selectedNavRoot.value = null;
+  if (menuName && itemId) {
+    await api.post('/api/navigation/recent', { menuName, itemId });
+    await loadNavigationPreferences();
+  }
+}
+async function setFavorite(menuName: string, itemId: string, favorite: boolean) {
+  await api.put(`/api/navigation/favorites/${encodeURIComponent(menuName)}/${encodeURIComponent(itemId)}`, { favorite });
+  await loadNavigationPreferences();
+}
 const themeOverrides: GlobalThemeOverrides = {
   common: {
     primaryColor: '#4f46e5', primaryColorHover: '#4338ca', primaryColorPressed: '#3730a3',
@@ -35,10 +55,10 @@ const menuOptions = computed<NavMenuOption[]>(() => {
     settingsLabel: t('nav.settings'),
     frameworkMenus: meta.frameworkMenus,
     apps: meta.apps,
-    onNavigate: () => {
-      drawerOpen.value = false;
-      selectedNavRoot.value = null;
-    },
+    onNavigate: recordNavigation,
+    favoriteKeys: favoriteKeys.value,
+    recentKeys: navigationPreferences.value.recent.map((item) => `${item.menuName}\0${item.itemId}`),
+    onFavorite: setFavorite,
   });
 });
 const activeKey = computed(() => findActiveKey(menuOptions.value, String(route.params.formName ?? ''), route.path) ?? '');
@@ -90,9 +110,20 @@ const breadcrumb = computed(() => {
   const form = meta.form(String(route.params.formName ?? ''));
   return form?.label ?? form?.name ?? t('home.title');
 });
-const userOptions = [{ key: 'account', label: 'Change password' }, { key: 'logout', label: t('auth.logout') }];
+const userOptions = computed(() => [
+  { key: 'account', label: 'Change password' },
+  { key: 'locale:en', label: `${session.user?.locale === 'en' ? '✓ ' : ''}Metadata: English` },
+  { key: 'locale:th', label: `${session.user?.locale === 'th' ? '✓ ' : ''}Metadata: ไทย` },
+  { key: 'logout', label: t('auth.logout') },
+]);
 async function onUserAction(key: string) {
   if (key === 'account') router.push('/account/password');
+  if (key.startsWith('locale:')) {
+    const locale = key.slice('locale:'.length);
+    await api.patch('/api/me/locale', { locale });
+    if (session.user) session.user.locale = locale;
+    await meta.load();
+  }
   if (key === 'logout') { await session.logout(); router.push('/login'); }
 }
 function updateViewport() {
@@ -105,7 +136,7 @@ function addOverflowTitle(event: Event) {
   const target = (event.target as HTMLElement | null)?.closest<HTMLElement>('.n-menu-item-content-header,.n-base-select-option__content');
   if (target && !target.title) target.title = target.textContent?.trim() ?? '';
 }
-onMounted(() => { updateViewport(); window.addEventListener('resize', updateViewport); window.addEventListener('keydown', onKeydown); document.addEventListener('mouseover', addOverflowTitle); });
+onMounted(() => { updateViewport(); void loadNavigationPreferences(); window.addEventListener('resize', updateViewport); window.addEventListener('keydown', onKeydown); document.addEventListener('mouseover', addOverflowTitle); });
 onBeforeUnmount(() => { window.removeEventListener('resize', updateViewport); window.removeEventListener('keydown', onKeydown); document.removeEventListener('mouseover', addOverflowTitle); });
 </script>
 
@@ -156,6 +187,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', updateViewport); wi
 body { margin:0; color:var(--emu-text); background:var(--emu-bg); font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; }
 .app-shell { height:100vh; height:100dvh; min-height:0; overflow:hidden; }
 .app-shell > .n-layout-scroll-container,.main-layout > .n-layout-scroll-container{overflow:hidden}
+.nav-favorite{border:0;background:transparent;color:#f59e0b;cursor:pointer;font-size:17px;line-height:1;padding:4px}
 .main-layout { height:100%; min-width:0; }
 .main-layout > .n-layout-scroll-container{display:flex;flex-direction:column}
 .app-sider { background:linear-gradient(180deg,#111827 0%,#172033 100%)!important; }

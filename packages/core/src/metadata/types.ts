@@ -413,7 +413,22 @@ export interface ReportElementStyle {
   align?: 'left' | 'center' | 'right';
   color?: string;
   borderWidth?: number;
+  borderColor?: string;
+  borderStyle?: 'solid' | 'dashed' | 'dotted' | 'none';
   fontFamily?: string;
+}
+
+export interface ReportImageMeta {
+  source: 'asset' | 'attachment';
+  /** Embedded design asset id for source=asset. */
+  assetId?: string;
+  /** Attachment id stored in a field on the current record. */
+  attachmentIdField?: string;
+  /** Or select an image attachment on the current record by its display name. */
+  attachmentName?: string;
+  fit?: 'stretch' | 'contain' | 'cover' | 'original';
+  horizontalAlign?: 'left' | 'center' | 'right';
+  verticalAlign?: 'top' | 'middle' | 'bottom';
 }
 
 export interface ReportElementMeta {
@@ -431,6 +446,7 @@ export interface ReportElementMeta {
   field?: string;
   /** Formatting token (e.g. date/number format) applied to a 'field' element's value. */
   format?: string;
+  image?: ReportImageMeta;
   style?: ReportElementStyle;
 }
 
@@ -488,8 +504,12 @@ export interface ReportLineSourceMeta {
 }
 
 export interface ReportPageMeta {
-  size?: 'A4' | 'Letter';
+  size?: 'A3' | 'A4' | 'A5' | 'Letter' | 'Legal' | 'Custom';
   orientation?: 'portrait' | 'landscape';
+  /** Required for Custom, canonical points. */
+  width?: number;
+  /** Required for Custom, canonical points. */
+  height?: number;
   /** [top, right, bottom, left], in points. */
   margins?: [number, number, number, number];
 }
@@ -503,6 +523,12 @@ export interface ReportMeta {
   dataSource: string;
   privileges?: string[];
   defaultFont?: string;
+  /** Layout v2 enables strict printable-area validation. */
+  layoutVersion?: 1 | 2;
+  /** Display/input unit only. Stored geometry always remains points. */
+  designUnit?: 'cm' | 'in' | 'px';
+  /** PNG/JPEG assets are embedded so metadata packages remain self-contained. */
+  assets?: { id: string; name: string; mimeType: 'image/png' | 'image/jpeg'; dataBase64: string }[];
   page?: ReportPageMeta;
   bands: ReportBandMeta[];
   lineSources?: ReportLineSourceMeta[];
@@ -550,6 +576,42 @@ export interface FieldUiOverrideMeta {
   allowEditOnCreate?: boolean;
   multiline?: boolean;
   encrypted?: boolean;
+}
+
+// ---- localization and document data entities ----
+
+/** Additive label resources. Keys remain stable while labels may change by locale. */
+export interface TranslationMeta {
+  kind: 'translation';
+  name: string;
+  app?: string;
+  locale: string;
+  resources: Record<string, string>;
+  layer?: LayerType;
+  model?: string;
+}
+
+export interface DataEntityLineMeta {
+  name: string;
+  table: string;
+  parentReference: string;
+  fields: string[];
+  lineKeys: string[];
+}
+
+export interface DataEntityMeta {
+  kind: 'dataEntity';
+  name: string;
+  app?: string;
+  label?: string;
+  rootTable: string;
+  businessKey: string[];
+  fields: string[];
+  lines?: DataEntityLineMeta[];
+  archiveEligible?: boolean;
+  businessDateField?: string;
+  layer?: LayerType;
+  model?: string;
 }
 
 // ---- declarative views and reusable charts ----
@@ -713,6 +775,8 @@ export type AnyMeta =
   | ScriptMeta
   | FunctionMeta
   | ReportMeta
+  | TranslationMeta
+  | DataEntityMeta
   | ViewMeta
   | ChartMeta;
 
@@ -743,6 +807,8 @@ export const BASE_KINDS = new Set([
   'script',
   'function',
   'report',
+  'translation',
+  'dataEntity',
   'view',
   'chart',
 ]);

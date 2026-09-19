@@ -8,4 +8,5 @@ dist/
 .DS_Store
 coverage/
 backups/
+data-jobs/
 .emu-secret.key
