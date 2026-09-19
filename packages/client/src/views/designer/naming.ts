@@ -28,4 +28,5 @@ export const EXT_TARGET_FIELD: Record<string, string> = {
   viewExtension: 'view',
   chartExtension: 'chart',
   functionExtension: 'function',
+  dataEntityExtension: 'dataEntity',
 };

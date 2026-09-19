@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
+import { mkdir, open, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -184,6 +184,39 @@ export function registerAttachmentRoutes(app: FastifyInstance, kernel: Kernel, d
     reply.header('Content-Type', String(row.mimeType));
     reply.header('Content-Length', String(row.bytes));
     reply.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(String(row.originalName))}`);
+    return reply.send(createReadStream(path));
+  });
+
+  const PREVIEWABLE: Record<string, string> = { 'image/png': 'image/png', 'image/jpeg': 'image/jpeg' };
+  app.get<{ Params: AttachmentParams }>('/api/attachments/:attachmentId/preview', async (request, reply) => {
+    const ctx = deps.userCtx(request); const row = attachmentRow(kernel, request.params.attachmentId);
+    assertParent(kernel, ctx, String(row.parentTable), Number(row.parentId), 'read');
+    if (row.kind !== 'file' || !row.storageKey) return reply.status(409).send({ error: 'This attachment is not a file' });
+    const mimeType = String(row.mimeType ?? '').toLowerCase().split(';', 1)[0]!;
+    if (!PREVIEWABLE[mimeType]) return reply.status(415).send({ error: 'Only PNG and JPEG images can be previewed' });
+    const path = storageFile(root, String(row.storageKey));
+    if (!existsSync(path)) return reply.status(410).send({ error: 'Attachment content is missing; contact an administrator' });
+    // Verify the file signature before serving; a renamed file must not be
+    // rendered inline as an image regardless of its recorded MIME type.
+    const handle = await open(path, 'r');
+    let signatureType = '';
+    try {
+      const { buffer, bytesRead } = await handle.read({ buffer: Buffer.alloc(8), length: 8, position: 0 });
+      const isPng = bytesRead >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47
+        && buffer[4] === 0x0d && buffer[5] === 0x0a && buffer[6] === 0x1a && buffer[7] === 0x0a;
+      const isJpeg = bytesRead >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+      signatureType = isPng ? 'image/png' : isJpeg ? 'image/jpeg' : '';
+    } finally {
+      await handle.close();
+    }
+    if (signatureType !== PREVIEWABLE[mimeType]) {
+      return reply.status(415).send({ error: 'Attachment content does not match a PNG or JPEG image' });
+    }
+    reply.header('Content-Type', signatureType);
+    reply.header('Content-Length', String(row.bytes));
+    reply.header('Content-Disposition', 'inline');
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Cache-Control', 'private, no-store');
     return reply.send(createReadStream(path));
   });
 

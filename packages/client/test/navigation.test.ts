@@ -19,23 +19,37 @@ describe('sidebar navigation', () => {
     ],
   };
 
-  it('builds Settings and Apps as icon-bearing submenus, never collapsed groups', () => {
+  it('builds Recent, Settings and Apps as icon-bearing submenus, never collapsed groups', () => {
     const options = buildNavigationOptions({
-      isFrameworkUser: true, settingsLabel: 'Settings', frameworkMenus: [settings],
+      isFrameworkUser: true, settingsLabel: 'Settings', recentLabel: 'Recent', recentEmptyLabel: 'No recently opened items',
+      frameworkMenus: [settings],
       apps: [{ name: 'sales', label: 'Sales', menus: [appMenu] }], onNavigate: vi.fn(),
     });
-    expect(options.map((option) => option.key)).toEqual(['app-sales', 'framework-settings']);
+    expect(options.map((option) => option.key)).toEqual(['recent', 'app-sales', 'framework-settings']);
     expect(options.every((option) => option.type !== 'group' && typeof option.icon === 'function')).toBe(true);
-    expect(allOptions(options).every((option) => typeof option.icon === 'function')).toBe(true);
+    // every navigable row carries an icon; the inert Recent empty hint is exempt
+    expect(allOptions(options).filter((option) => !option.disabled).every((option) => typeof option.icon === 'function')).toBe(true);
     expect(findActiveKey(options, 'SALES_OrderForm', '/')).toContain('SALES_OrderForm');
     expect(findActiveKey(options, '', '/system/maintenance')).toContain('/system/maintenance');
     const active = findActiveKey(options, 'SALES_OrderForm', '/')!;
     expect(findNavigationKeyPath(options, active)).toEqual(['app-sales', 'app-sales:Sales', active]);
   });
 
+  it('always shows the Recent root and an inert empty hint without history', () => {
+    const options = buildNavigationOptions({
+      settingsLabel: 'Settings', recentLabel: 'Recent', recentEmptyLabel: 'No recently opened items',
+      frameworkMenus: [], apps: [], onNavigate: vi.fn(),
+    });
+    expect(options.map((option) => option.key)).toEqual(['recent']);
+    const recent = options[0]!;
+    expect((recent.children ?? [])).toHaveLength(1);
+    expect(String((recent.children as NavMenuOption[])[0]!.key)).toBe('recent:empty');
+    expect((recent.children as NavMenuOption[])[0]!.disabled).toBe(true);
+  });
+
   it('maps an action item to the server-action route', () => {
     const actionMenu: MenuMeta = { kind: 'menu', name: 'Jobs', items: [{ label: 'Rebuild', action: 'RebuildIndex' }] };
-    const options = buildNavigationOptions({ isFrameworkUser: false, settingsLabel: 'Settings', frameworkMenus: [], apps: [{ name: 'ops', label: 'Ops', menus: [actionMenu] }], onNavigate: vi.fn() });
+    const options = buildNavigationOptions({ isFrameworkUser: false, settingsLabel: 'Settings', recentLabel: 'Recent', recentEmptyLabel: 'Empty', frameworkMenus: [], apps: [{ name: 'ops', label: 'Ops', menus: [actionMenu] }], onNavigate: vi.fn() });
     expect(allOptions(options).some((option) => String(option.key).includes('RebuildIndex'))).toBe(true);
   });
 
@@ -45,7 +59,7 @@ describe('sidebar navigation', () => {
       { label: 'Recalculate', target: { type: 'function', name: 'Recalculate' } },
       { label: 'Statement', target: { type: 'report', name: 'CustomerStatement' } },
     ] };
-    const options = buildNavigationOptions({ isFrameworkUser: false, settingsLabel: 'Settings', frameworkMenus: [], apps: [{ name: 'sales', label: 'Sales', menus: [menu] }], onNavigate: vi.fn() });
+    const options = buildNavigationOptions({ isFrameworkUser: false, settingsLabel: 'Settings', recentLabel: 'Recent', recentEmptyLabel: 'Empty', frameworkMenus: [], apps: [{ name: 'sales', label: 'Sales', menus: [menu] }], onNavigate: vi.fn() });
     expect(findActiveKey(options, 'SALES_OrderForm', '/')).toContain('SALES_OrderForm');
     expect(findActiveKey(options, '', '/report/CustomerStatement')).toContain('CustomerStatement');
     expect(allOptions(options).some((option) => String(option.key).includes('Recalculate'))).toBe(true);
@@ -68,7 +82,7 @@ describe('sidebar navigation', () => {
         { label: 'Hidden child', visible: false, form: 'HiddenChildForm' },
       ] },
     ] };
-    const options = buildNavigationOptions({ isFrameworkUser: false, settingsLabel: 'Settings', frameworkMenus: [], apps: [{ name: 'app', label: 'App', menus: [menu] }], onNavigate: vi.fn() });
+    const options = buildNavigationOptions({ isFrameworkUser: false, settingsLabel: 'Settings', recentLabel: 'Recent', recentEmptyLabel: 'Empty', frameworkMenus: [], apps: [{ name: 'app', label: 'App', menus: [menu] }], onNavigate: vi.fn() });
     const keys = allOptions(options).map((option) => String(option.key));
     expect(keys.some((key) => key.includes('RestoredForm'))).toBe(true);
     expect(keys.some((key) => key.includes('VisibleForm'))).toBe(true);

@@ -28,7 +28,7 @@ import type {
   DataEntityMeta,
   TranslationMeta,
 } from './types.js';
-import { SYSTEM_FIELDS, LAYER_ORDER, DEFAULT_LAYER, EXTENSION_KINDS, isIconName, canExtendLayer, canonicalExtensionName, type LayerType } from './types.js';
+import { SYSTEM_FIELDS, LAYER_ORDER, DEFAULT_LAYER, DEFAULT_LOCALE, EXTENSION_KINDS, isIconName, canExtendLayer, canonicalExtensionName, normalizeLocale, type LayerType } from './types.js';
 import { validateMetadataArtifact } from './schema.js';
 import { validateReportLayout } from './reportLayout.js';
 
@@ -61,6 +61,7 @@ const META_DIRS: { dir: string; kind: AnyMeta['kind'] }[] = [
   { dir: 'reports', kind: 'report' },
   { dir: 'translations', kind: 'translation' },
   { dir: 'dataEntities', kind: 'dataEntity' },
+  { dir: 'dataEntityExtensions', kind: 'dataEntityExtension' },
   { dir: 'views', kind: 'view' },
   { dir: 'charts', kind: 'chart' },
   { dir: 'viewExtensions', kind: 'viewExtension' },
@@ -144,6 +145,13 @@ export class MetadataRegistry {
   registerApp(manifest: AppManifest, artifacts: AnyMeta[]): void {
     if (manifest.icon !== undefined && !isIconName(manifest.icon)) {
       throw new MetadataError(`App '${manifest.name}': unknown icon '${String(manifest.icon)}'`);
+    }
+    if (manifest.defaultLocale !== undefined) {
+      try {
+        manifest = { ...manifest, defaultLocale: normalizeLocale(manifest.defaultLocale, 'defaultLocale') };
+      } catch (error) {
+        throw new MetadataError(`App '${manifest.name}': ${(error as Error).message}`);
+      }
     }
     for (const dep of manifest.dependsOn ?? []) {
       if (!this.apps.some((a) => a.manifest.name === dep)) {
@@ -237,9 +245,9 @@ export class MetadataRegistry {
 
   private validateExtension(appName: string, meta: AnyMeta): void {
     const ext = meta as any;
-    const field = ({ tableExtension: 'table', formExtension: 'form', menuExtension: 'menu', enumExtension: 'enum', privilegeExtension: 'privilege', dutyExtension: 'duty', roleExtension: 'role', scriptExtension: 'script', viewExtension: 'view', chartExtension: 'chart', functionExtension: 'function' } as Record<string, string>)[meta.kind];
+    const field = ({ tableExtension: 'table', formExtension: 'form', menuExtension: 'menu', enumExtension: 'enum', privilegeExtension: 'privilege', dutyExtension: 'duty', roleExtension: 'role', scriptExtension: 'script', viewExtension: 'view', chartExtension: 'chart', functionExtension: 'function', dataEntityExtension: 'dataEntity' } as Record<string, string>)[meta.kind];
     const targetName = ext[field];
-    const target = field === 'table' ? this.tables.get(targetName) : field === 'form' ? this.forms.get(targetName) : field === 'menu' ? this.menus.get(targetName) : field === 'enum' ? this.enums.get(targetName) : field === 'privilege' ? this.privileges.get(targetName) : field === 'duty' ? this.duties.get(targetName) : field === 'role' ? this.roles.get(targetName) : field === 'view' ? this.views.get(targetName) : field === 'chart' ? this.charts.get(targetName) : field === 'function' ? this.functions.get(targetName) : this.scripts.get(targetName);
+    const target = field === 'table' ? this.tables.get(targetName) : field === 'form' ? this.forms.get(targetName) : field === 'menu' ? this.menus.get(targetName) : field === 'enum' ? this.enums.get(targetName) : field === 'privilege' ? this.privileges.get(targetName) : field === 'duty' ? this.duties.get(targetName) : field === 'role' ? this.roles.get(targetName) : field === 'view' ? this.views.get(targetName) : field === 'chart' ? this.charts.get(targetName) : field === 'dataEntity' ? this.dataEntities.get(targetName) : field === 'function' ? this.functions.get(targetName) : this.scripts.get(targetName);
     if (!target) throw new MetadataError(`Extension '${meta.name}': unknown ${field} '${targetName}'`);
     const sourceLayer = ext.layer ?? DEFAULT_LAYER;
     const targetLayer = (target as any).layer ?? DEFAULT_LAYER;
@@ -275,7 +283,7 @@ export class MetadataRegistry {
 
   /** Raw ordered metadata layers for the Designer; returned objects are never effective/mutated artifacts. */
   customizationLayers(kind: string, targetName: string): AnyMeta[] {
-    const targetField = ({ table: 'table', enum: 'enum', form: 'form', menu: 'menu', privilege: 'privilege', duty: 'duty', role: 'role', script: 'script', view: 'view', chart: 'chart', function: 'function' } as Record<string, string>)[kind];
+    const targetField = ({ table: 'table', enum: 'enum', form: 'form', menu: 'menu', privilege: 'privilege', duty: 'duty', role: 'role', script: 'script', view: 'view', chart: 'chart', function: 'function', dataEntity: 'dataEntity' } as Record<string, string>)[kind];
     const extensionKind = `${kind}Extension`;
     return this.artifactSources
       .filter((artifact: any) => (artifact.kind === kind && artifact.name === targetName) || (artifact.kind === extensionKind && artifact[targetField] === targetName))
@@ -345,6 +353,11 @@ export class MetadataRegistry {
     if (!(meta as any).model && models[0]) (meta as any).model = models[0].name;
     const model = models.find((m) => m.name === (meta as any).model);
     if (model) (meta as any).layer = model.layer;
+    // Locale tags are stored canonically ('th-th' → 'th-TH'); shape was
+    // validated by the artifact schema before normalization.
+    if ((meta as any).kind === 'translation') {
+      try { (meta as any).locale = normalizeLocale(String((meta as any).locale), 'locale'); } catch { /* schema validation reports the invalid tag */ }
+    }
     return meta;
   }
 
@@ -519,6 +532,25 @@ export class MetadataRegistry {
       }
     } else if (e.kind === 'functionExtension') {
       if (!this.functions.has(e.function)) throw new MetadataError(`Extension '${e.name}': unknown function '${e.function}'`);
+    } else if (e.kind === 'dataEntityExtension') {
+      const base = this.dataEntities.get(e.dataEntity);
+      if (!base) throw new MetadataError(`Extension '${e.name}': unknown data entity '${e.dataEntity}'`);
+      for (const field of e.fields ?? []) {
+        if (base.fields.includes(field)) throw new MetadataError(`Extension '${e.name}': field '${field}' already exists on '${e.dataEntity}'`);
+        base.fields.push(field);
+      }
+      for (const line of e.lines ?? []) {
+        if ((base.lines ?? []).some((candidate) => candidate.name === line.name)) throw new MetadataError(`Extension '${e.name}': line '${line.name}' already exists on '${e.dataEntity}'`);
+        base.lines = [...(base.lines ?? []), structuredClone(line)];
+      }
+      for (const lineExtension of e.lineExtensions ?? []) {
+        const line = (base.lines ?? []).find((candidate) => candidate.name === lineExtension.name);
+        if (!line) throw new MetadataError(`Extension '${e.name}': unknown line '${lineExtension.name}' on '${e.dataEntity}'`);
+        for (const field of lineExtension.fields) {
+          if (line.fields.includes(field)) throw new MetadataError(`Extension '${e.name}': field '${field}' already exists on line '${lineExtension.name}'`);
+          line.fields.push(field);
+        }
+      }
     }
   }
 
@@ -1154,6 +1186,11 @@ export class MetadataRegistry {
 
   loadedApps(): AppManifest[] {
     return this.apps.map((a) => a.manifest);
+  }
+
+  /** Effective default locale for an app manifest ('en' when not declared). */
+  defaultLocaleOf(appName: string): string {
+    return this.appManifests.get(appName)?.defaultLocale ?? DEFAULT_LOCALE;
   }
 
   /** Returns the app name that registered a given artifact. */

@@ -65,6 +65,37 @@ export interface IndexMeta {
 /** Layer priority — higher layers override lower layers. */
 export type LayerType = 'SYS' | 'ISV' | 'LOC' | 'DEV' | 'CUS';
 export const LAYER_ORDER: readonly LayerType[] = ['SYS', 'ISV', 'LOC', 'DEV', 'CUS'] as const;
+
+// ---- locales ----
+
+/** Locale used when an app manifest does not declare `defaultLocale`. */
+export const DEFAULT_LOCALE = 'en';
+
+/** Structural BCP-47-style tag pattern shared by artifact schemas and validation. */
+export const LOCALE_PATTERN = '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$';
+const LOCALE_TAG = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
+
+/**
+ * Validates and canonicalizes a BCP-47 locale tag (e.g. 'th-th' → 'th-TH')
+ * with Intl.getCanonicalLocales. Throws a validation error naming `field`
+ * when the tag is not a valid locale.
+ */
+export function normalizeLocale(value: string, field = 'locale'): string {
+  const candidate = value.trim();
+  if (!candidate) throw new Error(`${field}: locale tag is required`);
+  try {
+    const [canonical] = Intl.getCanonicalLocales(candidate);
+    if (typeof canonical !== 'string' || !LOCALE_TAG.test(canonical)) throw new RangeError('unsupported tag shape');
+    return canonical;
+  } catch {
+    throw new Error(`${field}: '${value}' is not a valid BCP-47 locale tag`);
+  }
+}
+
+/** Lower-case primary language subtag of a locale ('th-TH' → 'th'). */
+export function localeBase(locale: string): string {
+  return locale.trim().toLowerCase().split('-')[0] ?? locale;
+}
 export const DEFAULT_LAYER: LayerType = 'SYS';
 export function layerIndex(layer: LayerType): number { return LAYER_ORDER.indexOf(layer); }
 export function canExtendLayer(source: LayerType, target: LayerType): boolean { return layerIndex(source) > layerIndex(target); }
@@ -614,6 +645,29 @@ export interface DataEntityMeta {
   model?: string;
 }
 
+/** Additional fields appended to one existing Data Entity line. */
+export interface DataEntityLineExtensionMeta {
+  name: string;
+  fields: string[];
+}
+
+/**
+ * Additive Data Entity extension. Appends root fields, new lines, or extra
+ * fields on existing lines. Root table, business key, line relationships and
+ * archive settings of the base entity can never be changed here.
+ */
+export interface DataEntityExtensionMeta {
+  kind: 'dataEntityExtension';
+  name: string;
+  app?: string;
+  model?: string;
+  layer?: LayerType;
+  dataEntity: string;
+  fields?: string[];
+  lines?: DataEntityLineMeta[];
+  lineExtensions?: DataEntityLineExtensionMeta[];
+}
+
 // ---- declarative views and reusable charts ----
 
 export type ViewParameterType = 'string' | 'int' | 'real' | 'boolean' | 'date' | 'datetime';
@@ -747,6 +801,8 @@ export interface FormChartMeta {
 export interface AppManifest {
   name: string;
   label?: string;
+  /** Default display locale for this app's artifacts (BCP-47; 'en' when omitted). */
+  defaultLocale?: string;
   icon?: IconName;
   dependsOn?: string[];
   /** Model definitions: name → layer */
@@ -777,6 +833,7 @@ export type AnyMeta =
   | ReportMeta
   | TranslationMeta
   | DataEntityMeta
+  | DataEntityExtensionMeta
   | ViewMeta
   | ChartMeta;
 
@@ -793,6 +850,7 @@ export const EXTENSION_KINDS = new Set([
   'viewExtension',
   'chartExtension',
   'functionExtension',
+  'dataEntityExtension',
 ]);
 
 /** All non-extension kinds (can override by layer). */

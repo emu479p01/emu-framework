@@ -99,8 +99,8 @@ export function orderScriptsForExecution<T extends OrderableScript>(scripts: T[]
 }
 
 const WEB_KIND_ORDER = [
-  'app', 'enum', 'table', 'view', 'chart', 'privilege', 'duty', 'role', 'script', 'function',
-  'tableExtension', 'enumExtension', 'form', 'formExtension',
+  'app', 'enum', 'table', 'translation', 'dataEntity', 'view', 'chart', 'privilege', 'duty', 'role', 'script', 'function',
+  'tableExtension', 'enumExtension', 'dataEntityExtension', 'form', 'formExtension',
   'menu', 'menuExtension', 'privilegeExtension', 'dutyExtension',
   'roleExtension', 'scriptExtension',
   'viewExtension', 'chartExtension', 'functionExtension',
