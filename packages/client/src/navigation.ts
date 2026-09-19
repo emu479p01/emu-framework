@@ -3,7 +3,7 @@ import { RouterLink } from 'vue-router';
 import type { IconName, MenuItemMeta, MenuMeta } from '@emu/core';
 import type { MenuOption } from 'naive-ui';
 
-export type NavMenuOption = MenuOption & { formName?: string; routeTo?: string };
+export type NavMenuOption = MenuOption & { formName?: string; routeTo?: string; menuName?: string; itemId?: string };
 export interface NavigationApp {
   name: string;
   label: string;
@@ -53,20 +53,32 @@ export function renderAppIcon(app: NavigationApp): () => VNodeChild {
   return () => h('span', { class: 'nav-icon nav-monogram', 'aria-hidden': 'true', title: app.label }, initial);
 }
 
-export function itemToOption(item: MenuItemMeta, parentKey: string, appName: string, onNavigate: () => void): NavMenuOption {
+export function itemToOption(item: MenuItemMeta, parentKey: string, appName: string, menuName: string, input: {
+  onNavigate: (menuName?: string, itemId?: string) => void;
+  favoriteKeys?: Set<string>;
+  recentKeys?: string[];
+  onFavorite?: (menuName: string, itemId: string, favorite: boolean) => void;
+}): NavMenuOption {
   const typedName = item.target && 'name' in item.target ? item.target.name : '';
   const key = `${parentKey}:${item.route || item.form || item.action || typedName || item.label || 'sub'}`;
   const icon = renderIcon(iconForItem(item), item.label);
   if (item.items?.length) {
     const label = item.label ?? '';
-    return { label: () => h('span', { title: label }, label), key, icon, children: item.items.filter(isMenuItemVisible).map((child) => itemToOption(child, key, appName, onNavigate)) };
+    return { label: () => h('span', { title: label }, label), key, icon, children: item.items.filter(isMenuItemVisible).map((child) => itemToOption(child, key, appName, menuName, input)) };
   }
   const targetType = item.target?.type ?? (item.form ? 'form' : item.action ? 'function' : undefined);
   const targetName = typedName || item.form || item.action || '';
   const to = item.route || (targetType === 'function' ? `/action/${encodeURIComponent(targetName)}` : targetType === 'report' ? `/report/${encodeURIComponent(targetName)}` : `/app/${appName}/form/${targetName}`);
+  const preferenceKey = item.id ? `${menuName}\0${item.id}` : '';
+  const favorite = preferenceKey ? input.favoriteKeys?.has(preferenceKey) === true : false;
   return {
-    key, routeTo: item.route || (targetType === 'report' ? to : undefined), formName: targetType === 'form' ? targetName : undefined, icon,
-    label: () => h(RouterLink, { to, onClick: onNavigate, title: item.label ?? item.form ?? to }, { default: () => item.label ?? item.form ?? to }),
+    key, menuName, itemId: item.id, routeTo: item.route || (targetType === 'report' ? to : undefined), formName: targetType === 'form' ? targetName : undefined, icon,
+    label: () => h(RouterLink, { to, onClick: () => input.onNavigate(menuName, item.id), title: item.label ?? item.form ?? to }, { default: () => item.label ?? item.form ?? to }),
+    extra: item.id && input.onFavorite ? () => h('button', {
+      type: 'button', class: 'nav-favorite', title: favorite ? 'Remove favorite' : 'Add favorite',
+      'aria-label': favorite ? 'Remove favorite' : 'Add favorite',
+      onClick: (event: Event) => { event.preventDefault(); event.stopPropagation(); input.onFavorite!(menuName, item.id!, !favorite); },
+    }, favorite ? '★' : '☆') : undefined,
   };
 }
 
@@ -75,19 +87,38 @@ export function buildNavigationOptions(input: {
   settingsLabel: string;
   frameworkMenus: MenuMeta[];
   apps: NavigationApp[];
-  onNavigate: () => void;
+  onNavigate: (menuName?: string, itemId?: string) => void;
+  favoriteKeys?: Set<string>;
+  recentKeys?: string[];
+  onFavorite?: (menuName: string, itemId: string, favorite: boolean) => void;
 }): NavMenuOption[] {
   const options: NavMenuOption[] = [];
   options.push(...input.apps.map((app) => ({
     label: () => h('span', { title: app.label }, app.label), key: `app-${app.name}`, icon: renderAppIcon(app),
-    children: app.menus.flatMap((menu) => menu.items.filter(isMenuItemVisible).map((item) => itemToOption(item, `app-${app.name}`, app.name, input.onNavigate))),
+    children: app.menus.flatMap((menu) => menu.items.filter(isMenuItemVisible).map((item) => itemToOption(item, `app-${app.name}`, app.name, menu.name, input))),
   })));
   if (input.frameworkMenus.length) {
     options.push({
       label: () => h('span', { title: input.settingsLabel }, input.settingsLabel), key: 'framework-settings', icon: renderIcon('settings', input.settingsLabel),
-      children: input.frameworkMenus.flatMap((menu) => menu.items.filter(isMenuItemVisible).map((item) => itemToOption(item, `fw-${menu.name}`, 'system', input.onNavigate))),
+      children: input.frameworkMenus.flatMap((menu) => menu.items.filter(isMenuItemVisible).map((item) => itemToOption(item, `fw-${menu.name}`, 'system', menu.name, input))),
     });
   }
+  const leaves = new Map<string, NavMenuOption>();
+  const collect = (items: NavMenuOption[]) => {
+    for (const item of items) {
+      if (item.menuName && item.itemId) leaves.set(`${item.menuName}\0${item.itemId}`, item);
+      collect((item.children ?? []) as NavMenuOption[]);
+    }
+  };
+  collect(options);
+  const quickRoot = (key: string, label: string, keys: string[]): NavMenuOption | null => {
+    const children = keys.map((itemKey) => leaves.get(itemKey)).filter((item): item is NavMenuOption => Boolean(item)).map((item, index) => ({ ...item, key: `${key}:${index}:${String(item.key)}` }));
+    return children.length ? { key, label, icon: renderIcon(key === 'favorites' ? 'app' : 'file', label), children } : null;
+  };
+  const favorites = quickRoot('favorites', 'Favorites', [...(input.favoriteKeys ?? [])]);
+  const recent = quickRoot('recent', 'Recent', input.recentKeys ?? []);
+  if (recent) options.unshift(recent);
+  if (favorites) options.unshift(favorites);
   return options;
 }
 

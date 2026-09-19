@@ -27,16 +27,18 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3399 \
     EMU_DB_PATH=/data/data.db \
-    EMU_DESIGNER_DB_PATH=/data/designer.db
+    EMU_DESIGNER_DB_PATH=/data/designer.db \
+    EMU_FILE_STORAGE_PATH=/files \
+    EMU_ARCHIVE_STORAGE_PATH=/archive
 
 # packages/server and packages/client must stay siblings — the server locates
 # the built client at a path relative to its own compiled location.
 COPY --from=build /app /app
 
-RUN mkdir -p /data
+RUN mkdir -p /data /files /archive
 
 EXPOSE 3399
-VOLUME ["/data"]
+VOLUME ["/data", "/files", "/archive"]
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=6 \
   CMD node -e "fetch('http://127.0.0.1:3399/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"

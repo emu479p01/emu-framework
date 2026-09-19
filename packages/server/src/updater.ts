@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { copyFile, cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { interruptedRestoreAction, isStableVersion, mergeContainerEnvironment, updateChangedState, type UpdaterPhase } from './updaterState.js';
@@ -21,20 +21,24 @@ interface JobState {
 }
 
 interface UpdateRequest { jobId: string; version: string; backupPath?: string }
-interface RestoreRequest { jobId: string; stagePath: string; components: Array<'data' | 'designer' | 'fonts'> }
+type RestoreComponent = 'data' | 'designer' | 'fonts' | 'files' | 'archive';
+interface RestoreRequest { jobId: string; stagePath: string; components: RestoreComponent[] }
 interface ContainerInfo {
   Config: Record<string, unknown> & { Image?: string; Env?: string[]; Labels?: Record<string, string> };
   HostConfig: Record<string, unknown>;
   NetworkSettings: { Networks: Record<string, Record<string, unknown>> };
   State?: { Running?: boolean; Status?: string; Health?: { Status?: string } };
+  Mounts?: Array<{ Destination: string; Name?: string; Source?: string; Type?: string }>;
 }
 interface ImageInfo { Config: Record<string, unknown> & { Env?: string[]; Labels?: Record<string, string> } }
-interface SnapshotManifest { entries: Array<{ name: string; kind: 'file' | 'directory'; existed: boolean }> }
+interface SnapshotManifest { entries: Array<{ name: string; root?: 'data' | 'files' | 'archive'; kind: 'file' | 'directory'; existed: boolean }> }
 
 const token = process.env.EMU_UPDATER_TOKEN;
 const imageRepository = process.env.EMU_IMAGE_REPOSITORY ?? 'ghcr.io/emu479p01/emu-framework';
 const appContainer = process.env.EMU_APP_CONTAINER ?? 'emuframework-app';
 const dataRoot = resolve(process.env.EMU_DATA_PATH ?? '/data');
+const filesRoot = resolve(process.env.EMU_FILE_STORAGE_PATH ?? join(dataRoot, 'files'));
+const archiveRoot = resolve(process.env.EMU_ARCHIVE_STORAGE_PATH ?? join(dataRoot, 'archive'));
 const statePath = process.env.EMU_UPDATE_STATE_PATH ?? join(dataRoot, 'update-status.json');
 const restoreStatePath = process.env.EMU_RESTORE_STATE_PATH ?? join(dataRoot, 'restore-status.json');
 const pullPolicy = process.env.EMU_UPDATER_PULL_POLICY === 'never' ? 'never' : 'always';
@@ -49,6 +53,41 @@ function errorText(error: unknown): string {
 function insideDataRoot(path: string): boolean {
   const rel = relative(dataRoot, resolve(path));
   return rel !== '' && rel !== '..' && !rel.startsWith('../') && !rel.startsWith('..\\');
+}
+
+function rootFor(entry: SnapshotManifest['entries'][number]): string {
+  if (entry.root === 'files') return filesRoot;
+  if (entry.root === 'archive') return archiveRoot;
+  return dataRoot;
+}
+
+async function clearDirectory(path: string): Promise<void> {
+  await mkdir(path, { recursive: true });
+  for (const entry of await readdir(path)) await rm(join(path, entry), { recursive: true, force: true });
+}
+
+function mountIdentity(info: ContainerInfo, destination: string): string | null {
+  const mount = info.Mounts?.find((item) => resolve(item.Destination) === resolve(destination));
+  return mount ? `${mount.Type ?? ''}:${mount.Name ?? mount.Source ?? ''}` : null;
+}
+
+/** A newly introduced persistent path must be mounted into both containers
+ * from the same source. This runs before stopApp so a topology mistake cannot
+ * turn an update into data loss. Legacy /data/files and /data/archive layouts
+ * intentionally remain valid and require no additional mount. */
+async function assertMountContinuity(appInfo: ContainerInfo): Promise<void> {
+  const configured = [
+    process.env.EMU_FILE_STORAGE_PATH ? filesRoot : null,
+    process.env.EMU_ARCHIVE_STORAGE_PATH ? archiveRoot : null,
+  ].filter((path): path is string => Boolean(path) && !insideDataRoot(path!));
+  if (!configured.length) return;
+  const updaterInfo = await containerInfo(process.env.HOSTNAME ?? '');
+  if (!updaterInfo) throw new Error('Cannot verify updater mounts; application was not stopped');
+  for (const destination of configured) {
+    const appMount = mountIdentity(appInfo, destination);
+    const updaterMount = mountIdentity(updaterInfo, destination);
+    if (!appMount || appMount !== updaterMount) throw new Error(`Persistent mount '${destination}' is missing or differs between app and updater; application was not stopped`);
+  }
 }
 
 function docker<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
@@ -131,11 +170,11 @@ async function snapshot(recoveryPath: string, entries: SnapshotManifest['entries
   await mkdir(recoveryPath, { recursive: true });
   const manifest: SnapshotManifest = { entries: [] };
   for (const requested of entries) {
-    const source = join(dataRoot, requested.name);
+    const source = requested.root && requested.root !== 'data' ? rootFor(requested) : join(dataRoot, requested.name);
     const existed = existsSync(source);
     manifest.entries.push({ ...requested, existed });
     if (!existed) continue;
-    const target = join(recoveryPath, requested.name);
+    const target = join(recoveryPath, requested.root && requested.root !== 'data' ? requested.root : requested.name);
     await mkdir(dirname(target), { recursive: true });
     if (requested.kind === 'directory') await cp(source, target, { recursive: true });
     else await copyFile(source, target);
@@ -148,15 +187,19 @@ async function restoreSnapshot(recoveryPath: string): Promise<void> {
   const manifest = JSON.parse(await readFile(join(recoveryPath, 'manifest.json'), 'utf8')) as SnapshotManifest;
   for (const entry of manifest.entries) {
     if (!/^[A-Za-z0-9._-]+$/.test(entry.name)) throw new Error('Recovery manifest contains an unsafe entry');
-    const target = join(dataRoot, entry.name);
-    await rm(target, { recursive: true, force: true });
+    if (entry.root && !['data', 'files', 'archive'].includes(entry.root)) throw new Error('Recovery manifest contains an unsafe root');
+    const externalRoot = entry.root && entry.root !== 'data';
+    const target = externalRoot ? rootFor(entry) : join(dataRoot, entry.name);
+    if (externalRoot) await clearDirectory(target); else await rm(target, { recursive: true, force: true });
     if (entry.kind === 'file') {
       await rm(`${target}-wal`, { force: true });
       await rm(`${target}-shm`, { force: true });
     }
     if (!entry.existed) continue;
-    const source = join(recoveryPath, entry.name);
-    if (entry.kind === 'directory') await cp(source, target, { recursive: true });
+    const source = join(recoveryPath, externalRoot ? entry.root! : entry.name);
+    if (entry.kind === 'directory' && externalRoot) {
+      for (const child of await readdir(source)) await cp(join(source, child), join(target, child), { recursive: true });
+    } else if (entry.kind === 'directory') await cp(source, target, { recursive: true });
     else await copyFile(source, target);
   }
 }
@@ -166,6 +209,8 @@ const updateEntries: SnapshotManifest['entries'] = [
   { name: 'designer.db', kind: 'file', existed: false },
   { name: '.emu-secret.key', kind: 'file', existed: false },
   { name: 'fonts', kind: 'directory', existed: false },
+  { name: 'files', root: 'files', kind: 'directory', existed: false },
+  { name: 'archive', root: 'archive', kind: 'directory', existed: false },
 ];
 
 function restoreEntries(components: RestoreRequest['components']): SnapshotManifest['entries'] {
@@ -173,21 +218,25 @@ function restoreEntries(components: RestoreRequest['components']): SnapshotManif
   if (components.includes('data')) entries.push({ name: 'data.db', kind: 'file', existed: false });
   if (components.includes('designer')) entries.push({ name: 'designer.db', kind: 'file', existed: false });
   if (components.includes('fonts')) entries.push({ name: 'fonts', kind: 'directory', existed: false });
+  if (components.includes('files')) entries.push({ name: 'files', root: 'files', kind: 'directory', existed: false });
+  if (components.includes('archive')) entries.push({ name: 'archive', root: 'archive', kind: 'directory', existed: false });
   return entries;
 }
 
 async function replaceRestoreComponents(request: RestoreRequest): Promise<void> {
   for (const component of request.components) {
-    const name = component === 'data' ? 'data.db' : component === 'designer' ? 'designer.db' : 'fonts';
+    const name = component === 'data' ? 'data.db' : component === 'designer' ? 'designer.db' : component;
     const source = join(request.stagePath, name);
-    const target = join(dataRoot, name);
-    await rm(target, { recursive: true, force: true });
-    if (component !== 'fonts') {
+    const external = component === 'files' || component === 'archive';
+    const target = component === 'files' ? filesRoot : component === 'archive' ? archiveRoot : join(dataRoot, name);
+    if (external) await clearDirectory(target); else await rm(target, { recursive: true, force: true });
+    if (component === 'data' || component === 'designer') {
       await rm(`${target}-wal`, { force: true });
       await rm(`${target}-shm`, { force: true });
       await copyFile(source, target);
     } else if (existsSync(source)) {
-      await cp(source, target, { recursive: true });
+      if (external) for (const child of await readdir(source)) await cp(join(source, child), join(target, child), { recursive: true });
+      else await cp(source, target, { recursive: true });
     } else {
       await mkdir(target, { recursive: true });
     }
@@ -234,6 +283,7 @@ async function update(request: UpdateRequest): Promise<void> {
     const candidateImage = await docker<ImageInfo>('GET', `/images/${encodeURIComponent(image)}/json`);
     const old = await containerInfo(appContainer);
     if (!old) throw new Error(`Application container '${appContainer}' was not found`);
+    await assertMountContinuity(old);
     const previousImage = old.Config.Image ? await docker<ImageInfo>('GET', `/images/${encodeURIComponent(old.Config.Image)}/json`) : null;
 
     await patchState(statePath, request.jobId, { phase: 'stopping' });
@@ -291,12 +341,15 @@ async function rollbackRestore(request: RestoreRequest, recoveryPath: string, ca
 }
 
 async function restore(request: RestoreRequest): Promise<void> {
-  if (!Array.isArray(request.components) || request.components.some((item) => !['data', 'designer', 'fonts'].includes(item))) throw new Error('Invalid restore components');
+  if (!Array.isArray(request.components) || request.components.some((item) => !['data', 'designer', 'fonts', 'files', 'archive'].includes(item))) throw new Error('Invalid restore components');
   if (!insideDataRoot(request.stagePath) || request.stagePath.includes('..')) throw new Error('Invalid restore stage path');
   const recoveryPath = join(dataRoot, `restore-recovery-${request.jobId}`);
   let stopped = false;
   await patchState(restoreStatePath, request.jobId, { status: 'running', phase: 'stopping', rollbackStatus: 'not_required', recoveryRequired: false, recoveryPath });
   try {
+    const current = await containerInfo(appContainer);
+    if (!current) throw new Error(`Application container '${appContainer}' was not found`);
+    await assertMountContinuity(current);
     await stopApp(); stopped = true;
     await patchState(restoreStatePath, request.jobId, { phase: 'snapshotting' });
     await snapshot(recoveryPath, restoreEntries(request.components));
@@ -339,7 +392,7 @@ async function recoverRestore(state: JobState): Promise<void> {
   const request: RestoreRequest = {
     jobId: state.id,
     stagePath: typeof state.stagePath === 'string' ? state.stagePath : join(dataRoot, 'restore-jobs', state.id),
-    components: Array.isArray(state.components) ? state.components.filter((item): item is RestoreRequest['components'][number] => ['data', 'designer', 'fonts'].includes(String(item))) : [],
+    components: Array.isArray(state.components) ? state.components.filter((item): item is RestoreRequest['components'][number] => ['data', 'designer', 'fonts', 'files', 'archive'].includes(String(item))) : [],
   };
   const action = interruptedRestoreAction(state.phase, existsSync(join(recoveryPath, 'manifest.json')));
   if (action === 'rollback') {

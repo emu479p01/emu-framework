@@ -20,6 +20,7 @@ import LineGrid from '../components/LineGrid.vue';
 import { applyIfBlank } from '../utils/applyDefaults';
 import ActionDialog from '../components/ActionDialog.vue';
 import EmbeddedChart from '../components/EmbeddedChart.vue';
+import AttachmentPanel from '../components/AttachmentPanel.vue';
 import type { FormAction } from '@emu/core';
 
 const props = defineProps<{ formName: string; id: string; appName?: string }>();
@@ -186,6 +187,7 @@ function remove() {
         </div>
 
         <template v-if="!isNew">
+          <AttachmentPanel :table="table.name" :record-id="Number(id)" />
           <LineGrid
             v-for="line in (form.lines ?? []).filter((entry) => !entry.hidden)"
             :key="line.id ?? line.table"

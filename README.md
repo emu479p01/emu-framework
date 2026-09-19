@@ -4,7 +4,7 @@
 
 EmuFramework is a metadata-driven TypeScript framework for building and operating business applications. This repository contains the framework source, tests, container definitions, and release tooling. Installation guides, tutorials, usage instructions, and detailed reference material live in the separate [EmuFramework documentation repository](https://github.com/emu479p01/emu-framework-docs).
 
-Current framework version: **1.0.2**
+Current framework version: **1.1.0**
 
 ## What it provides
 
@@ -41,41 +41,43 @@ New framework releases use exactly three components: **`Major.Minor.Patch`**.
 The latest canonical English release note remains below because the release workflow copies this marked block into the GitHub Release. The [release-note archive](release-notes/README.md) contains historical notes and guidance for future releases.
 
 <!-- release-notes:start -->
-## PU — EmuFramework v1.0.2
+## FU — EmuFramework v1.1.0
 
 ### Summary
 
-This proactive update makes container updates and restores durable, removes unauthorized actions from delivered metadata, and corrects Report Designer canvas sizing.
+This framework update adds localized metadata labels, personal navigation, record attachments, document-level Data Entity exchange, governed business-data archiving, storage monitoring, and a substantially expanded Report Designer.
 
 ### Improvements
 
-- Adds an atomic, phase-based maintenance journal with explicit rollback and recovery-required status.
-- Checkpoints and closes both SQLite databases during graceful application shutdown.
-
-### Fixes
-
-- Restores the previous container and the pre-operation persistent-data snapshot when update health verification fails.
-- Compensates interrupted update and restore phases idempotently and retains recovery artifacts when automated rollback cannot finish.
-- Requires stable `X.Y.Z` update targets and supports a fail-closed local-image mode for unpublished test images.
-- Omits unauthorized form and line actions from `/api/metadata`, while direct action calls continue to return `403`.
-- Filters hidden or disabled actions defensively in the client.
-- Calculates Report Designer canvas width from left and right margins, including asymmetric margins.
+- Adds BCP-47 metadata translations with per-user locale and exact-locale, base-language, and default-label fallback.
+- Adds server-backed Favorites and the ten most recent authorized navigation items per user.
+- Adds file, note, and URL attachments to saved header and line records with opaque storage keys, SHA-256 integrity, streaming upload/download, configurable limits, and parent-record permissions.
+- Adds separate `/files` and `/archive` Docker volumes while retaining shared `/data` fallbacks with administrator warnings.
+- Adds Header/Line Data Entities with XLSX sheets or manifest-based CSV ZIP packages, durable staging, per-document atomic upsert, and downloadable error files.
+- Adds opt-in archive policies for explicitly eligible Data Entities, immutable checksummed payloads and blobs, scheduled batches, read-only search, collision-safe restore, and job history.
+- Adds a Storage & Archive dashboard with filesystem capacity, database/WAL, backup, font, live-file, archive, and per-App database usage.
+- Expands Report Designer with A3, A4, A5, Letter, Legal, and custom paper; orientation; four margins; cm, inch, and pixel display units; strict layout validation; text/field borders; and PNG/JPEG images from bundled assets or record attachments.
+- Extends backup schema version 4 with live files and archive data, streaming backup downloads, and backward-compatible restore validation.
 
 ### Breaking changes and migration
 
-None. The maintenance API adds optional `phase`, `rollbackStatus`, and `recoveryRequired` fields while preserving the existing `status` field.
+No existing metadata or API contract is removed. New metadata kinds and fields are additive. Official Docker deployments should add the `emu-files:/files` and `emu-archive:/archive` named volumes and set `EMU_FILE_STORAGE_PATH=/files` and `EMU_ARCHIVE_STORAGE_PATH=/archive`. Existing deployments continue to boot with `/data/files` and `/data/archive`, but the administration page warns that shared fallback storage is in use.
+
+Reports remain compatible as layout version 1. Existing overflowing reports can still preview with warnings. A report saved from the updated designer becomes layout version 2 and must pass the printable-area validator.
 
 ### Upgrade notes
 
-Back up `data.db` and `designer.db`, preserve `.emu-secret.key`, and update both the application and updater images together to `1.0.2`. After restart, verify login and **Settings → System Maintenance** diagnostics.
+Create a full backup, preserve `.emu-secret.key`, and update the application and updater images together to `1.1.0`. Before stopping the application, the updater verifies that the application and updater see the same separate file and archive mounts. After restart, verify **Settings → System Maintenance → Storage & Archive**, configure archive policies only for declared Data Entities, and confirm attachment upload/download permissions.
+
+Plan SSD capacity for databases, WAL, backups, live attachments, archive payloads, and rollback headroom. A practical baseline is 200 GB for a 4-vCPU/8-GB server; use 100 GB only for light deployments without material attachment growth, and 500 GB or more for file-heavy workloads.
 
 ### Validation
 
-The candidate passed the offline release policy, type checking, automated tests, production builds, fresh-container boot, local-image upgrade, failed-health rollback, failed-restore rollback, and byte-equality checks for restored `data.db`.
+The candidate is required to pass version consistency, release-policy tests, core/server/client type checking, all automated tests, production builds, and the isolated local Docker acceptance gate without dependency installation or network pulls. Docker acceptance covers fresh install, upgrade, failed-health rollback, interrupted maintenance recovery, restore rollback, byte equality, mount-continuity rejection, and attachment backup/restore.
 
 ### Known issues
 
-The local Docker acceptance stack requires Docker Desktop to be running and the previous release image to exist in the local image cache; the verifier never pulls it automatically.
+Archive data is retained indefinitely in this release; automatic archive purge is intentionally not provided. Legacy `.xls` files are not accepted by Data Entities. Attachment versioning and check-in/check-out are not included. Framework UI strings, runtime error messages, and business record values are not translated by metadata translation resources.
 <!-- release-notes:end -->
 
 ## Repository structure

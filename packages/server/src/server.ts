@@ -25,6 +25,11 @@ import {
   type TableMeta,
 } from '@emu/core';
 import { registerSystemApp, registerSystemHooks } from './systemApp.js';
+import { localizeMetadata } from './localization.js';
+import { registerNavigationPreferenceRoutes } from './navigationPreferences.js';
+import { deleteRecordAttachments, registerAttachmentRoutes } from './attachments.js';
+import { registerDataEntityRoutes } from './dataEntities.js';
+import { registerArchiveRoutes } from './archive.js';
 import { hashPassword, login, logout, resolveSession, verifyPassword, type AuthUser } from './auth.js';
 import { bootWebArtifacts, registerDesignerRoutes } from './designer.js';
 import { seedDesignerDb } from './seeder.js';
@@ -58,8 +63,8 @@ const COOKIE_NAME = 'nf_session';
 const SECURE_COOKIES = process.env.NODE_ENV === 'production' || process.env.EMU_SECURE_COOKIES === 'true';
 /** Auth/system tables are never exposed through the generic data API. */
 const PROTECTED_TABLES = new Set([
-  'FW_User', 'FW_UserRole', 'FW_AppAccess', 'FW_Session', 'FW_WebArtifact',
-  'FW_Migration', 'FW_ViewToken', 'FW_ViewTokenScope',
+  'FW_User', 'FW_UserRole', 'FW_AppAccess', 'FW_Session', 'FW_WebArtifact', 'FW_NavigationItem', 'FW_Blob', 'FW_Attachment',
+  'FW_Migration', 'FW_ViewToken', 'FW_ViewTokenScope', 'FW_DataJob', 'FW_ArchivePolicy',
 ]);
 const SETUP_TTL_MS = 15 * 60 * 1000;
 const SETUP_MAX_FAILURES = 10;
@@ -480,6 +485,15 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return kernel.context({ user: username }, policyOf(username));
   };
 
+  registerNavigationPreferenceRoutes(app, kernel, {
+    requireUser,
+    policyOf,
+    isFrameworkAdmin: (username) => rolesOf(username).includes('FW_SystemAdminRole'),
+    openApps: (username) => appAccessOf(username).openApps,
+  });
+  registerAttachmentRoutes(app, kernel, { userCtx });
+  registerDataEntityRoutes(app, kernel, { userCtx });
+
   const dataTable = (name: string, req?: FastifyRequest) => {
     void req;
     if (PROTECTED_TABLES.has(name)) {
@@ -616,6 +630,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return { ...user, roles: rolesOf(user.username) };
   });
 
+  app.patch<{ Body: { locale?: string } }>('/api/me/locale', (req, reply) => {
+    const user = requireUser(req);
+    const locale = String(req.body?.locale ?? '');
+    if (!/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(locale)) return reply.status(400).send({ error: 'Locale must be a BCP-47 language tag' });
+    kernel.db.prepare('UPDATE "FW_User" SET locale=?, modifiedAt=CURRENT_TIMESTAMP, modifiedBy=? WHERE username=?').run(locale, user.username, user.username);
+    return { ok: true, locale };
+  });
+
   // ---- metadata (filtered by the caller's security policy) ----
 
   app.get('/api/metadata', (req) => {
@@ -744,7 +766,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       }
     }
 
-    return {
+    const metadata = {
       branding: { title: options.appTitle ?? 'EmuFramework' },
       capabilities: {
         designer: isFrameworkAdmin || access.customizeApps.size > 0,
@@ -757,6 +779,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       enums: kernel.registry.allEnums().filter((entry) => visibleEnums.has(entry.name)),
       forms,
       reports: kernel.registry.allReports().filter((r) => !PROTECTED_TABLES.has(r.dataSource) && policy.canReport(r.name) && policy.can(r.dataSource, 'read')),
+      dataEntities: kernel.registry.allDataEntities().filter((entity) => policy.can(entity.rootTable, 'read') && (entity.lines ?? []).every((line) => policy.can(line.table, 'read'))),
       views: kernel.registry.allViews().filter((view) => canUseView(view.name)),
       charts: kernel.registry.allCharts().filter((chart) => policy.canChart(chart.name) && canUseView(chart.view)),
       privileges: isFrameworkAdmin ? kernel.registry.allPrivileges() : [],
@@ -773,6 +796,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return access.openApps.has(a.name);
       }),
     };
+    return localizeMetadata(kernel.registry, metadata, user.locale);
   });
 
   // ---- web designer ----
@@ -807,6 +831,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   };
   registerAiRoutes(app, kernel, { requireDesigner, designerScope, requireAdmin: requireFrameworkAdmin });
   registerSystemMaintenanceRoutes(app, kernel, requireFrameworkAdmin);
+  registerArchiveRoutes(app, kernel, requireFrameworkAdmin);
   registerAppDataManagementRoutes(app, kernel, requireFrameworkAdmin);
   registerFontRoutes(app, kernel, requireFrameworkAdmin, requireUser);
   registerIntegrationRoutes(app, integrations, requireFrameworkAdmin);
@@ -894,11 +919,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     },
   );
 
-  app.delete<{ Params: { table: string; id: string } }>('/api/data/:table/:id', (req) => {
+  app.delete<{ Params: { table: string; id: string } }>('/api/data/:table/:id', async (req) => {
     const table = dataTable(req.params.table, req);
     const rec = userCtx(req).find(table.name, Number(req.params.id));
     if (!rec) throw Object.assign(new Error('Not found'), { statusCode: 404 });
     rec.delete();
+    await deleteRecordAttachments(kernel, table.name, Number(req.params.id));
     return { ok: true };
   });
 

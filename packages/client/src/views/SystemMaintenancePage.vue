@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { NAlert, NButton, NCard, NDescriptions, NDescriptionsItem, NInput, NModal, NSelect, NSpace, NSpin, NTag, useMessage } from 'naive-ui';
+import { NAlert, NButton, NCard, NDescriptions, NDescriptionsItem, NInput, NInputNumber, NModal, NSelect, NSpace, NSpin, NTag, useMessage } from 'naive-ui';
 import { api, ApiError, type BackupPreview } from '../api';
 import { useRouter } from 'vue-router';
 
@@ -21,15 +21,27 @@ const info = ref<Info|null>(null);
 const release = ref<Release|null>(null);
 const job = ref<UpdateJob|null>(null);
 const validated = ref<{ frameworkVersion: string; createdAt: string; files: { name: string; bytes: number }[] }|null>(null);
-const backupComponent = ref<'full'|'data'|'designer'|'fonts'>('full');
+const backupComponent = ref<'full'|'data'|'designer'|'fonts'|'files'|'archive'>('full');
 const backupOptions = [
-  { label: 'Full — Data + Designer + Fonts', value: 'full' }, { label: 'Data database', value: 'data' },
-  { label: 'Designer database', value: 'designer' }, { label: 'Report fonts', value: 'fonts' },
+  { label: 'Full — Data + Designer + Fonts + Files + Archive', value: 'full' }, { label: 'Data database', value: 'data' },
+  { label: 'Designer database', value: 'designer' }, { label: 'Report fonts', value: 'fonts' }, { label: 'Live attachments', value: 'files' }, { label: 'Archive catalog and payloads', value: 'archive' },
 ];
 const restorePreview = ref<BackupPreview|null>(null);
 const restoreConfirm = ref(false); const restoreText = ref(''); const restoring = ref(false);
 const restoreJob = ref<{ id: string; status: string; components: string[]; phase?: MaintenancePhase; rollbackStatus?: string; recoveryRequired?: boolean; error?: string }|null>(null);
 let pollTimer: number|undefined;
+type StorageInfo = { filesystem: Record<string,{total:number|null;free:number|null}>; usage: Record<string,number>; usageByApp: {app:string;bytes:number;method:string}[]; paths:{files:string;archive:string}; warnings:string[] };
+type ArchivePolicy = { entityName:string;enabled:number;businessDateField:string;ageDays:number;batchSize:number;includeAttachments:number;schedule:string;weekday:number;timezone:string;lastRunAt?:string };
+const storage = ref<StorageInfo|null>(null); const archiveEntities = ref<{name:string;label?:string;businessDateField?:string}[]>([]); const archivePolicies = ref<ArchivePolicy[]>([]); const selectedEntity = ref('');
+const policyDraft = ref({ businessDateField:'', ageDays:365, batchSize:100, includeAttachments:true, schedule:'weekly', weekday:0, timezone:'Asia/Bangkok' });
+const archivePreview = ref<{eligible:number;oldest:string|null;cutoff:string}|null>(null); const archiveBusy = ref(false);
+const archivedDocuments=ref<Array<{archiveId:string;entityName:string;businessKey:string;businessDate:string;createdAt:string;restoredAt?:string}>>([]);const dataJobs=ref<Array<{jobId:string;type:string;entityName:string;status:string;createdAt:string;error?:string}>>([]);
+async function loadStorageArchive() { storage.value = await api.get('/api/system/storage'); const [result,documents,jobs]=await Promise.all([api.get<{eligibleEntities:typeof archiveEntities.value;policies:ArchivePolicy[]}>('/api/system/archive/policies'),api.get<{items:typeof archivedDocuments.value}>('/api/system/archive/documents?limit=20'),api.get<{items:typeof dataJobs.value}>('/api/system/data-jobs?limit=20')]); archiveEntities.value=result.eligibleEntities; archivePolicies.value=result.policies;archivedDocuments.value=documents.items;dataJobs.value=jobs.items;if(!selectedEntity.value && result.eligibleEntities[0]) selectArchiveEntity(result.eligibleEntities[0].name); }
+function selectArchiveEntity(value:string) { selectedEntity.value=value; const existing=archivePolicies.value.find((item)=>item.entityName===value); const entity=archiveEntities.value.find((item)=>item.name===value); policyDraft.value=existing?{businessDateField:existing.businessDateField,ageDays:existing.ageDays,batchSize:existing.batchSize,includeAttachments:Boolean(existing.includeAttachments),schedule:existing.schedule,weekday:existing.weekday,timezone:existing.timezone}:{businessDateField:entity?.businessDateField??'',ageDays:365,batchSize:100,includeAttachments:true,schedule:'weekly',weekday:0,timezone:'Asia/Bangkok'}; archivePreview.value=null; }
+async function savePolicy(){if(!selectedEntity.value)return;archiveBusy.value=true;try{await api.put(`/api/system/archive/policies/${encodeURIComponent(selectedEntity.value)}`,policyDraft.value);await loadStorageArchive();message.success('Archive policy saved');}catch(error){message.error(error instanceof ApiError?error.message:String(error));}finally{archiveBusy.value=false;}}
+async function previewArchive(){archivePreview.value=await api.get(`/api/system/archive/${encodeURIComponent(selectedEntity.value)}/preview`);}
+async function runArchive(){archiveBusy.value=true;try{const result=await api.post<{archived:number;failed:number}>(`/api/system/archive/${encodeURIComponent(selectedEntity.value)}/run`);message.success(`Archived ${result.archived}; failed ${result.failed}`);await loadStorageArchive();await previewArchive();}catch(error){message.error(error instanceof ApiError?error.message:String(error));}finally{archiveBusy.value=false;}}
+async function restoreArchived(id:string){archiveBusy.value=true;try{const result=await api.post<{restored:boolean;skipped:boolean;reason?:string}>(`/api/system/archive/documents/${encodeURIComponent(id)}/restore`);result.restored?message.success('Archived document restored'):message.warning(result.reason??'Document skipped');await loadStorageArchive();}catch(error){message.error(error instanceof ApiError?error.message:String(error));}finally{archiveBusy.value=false;}}
 
 const active = computed(() => !!job.value && ['pending', 'running', 'restarting'].includes(job.value.status));
 const jobType = computed(() => job.value?.status === 'failed' ? 'error' : job.value?.status === 'succeeded' ? 'success' : 'info');
@@ -74,7 +86,7 @@ function startPolling() {
 }
 
 onMounted(async () => {
-  try { await loadInfo(); await loadRestoreStatus(); await checkUpdate(false); }
+  try { await loadInfo(); await loadRestoreStatus(); await checkUpdate(false); await loadStorageArchive(); }
   catch (error) { message.error(error instanceof ApiError ? error.message : 'Could not load system information'); }
   finally { loading.value = false; }
 });
@@ -151,6 +163,25 @@ function back() { window.history.length > 1 ? router.back() : router.push('/'); 
           </n-alert>
           <n-alert v-if="restoreJob?.recoveryRequired" type="error" class="notice" title="Administrator recovery required">Automated restore rollback did not complete. Preserve the recovery files and inspect the updater logs.</n-alert>
         </n-card>
+        <n-card title="Storage & Archive" class="maintenance-card storage-card">
+          <n-alert v-for="warning in storage?.warnings ?? []" :key="warning" type="warning" class="notice">{{ warning }}</n-alert>
+          <n-descriptions v-if="storage" label-placement="left" :column="1" size="small">
+            <n-descriptions-item v-for="(bytes,key) in storage.usage" :key="key" :label="String(key)">{{ mb(bytes) }}</n-descriptions-item>
+            <n-descriptions-item label="Files path">{{ storage.paths.files }}</n-descriptions-item><n-descriptions-item label="Archive path">{{ storage.paths.archive }}</n-descriptions-item>
+          </n-descriptions>
+          <details v-if="storage?.usageByApp.length"><summary>Database usage per App</summary><div v-for="entry in storage.usageByApp" :key="entry.app">{{ entry.app }}: {{ mb(entry.bytes) }} ({{ entry.method }})</div></details>
+          <hr>
+          <n-space vertical>
+            <n-select :value="selectedEntity" :options="archiveEntities.map((entity)=>({label:entity.label??entity.name,value:entity.name}))" placeholder="Archive-eligible Data Entity" @update:value="selectArchiveEntity" />
+            <n-input v-model:value="policyDraft.businessDateField" placeholder="Business date field" />
+            <n-space><span>Age days</span><n-input-number v-model:value="policyDraft.ageDays" :min="0"/><span>Batch</span><n-input-number v-model:value="policyDraft.batchSize" :min="1" :max="10000"/></n-space>
+            <n-space><n-select v-model:value="policyDraft.schedule" :options="[{label:'Daily',value:'daily'},{label:'Weekly',value:'weekly'}]" style="width:130px"/><n-input v-model:value="policyDraft.timezone" placeholder="Asia/Bangkok"/><label><input v-model="policyDraft.includeAttachments" type="checkbox"> Include attachments</label></n-space>
+            <n-space><n-button :loading="archiveBusy" @click="savePolicy">Save policy</n-button><n-button :disabled="!selectedEntity" @click="previewArchive">Preview</n-button><n-button type="primary" :loading="archiveBusy" :disabled="!archivePreview" @click="runArchive">Archive batch</n-button></n-space>
+            <n-alert v-if="archivePreview" type="info">{{ archivePreview.eligible }} eligible documents · oldest {{ archivePreview.oldest ?? '—' }} · cutoff {{ archivePreview.cutoff }}</n-alert>
+            <details v-if="archivedDocuments.length"><summary>Archived documents (read-only)</summary><div v-for="document in archivedDocuments" :key="document.archiveId" class="archive-row"><span>{{ document.entityName }} · {{ document.businessKey }} · {{ document.businessDate }}</span><n-space><a :href="`/api/system/archive/documents/${encodeURIComponent(document.archiveId)}`" target="_blank">View</a><n-button size="tiny" :disabled="Boolean(document.restoredAt)" @click="restoreArchived(document.archiveId)">Restore</n-button></n-space></div></details>
+            <details v-if="dataJobs.length"><summary>Job history</summary><div v-for="jobEntry in dataJobs" :key="jobEntry.jobId">{{ jobEntry.createdAt }} · {{ jobEntry.type }} · {{ jobEntry.entityName }} · {{ jobEntry.status }} <span v-if="jobEntry.error">— {{ jobEntry.error }}</span></div></details>
+          </n-space>
+        </n-card>
       </div>
     </n-spin>
     <n-modal v-model:show="confirmUpdate" preset="dialog" title="Update framework?" positive-text="Create backup and update" negative-text="Cancel" @positive-click="startUpdate">
@@ -170,4 +201,5 @@ function back() { window.history.length > 1 ? router.back() : router.push('/'); 
 
 <style scoped>
 .maintenance-page{max-width:1080px;margin:0 auto}.page-hero{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:24px}.eyebrow{color:var(--emu-primary);font-size:11px;font-weight:800;letter-spacing:.12em}.page-hero h1{font-size:30px;letter-spacing:-.04em;margin:6px 0}.page-hero p,.maintenance-card p{color:var(--emu-muted);line-height:1.6}.maintenance-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}.maintenance-card{border-radius:var(--emu-radius-lg);box-shadow:var(--emu-shadow-sm)}.actions,.notice{margin-top:18px}.component-select{max-width:360px;margin:12px 0}.command{margin-top:8px;overflow-wrap:anywhere}.notes{margin-top:18px}.notes summary{cursor:pointer;font-weight:700}.notes pre{white-space:pre-wrap;max-height:260px;overflow:auto;background:#f8fafc;padding:12px;border-radius:8px;font:12px/1.5 ui-monospace,monospace}code{background:#eef2ff;color:#3730a3;border-radius:6px;padding:3px 7px;font-size:12px}@media(max-width:800px){.maintenance-grid{grid-template-columns:1fr}.page-hero{display:block}.page-hero h1{font-size:25px}.page-hero>.n-space{margin-top:12px;flex-wrap:wrap!important}.actions{display:grid!important;grid-template-columns:1fr}.actions :deep(.n-button),.maintenance-card :deep(.n-button){min-height:44px}.maintenance-card :deep(.n-card__content){padding:16px}.maintenance-card :deep(.n-descriptions-table-content){overflow-wrap:anywhere}}
+.storage-card{grid-column:1/-1}.archive-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--emu-border)}
 </style>

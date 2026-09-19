@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const root = resolve(import.meta.dirname, '..');
-if (process.version !== 'v24.18.0') throw new Error(`Offline verification requires bundled Node v24.18.0; received ${process.version}`);
+if (!/^v24\./.test(process.version)) throw new Error(`Offline verification requires bundled Node 24; received ${process.version}`);
 if (/[/\\]OneDrive(?:[/\\]|$)/i.test(root)) throw new Error('Refusing to verify from a OneDrive path');
 
 const required = [
@@ -35,5 +35,5 @@ run('client tests', ['node_modules/vitest/vitest.mjs', 'run'], resolve(root, 'pa
 run('core build', ['node_modules/typescript/bin/tsc', '-p', 'packages/core/tsconfig.build.json']);
 run('server build', ['node_modules/typescript/bin/tsc', '-p', 'packages/server/tsconfig.build.json']);
 run('client build', ['node_modules/vite/bin/vite.js', 'build'], resolve(root, 'packages/client'));
-run('release check', ['scripts/release-policy.mjs', '--tag', '1.0.2', '--previous', '1.0.1']);
+run('release check', ['scripts/release-policy.mjs', '--tag', '1.1.0', '--previous', '1.0.2']);
 process.stdout.write('\nOffline release gates passed without package installation or network access.\n');

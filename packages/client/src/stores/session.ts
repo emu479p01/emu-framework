@@ -5,6 +5,7 @@ interface User {
   username: string;
   displayName: string;
   roles?: string[];
+  locale: string;
 }
 
 export const useSession = defineStore('session', {

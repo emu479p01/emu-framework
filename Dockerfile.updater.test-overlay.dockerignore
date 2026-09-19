@@ -1,7 +1,0 @@
-*
-!Dockerfile.updater.test-overlay
-!packages/
-!packages/server/
-!packages/server/dist/
-!packages/server/dist/updater.js
-!packages/server/dist/updaterState.js

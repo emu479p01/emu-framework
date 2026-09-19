@@ -1,6 +1,9 @@
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { unzipSync, zipSync } from 'fflate';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildServer } from '../src/server.js';
 import { hashPassword } from '../src/auth.js';
 import { completeTestSetup, TEST_SETUP_CODE } from './setupHelper.js';
@@ -39,7 +42,7 @@ describe('system maintenance', () => {
     expect(exported.statusCode).toBe(200);
     const files = unzipSync(exported.rawPayload);
     expect(Object.keys(files).sort()).toEqual(['data.db', 'designer.db', 'manifest.json']);
-    expect(JSON.parse(Buffer.from(files['manifest.json']).toString('utf8'))).toMatchObject({ schemaVersion: 3, components: ['data', 'designer', 'fonts'] });
+    expect(JSON.parse(Buffer.from(files['manifest.json']).toString('utf8'))).toMatchObject({ schemaVersion: 4, components: ['data', 'designer', 'fonts', 'files', 'archive'] });
     const { boundary, body } = multipart(exported.rawPayload);
     const validated = await app.inject({
       method: 'POST', url: '/api/system/backup/validate',
@@ -65,6 +68,28 @@ describe('system maintenance', () => {
     expect(JSON.parse(Buffer.from(unzipSync(fonts.rawPayload)['manifest.json']).toString('utf8')).components).toEqual(['fonts']);
   });
 
+  it('streams live attachment blobs and archive payloads into a verifiable backup', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'emu-volume-backup-'));
+    const filesRoot = join(root, 'files'); const archiveRoot = join(root, 'archive');
+    const previousFiles = process.env.EMU_FILE_STORAGE_PATH; const previousArchive = process.env.EMU_ARCHIVE_STORAGE_PATH;
+    process.env.EMU_FILE_STORAGE_PATH = filesRoot; process.env.EMU_ARCHIVE_STORAGE_PATH = archiveRoot;
+    try {
+      await mkdir(join(filesRoot, 'ab'), { recursive: true }); await writeFile(join(filesRoot, 'ab', 'attachment.bin'), 'attachment-bytes');
+      await mkdir(join(archiveRoot, 'documents'), { recursive: true }); await writeFile(join(archiveRoot, 'documents', 'payload.json'), '{"archived":true}');
+      const exported = await app.inject({ method: 'GET', url: '/api/system/backup/export', headers: auth });
+      expect(exported.statusCode).toBe(200);
+      const entries = unzipSync(exported.rawPayload);
+      expect(Buffer.from(entries['files/ab/attachment.bin']).toString()).toBe('attachment-bytes');
+      expect(Buffer.from(entries['archive/documents/payload.json']).toString()).toBe('{"archived":true}');
+      const upload = multipart(exported.rawPayload);
+      expect((await app.inject({ method: 'POST', url: '/api/system/backup/validate', headers: { ...auth, 'content-type': `multipart/form-data; boundary=${upload.boundary}` }, payload: upload.body })).statusCode).toBe(200);
+    } finally {
+      if (previousFiles === undefined) delete process.env.EMU_FILE_STORAGE_PATH; else process.env.EMU_FILE_STORAGE_PATH = previousFiles;
+      if (previousArchive === undefined) delete process.env.EMU_ARCHIVE_STORAGE_PATH; else process.env.EMU_ARCHIVE_STORAGE_PATH = previousArchive;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('accepts legacy full manifests and rejects backups from newer frameworks', async () => {
     const exported = await app.inject({ method: 'GET', url: '/api/system/backup/export', headers: auth });
     const files = unzipSync(exported.rawPayload); const legacy = JSON.parse(Buffer.from(files['manifest.json']).toString('utf8'));
@@ -88,12 +113,12 @@ describe('system maintenance', () => {
 
   it('reports the latest stable release without accepting a client-selected version', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
-      tag_name: '1.0.2', name: 'Stable', body: 'Release notes', html_url: 'https://example.test/release',
+      tag_name: '1.1.0', name: 'Stable', body: 'Release notes', html_url: 'https://example.test/release',
       published_at: '2026-07-12T00:00:00Z', draft: false, prerelease: false,
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const response = await app.inject({ method: 'GET', url: '/api/system/update/latest', headers: auth });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ currentVersion: '1.0.2', latestVersion: '1.0.2', updateAvailable: false });
+    expect(response.json()).toMatchObject({ currentVersion: '1.1.0', latestVersion: '1.1.0', updateAvailable: false });
   });
 
   it('rejects release tags that are not exactly X.Y.Z', async () => {

@@ -1,9 +1,12 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { readFileSync } from 'node:fs';
+import { resolve, sep } from 'node:path';
 import pdfMake from 'pdfmake';
 import type {
   DataContext, Kernel, ReportBandMeta, ReportElementMeta, ReportMeta,
   ReportTablixCellStyle, ReportTablixMeta, TableMeta,
 } from '@emu/core';
+import { reportPageDimensions, validateReportLayout } from '@emu/core';
 import { buildFilteredQuery } from './importExport.js';
 import { DEFAULT_REPORT_FONT, THAI_REPORT_FONT, pdfFontSupports, registerPdfFonts } from './fontManager.js';
 
@@ -138,6 +141,7 @@ function renderElement(
   originY: number,
   availableFonts: Set<string>,
   defaultFont: string,
+  report: ReportMeta,
   positionMode: 'absolute' | 'relative' = 'absolute',
 ): unknown {
   const x = originX + el.x;
@@ -151,20 +155,42 @@ function renderElement(
       ...position,
     };
   }
-  if (el.type === 'rect' || el.type === 'image') {
-    // Image binding is not yet supported by the designer — render a placeholder box.
+  if (el.type === 'rect') {
     return {
-      canvas: [{ type: 'rect', x: 0, y: 0, w: el.width, h: el.height, lineWidth: style.borderWidth ?? 1 }],
+      canvas: [{ type: 'rect', x: 0, y: 0, w: el.width, h: el.height, lineWidth: style.borderWidth ?? 1, lineColor: style.borderColor ?? '#000000', dash: style.borderStyle === 'dashed' ? { length: 5 } : style.borderStyle === 'dotted' ? { length: 1 } : undefined }],
       ...position,
     };
+  }
+  if (el.type === 'image') {
+    try {
+      let mimeType = ''; let data: Buffer;
+      if (el.image?.source === 'asset') {
+        const asset = report.assets?.find((candidate) => candidate.id === el.image?.assetId); if (!asset) throw new Error('design asset is missing');
+        mimeType = asset.mimeType; data = Buffer.from(asset.dataBase64, 'base64');
+      } else if (el.image?.source === 'attachment') {
+        if (!row?.id) throw new Error('record is unavailable');
+        const attachmentId = el.image.attachmentIdField ? String(row[el.image.attachmentIdField] ?? '') : '';
+        const attachment = attachmentId
+          ? kernel.db.prepare(`SELECT a.name,b.storageKey,b.mimeType FROM "FW_Attachment" a JOIN "FW_Blob" b ON b.blobId=a.blobId WHERE a.attachmentId=? AND a.parentTable=? AND a.parentId=?`).get(attachmentId, table.name, row.id)
+          : kernel.db.prepare(`SELECT a.name,b.storageKey,b.mimeType FROM "FW_Attachment" a JOIN "FW_Blob" b ON b.blobId=a.blobId WHERE a.parentTable=? AND a.parentId=? AND a.name=? ORDER BY a.createdAt DESC LIMIT 1`).get(table.name, row.id, el.image?.attachmentName) as { storageKey: string; mimeType: string } | undefined;
+        if (!attachment) throw new Error('record attachment is missing');
+        const typed = attachment as { storageKey: string; mimeType: string }; mimeType = typed.mimeType;
+        const root = resolve(process.env.EMU_FILE_STORAGE_PATH || '/data/files'); const path = resolve(root, ...typed.storageKey.split('/')); if (!path.startsWith(`${root}${sep}`)) throw new Error('attachment path is invalid'); data = readFileSync(path);
+      } else throw new Error('image source is not configured');
+      const png = data.length > 8 && data.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])); const jpeg = data.length > 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+      if (!((mimeType === 'image/png' && png) || (mimeType === 'image/jpeg' && jpeg))) throw new Error('image is corrupt or not PNG/JPEG');
+      const image = `data:${mimeType};base64,${data.toString('base64')}`; const fit = el.image?.fit ?? 'contain';
+      return { image, ...(fit === 'stretch' ? { width: el.width, height: el.height } : fit === 'contain' ? { fit: [el.width, el.height] } : fit === 'cover' ? { cover: { width: el.width, height: el.height, align: el.image?.horizontalAlign ?? 'center', valign: el.image?.verticalAlign ?? 'middle' } } : {}), alignment: el.image?.horizontalAlign, ...position };
+    } catch (error) {
+      return { text: `[Image unavailable: ${error instanceof Error ? error.message : String(error)}]`, color: '#b42318', fontSize: 8, width: el.width, ...position };
+    }
   }
 
   const text = el.type === 'field' && el.field ? formatReportFieldValue(kernel, ctx, table, row, el.field, el.format) : (el.text ?? '');
   const runs = reportTextRuns(text, style.fontFamily, defaultFont, availableFonts);
   const singleRun = runs.length === 1 ? runs[0] : undefined;
-  return {
+  const textNode = {
     text: singleRun?.text ?? runs,
-    ...position,
     width: el.width,
     fontSize: style.fontSize ?? 10,
     bold: style.bold,
@@ -173,6 +199,12 @@ function renderElement(
     color: style.color,
     font: singleRun?.font,
   };
+  const borderWidth = style.borderStyle === 'none' ? 0 : style.borderWidth ?? 0;
+  if (!borderWidth) return { ...textNode, ...position };
+  return { ...position, width: el.width, stack: [
+    { canvas: [{ type: 'rect', x: 0, y: 0, w: el.width, h: el.height, lineWidth: borderWidth, lineColor: style.borderColor ?? '#000000', dash: style.borderStyle === 'dashed' ? { length: 5 } : style.borderStyle === 'dotted' ? { length: 1 } : undefined }] },
+    { ...textNode, relativePosition: { x: 2, y: -el.height + 2 }, width: Math.max(0, el.width - 4) },
+  ] };
 }
 
 function tablixText(text: string, style: ReportTablixCellStyle | undefined, defaultFont: string, availableFonts: Set<string>): Record<string, unknown> {
@@ -321,8 +353,7 @@ function tryPageCount(
 export function planReportPages(kernel: Kernel, ctx: DataContext, report: ReportMeta, mainRows: ReportRow[]): ReportPagePlan[] {
   const margins = report.page?.margins ?? [40, 40, 40, 40];
   const [marginTop, , marginBottom] = margins;
-  const pageDimensions = report.page?.size === 'Letter' ? [612, 792] : [595, 842];
-  const pageHeight = report.page?.orientation === 'landscape' ? pageDimensions[0] : pageDimensions[1];
+  const [, pageHeight] = reportPageDimensions(report.page);
   const headers = report.bands.filter((band) => band.kind === 'header' || band.kind === 'pageHeader');
   const footers = report.bands.filter((band) => band.kind === 'footer' || band.kind === 'pageFooter');
   const units = bodyUnits(kernel, ctx, report, mainRows);
@@ -348,6 +379,8 @@ export function planReportPages(kernel: Kernel, ctx: DataContext, report: Report
 
 /** Builds a deterministic, pre-paginated pdfmake document definition. */
 export function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: ReportMeta, mainRows: ReportRow[]): Record<string, unknown> {
+  const errors = validateReportLayout(report).filter((diagnostic) => diagnostic.severity === 'error');
+  if (errors.length) throw new Error(`Report layout is invalid: ${errors.map((diagnostic) => diagnostic.message).join('; ')}`);
   const availableFonts = registerPdfFonts(kernel);
   const defaultFont = report.defaultFont && availableFonts.has(report.defaultFont) ? report.defaultFont : DEFAULT_REPORT_FONT;
   const table = kernel.registry.getTable(report.dataSource);
@@ -363,7 +396,7 @@ export function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: Rep
     for (let index = 0; index < page.units.length;) {
       const unit = page.units[index];
       if (unit.kind === 'freeform') {
-        for (const element of unit.band.elements) pageContent.push(renderElement(kernel, ctx, unit.table, element, unit.row, 0, 0, availableFonts, defaultFont, 'relative'));
+        for (const element of unit.band.elements) pageContent.push(renderElement(kernel, ctx, unit.table, element, unit.row, 0, 0, availableFonts, defaultFont, report, 'relative'));
         pageContent.push({ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 0, y2: unit.height, lineWidth: 0, lineColor: '#ffffff' }] });
         index++;
         continue;
@@ -382,7 +415,7 @@ export function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: Rep
     }
 
     content.push({
-      pageSize: report.page?.size ?? 'A4',
+      pageSize: report.page?.size === 'Custom' ? { width: report.page.width, height: report.page.height } : report.page?.size ?? 'A4',
       pageOrientation: report.page?.orientation ?? 'portrait',
       pageMargins: [marginLeft, marginTop + page.headerHeight, marginRight, marginBottom + page.footerHeight],
       section: { stack: pageContent.length > 0 ? pageContent : [{ text: '' }] },
@@ -394,14 +427,14 @@ export function buildDocDefinition(kernel: Kernel, ctx: DataContext, report: Rep
     let y = top;
     for (const band of bands) {
       if (!displaysOnPage(band, currentPage, pageCount)) continue;
-      for (const element of band.elements) stack.push(renderElement(kernel, ctx, table, element, row, marginLeft, y, availableFonts, defaultFont));
+      for (const element of band.elements) stack.push(renderElement(kernel, ctx, table, element, row, marginLeft, y, availableFonts, defaultFont, report));
       y += band.height;
     }
     return { stack };
   };
 
   return {
-    pageSize: report.page?.size ?? 'A4',
+    pageSize: report.page?.size === 'Custom' ? { width: report.page.width, height: report.page.height } : report.page?.size ?? 'A4',
     pageOrientation: report.page?.orientation ?? 'portrait',
     pageMargins: [marginLeft, marginTop, marginRight, marginBottom],
     defaultStyle: { font: defaultFont, fontSize: 10 },
@@ -449,6 +482,8 @@ export function registerReportRoutes(app: FastifyInstance, kernel: Kernel, deps:
       }
 
       const docDefinition = buildDocDefinition(kernel, ctx, report, mainRows);
+      const warnings = validateReportLayout(report).filter((diagnostic) => diagnostic.severity === 'warning');
+      if (warnings.length) reply.header('X-Emu-Report-Warnings', String(warnings.length));
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- our dynamic content tree isn't worth typing against pdfmake's Content union
       const buffer = await pdfMake.createPdf(docDefinition as any).getBuffer();
 

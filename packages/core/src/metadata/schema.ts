@@ -175,7 +175,8 @@ const reportStyleSchema = Type.Object({
   fontSize: Type.Optional(Type.Number()), bold: Type.Optional(Type.Boolean()), italic: Type.Optional(Type.Boolean()),
   fontFamily: Type.Optional(Type.String({ minLength: 1 })),
   align: Type.Optional(Type.Union([Type.Literal('left'), Type.Literal('center'), Type.Literal('right')])),
-  color: Type.Optional(Type.String()), borderWidth: Type.Optional(Type.Number()),
+  color: Type.Optional(Type.String()), borderWidth: Type.Optional(Type.Number({ minimum: 0 })), borderColor: Type.Optional(Type.String()),
+  borderStyle: Type.Optional(Type.Union(['solid', 'dashed', 'dotted', 'none'].map((v) => Type.Literal(v)))),
 }, { additionalProperties: false });
 const reportTablixCellStyleSchema = Type.Object({
   fontSize: Type.Optional(Type.Number({ minimum: 1 })), bold: Type.Optional(Type.Boolean()), italic: Type.Optional(Type.Boolean()),
@@ -197,6 +198,13 @@ const reportElementSchema = Type.Object({
   id: Type.String(), type: Type.Union(['text', 'field', 'image', 'line', 'rect'].map((v) => Type.Literal(v))),
   x: Type.Number(), y: Type.Number(), width: Type.Number(), height: Type.Number(),
   text: Type.Optional(Type.String()), field: Type.Optional(Type.String()), format: Type.Optional(Type.String()),
+  image: Type.Optional(Type.Object({
+    source: Type.Union([Type.Literal('asset'), Type.Literal('attachment')]), assetId: Type.Optional(Type.String({ minLength: 1 })),
+    attachmentIdField: Type.Optional(Type.String({ minLength: 1 })), attachmentName: Type.Optional(Type.String({ minLength: 1 })),
+    fit: Type.Optional(Type.Union(['stretch', 'contain', 'cover', 'original'].map((v) => Type.Literal(v)))),
+    horizontalAlign: Type.Optional(Type.Union(['left', 'center', 'right'].map((v) => Type.Literal(v)))),
+    verticalAlign: Type.Optional(Type.Union(['top', 'middle', 'bottom'].map((v) => Type.Literal(v)))),
+  }, { additionalProperties: false })),
   style: Type.Optional(reportStyleSchema),
 }, { additionalProperties: false });
 const reportBandSchema = Type.Object({
@@ -211,10 +219,17 @@ const reportParameterSchema = Type.Object({
   operator: Type.Optional(Type.Union(['eq', 'from', 'to'].map((v) => Type.Literal(v)))),
   label: Type.Optional(Type.String()), required: Type.Optional(Type.Boolean()),
 }, { additionalProperties: false });
+const dataEntityLineSchema = Type.Object({
+  name, table: Type.String({ minLength: 1 }), parentReference: Type.String({ minLength: 1 }),
+  fields: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+  lineKeys: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+}, { additionalProperties: false });
 
 const artifactSchemas = [
   Type.Object({ kind: Type.Literal('app'), name, label: Type.Optional(Type.String()), icon, dependsOn: Type.Optional(Type.Array(Type.String())), models: Type.Optional(Type.Array(Type.Object({ name, label: Type.Optional(Type.String()), layer }))) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('table'), ...common, fields: Type.Array(fieldSchema), titleField: Type.Optional(Type.String()), indexes: Type.Optional(Type.Array(indexSchema)) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('translation'), ...common, locale: Type.String({ pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$' }), resources: Type.Record(Type.String({ minLength: 1 }), Type.String()) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('dataEntity'), ...common, rootTable: Type.String({ minLength: 1 }), businessKey: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), fields: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), lines: Type.Optional(Type.Array(dataEntityLineSchema)), archiveEligible: Type.Optional(Type.Boolean()), businessDateField: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('enum'), ...common, values: Type.Array(Type.Object({ name, value: Type.Integer(), label: Type.Optional(Type.String()) }, { additionalProperties: false })) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('form'), ...common, table: Type.String(), actions: Type.Optional(Type.Array(formActionSchema)), listFields: Type.Optional(Type.Array(Type.String())), filterFields: Type.Optional(Type.Array(Type.String())), groups: Type.Optional(Type.Array(groupSchema)), charts: Type.Optional(Type.Array(formChartSchema)), lines: Type.Optional(Type.Array(lineGridSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('menu'), ...common, items: Type.Array(menuItemSchema) }, { additionalProperties: false }),
@@ -232,7 +247,7 @@ const artifactSchemas = [
   Type.Object({ kind: Type.Literal('scriptExtension'), ...common, script: Type.String(), code: Type.String() }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('function'), ...common, code: Type.String(), executionMode: Type.Optional(Type.Union([Type.Literal('transactional'), Type.Literal('async')])), privileges: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('functionExtension'), ...common, function: Type.String(), code: Type.String() }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal('report'), ...common, dataSource: Type.String(), defaultFont: Type.Optional(Type.String({ minLength: 1 })), privileges: Type.Optional(Type.Array(Type.String())), page: Type.Optional(Type.Object({ size: Type.Optional(Type.Union([Type.Literal('A4'), Type.Literal('Letter')])), orientation: Type.Optional(Type.Union([Type.Literal('portrait'), Type.Literal('landscape')])), margins: Type.Optional(Type.Tuple([Type.Number(), Type.Number(), Type.Number(), Type.Number()])) }, { additionalProperties: false })), bands: Type.Array(reportBandSchema), lineSources: Type.Optional(Type.Array(Type.Object({ table: Type.String(), refField: Type.String(), bands: Type.Array(reportBandSchema) }, { additionalProperties: false }))), parameters: Type.Optional(Type.Array(reportParameterSchema)) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('report'), ...common, dataSource: Type.String(), defaultFont: Type.Optional(Type.String({ minLength: 1 })), privileges: Type.Optional(Type.Array(Type.String())), layoutVersion: Type.Optional(Type.Union([Type.Literal(1), Type.Literal(2)])), designUnit: Type.Optional(Type.Union([Type.Literal('cm'), Type.Literal('in'), Type.Literal('px')])), assets: Type.Optional(Type.Array(Type.Object({ id: Type.String({ minLength: 1 }), name: Type.String({ minLength: 1 }), mimeType: Type.Union([Type.Literal('image/png'), Type.Literal('image/jpeg')]), dataBase64: Type.String({ minLength: 1 }) }, { additionalProperties: false }))), page: Type.Optional(Type.Object({ size: Type.Optional(Type.Union(['A3', 'A4', 'A5', 'Letter', 'Legal', 'Custom'].map((v) => Type.Literal(v)))), orientation: Type.Optional(Type.Union([Type.Literal('portrait'), Type.Literal('landscape')])), width: Type.Optional(Type.Number({ exclusiveMinimum: 0 })), height: Type.Optional(Type.Number({ exclusiveMinimum: 0 })), margins: Type.Optional(Type.Tuple([Type.Number(), Type.Number(), Type.Number(), Type.Number()])) }, { additionalProperties: false })), bands: Type.Array(reportBandSchema), lineSources: Type.Optional(Type.Array(Type.Object({ table: Type.String(), refField: Type.String(), bands: Type.Array(reportBandSchema) }, { additionalProperties: false }))), parameters: Type.Optional(Type.Array(reportParameterSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('view'), ...common,
     source: Type.Object({ table: Type.String({ minLength: 1 }), alias: name }, { additionalProperties: false }),
     joins: Type.Optional(Type.Array(viewJoinSchema)),

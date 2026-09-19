@@ -13,10 +13,11 @@ export interface AppEntry { name: string; label: string; icon?: import('@emu/cor
 export interface Metadata {
   branding: { title: string };
   capabilities: { designer: boolean; maintenance: boolean; tableBrowser: boolean; securityAdmin: boolean; myAccount: boolean };
-  tables: TableMeta[]; enums: EnumMeta[]; forms: FormMeta[]; reports: ReportMeta[]; views: ViewMeta[]; charts: ChartMeta[];
+  tables: TableMeta[]; enums: EnumMeta[]; forms: FormMeta[]; reports: ReportMeta[]; views: ViewMeta[]; charts: ChartMeta[]; dataEntities: import('@emu/core').DataEntityMeta[];
   privileges: SecurityMeta[]; duties: SecurityMeta[]; roles: SecurityMeta[];
   actions: string[];
   frameworkMenus: MenuMeta[]; apps: AppEntry[];
+  locale: string; availableLocales: string[];
 }
 
 export const useMeta = defineStore('meta', {
