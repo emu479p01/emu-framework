@@ -4,7 +4,8 @@ import { NAlert, NButton, NCard, NDescriptions, NDescriptionsItem, NInput, NModa
 import { api, ApiError, type BackupPreview } from '../api';
 import { useRouter } from 'vue-router';
 
-type UpdateJob = { id: string; status: 'pending'|'running'|'restarting'|'succeeded'|'failed'; currentVersion: string; targetVersion: string; requestedBy: string; requestedAt: string; updatedAt: string; backupPath: string; deployment: string; error?: string };
+type MaintenancePhase = 'preparing'|'stopping'|'snapshotting'|'switching'|'restoring'|'verifying'|'completed'|'rolling_back'|'rolled_back'|'recovery_required';
+type UpdateJob = { id: string; status: 'pending'|'running'|'restarting'|'succeeded'|'failed'; currentVersion: string; targetVersion: string; requestedBy: string; requestedAt: string; updatedAt: string; backupPath: string; deployment: string; phase?: MaintenancePhase; rollbackStatus?: 'not_required'|'running'|'succeeded'|'failed'; recoveryRequired?: boolean; error?: string };
 type Release = { currentVersion: string; latestVersion: string; updateAvailable: boolean; name: string; notes: string; url: string; publishedAt: string|null; checkedAt: string };
 type Info = { version: string; backupSchemaVersion: number; updateChannel: string; deployment: string; updateEnabled: boolean; job: UpdateJob|null };
 
@@ -27,7 +28,7 @@ const backupOptions = [
 ];
 const restorePreview = ref<BackupPreview|null>(null);
 const restoreConfirm = ref(false); const restoreText = ref(''); const restoring = ref(false);
-const restoreJob = ref<{ id: string; status: string; components: string[]; error?: string }|null>(null);
+const restoreJob = ref<{ id: string; status: string; components: string[]; phase?: MaintenancePhase; rollbackStatus?: string; recoveryRequired?: boolean; error?: string }|null>(null);
 let pollTimer: number|undefined;
 
 const active = computed(() => !!job.value && ['pending', 'running', 'restarting'].includes(job.value.status));
@@ -131,8 +132,10 @@ function back() { window.history.length > 1 ? router.back() : router.push('/'); 
           <n-alert v-if="info && !info.updateEnabled" type="warning" class="notice">Web update is not configured for this deployment. Use the manual update guide.</n-alert>
           <n-alert v-if="job" :type="jobType" class="notice" :title="`Update ${job.status}`">
             v{{ job.currentVersion }} → v{{ job.targetVersion }}<span v-if="reconnecting"> · reconnecting after restart…</span>
+            <div v-if="job.phase">Phase: {{ job.phase }}<span v-if="job.rollbackStatus && job.rollbackStatus !== 'not_required'"> · rollback {{ job.rollbackStatus }}</span></div>
             <div v-if="job.error">{{ job.error }}</div><div v-if="job.backupPath" class="command">Backup: <code>{{ job.backupPath }}</code></div>
           </n-alert>
+          <n-alert v-if="job?.recoveryRequired" type="error" class="notice" title="Administrator recovery required">Automated rollback did not complete. Preserve the recovery files and inspect the updater logs before attempting another update.</n-alert>
           <details v-if="release?.notes" class="notes"><summary>Release notes</summary><pre>{{ release.notes }}</pre><a :href="release.url" target="_blank" rel="noopener">Open release on GitHub</a></details>
         </n-card>
         <n-card title="Database backup" class="maintenance-card">
@@ -144,8 +147,9 @@ function back() { window.history.length > 1 ? router.back() : router.push('/'); 
             <div>{{ validated.files.map((file) => `${file.name} (${mb(file.bytes)})`).join(' · ') }}</div>
           </n-alert>
           <n-alert v-if="restoreJob" :type="restoreJob.status === 'failed' ? 'error' : restoreJob.status === 'succeeded' ? 'success' : 'info'" class="notice" :title="`Restore ${restoreJob.status}`">
-            {{ restoreJob.components.join(', ') }}<div v-if="restoreJob.error">{{ restoreJob.error }}</div>
+            {{ restoreJob.components.join(', ') }}<div v-if="restoreJob.phase">Phase: {{ restoreJob.phase }}<span v-if="restoreJob.rollbackStatus && restoreJob.rollbackStatus !== 'not_required'"> · rollback {{ restoreJob.rollbackStatus }}</span></div><div v-if="restoreJob.error">{{ restoreJob.error }}</div>
           </n-alert>
+          <n-alert v-if="restoreJob?.recoveryRequired" type="error" class="notice" title="Administrator recovery required">Automated restore rollback did not complete. Preserve the recovery files and inspect the updater logs.</n-alert>
         </n-card>
       </div>
     </n-spin>

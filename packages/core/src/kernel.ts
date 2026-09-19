@@ -146,6 +146,15 @@ export class Kernel {
     this.designerDb.pragma('wal_autocheckpoint = 1000');
   }
 
+  /** Flushes WAL state and closes both persistent stores before container shutdown. */
+  close(): void {
+    for (const db of [this.db, this.designerDb]) {
+      if (!db.open) continue;
+      try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* Close still releases the handle. */ }
+      db.close();
+    }
+  }
+
   get registry(): MetadataRegistry { return this._registry; }
   get webArtifacts(): AnyMeta[] { return this._webArtifacts; }
 

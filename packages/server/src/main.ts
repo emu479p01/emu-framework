@@ -32,6 +32,23 @@ const app = buildServer({
   },
 });
 
+let closing = false;
+const shutdown = async (signal: string) => {
+  if (closing) return;
+  closing = true;
+  console.log(`Received ${signal}; checkpointing databases and stopping.`);
+  try {
+    await app.close();
+    process.exitCode = 0;
+  } catch (error) {
+    console.error('Graceful shutdown failed:', error);
+    process.exitCode = 1;
+  }
+};
+
+process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+process.once('SIGINT', () => { void shutdown('SIGINT'); });
+
 app.listen({ port, host }).then(() => {
   const displayHost = host === '0.0.0.0' ? '127.0.0.1' : host;
   console.log(`${appTitle} server on http://${displayHost}:${port}`);

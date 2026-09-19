@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -20,6 +20,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const sha256 = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
 
 export type BackupComponent = 'full' | 'data' | 'designer' | 'fonts';
+export type MaintenancePhase = 'preparing' | 'stopping' | 'snapshotting' | 'switching' | 'restoring' | 'verifying' | 'completed' | 'rolling_back' | 'rolled_back' | 'recovery_required';
+export type RollbackStatus = 'not_required' | 'running' | 'succeeded' | 'failed';
 
 interface BackupManifest {
   format: typeof BACKUP_FORMAT;
@@ -39,6 +41,10 @@ export interface RestoreJob {
   updatedAt: string;
   deployment: UpdateJob['deployment'];
   stagePath: string;
+  phase?: MaintenancePhase;
+  rollbackStatus?: RollbackStatus;
+  recoveryRequired?: boolean;
+  recoveryPath?: string;
   error?: string;
 }
 
@@ -55,6 +61,10 @@ export interface UpdateJob {
   updatedAt: string;
   backupPath: string;
   deployment: 'docker' | 'unsupported';
+  phase?: MaintenancePhase;
+  rollbackStatus?: RollbackStatus;
+  recoveryRequired?: boolean;
+  recoveryPath?: string;
   error?: string;
 }
 
@@ -108,7 +118,13 @@ function compareVersions(left: string, right: string): number {
 }
 
 function publicJob(job: UpdateJob): UpdateJob {
-  return { ...job, error: job.error?.slice(0, 500) };
+  const { recoveryPath: _recoveryPath, ...safe } = job;
+  return { ...safe, error: job.error?.slice(0, 500) };
+}
+
+function publicRestoreJob(job: RestoreJob): Omit<RestoreJob, 'recoveryPath' | 'stagePath'> {
+  const { recoveryPath: _recoveryPath, stagePath: _stagePath, ...safe } = job;
+  return { ...safe, error: job.error?.slice(0, 500) };
 }
 
 async function readJob(): Promise<UpdateJob | null> {
@@ -117,8 +133,10 @@ async function readJob(): Promise<UpdateJob | null> {
 }
 
 async function writeJob(job: UpdateJob): Promise<void> {
-  await mkdir(dirname(statePath()), { recursive: true });
-  await writeFile(statePath(), JSON.stringify(job, null, 2), 'utf8');
+  const target = statePath(); const temporary = `${target}.${process.pid}.tmp`;
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(temporary, JSON.stringify(job, null, 2), 'utf8');
+  await rename(temporary, target);
 }
 
 async function readRestoreJob(): Promise<RestoreJob | null> {
@@ -126,8 +144,10 @@ async function readRestoreJob(): Promise<RestoreJob | null> {
 }
 
 async function writeRestoreJob(job: RestoreJob): Promise<void> {
-  await mkdir(dirname(restoreStatePath()), { recursive: true });
-  await writeFile(restoreStatePath(), JSON.stringify(job, null, 2), 'utf8');
+  const target = restoreStatePath(); const temporary = `${target}.${process.pid}.tmp`;
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(temporary, JSON.stringify(job, null, 2), 'utf8');
+  await rename(temporary, target);
 }
 
 async function latestRelease(): Promise<GitHubRelease> {
@@ -268,19 +288,21 @@ export function registerSystemMaintenanceRoutes(app: FastifyInstance, kernel: Ke
   });
   app.get('/api/system/info', async (req) => {
     requireFrameworkAdmin(req);
-    return { version: CORE_VERSION, backupSchemaVersion: BACKUP_SCHEMA_VERSION, updateChannel: 'stable', deployment: deploymentMode(), updateEnabled: deploymentMode() !== 'unsupported', job: await readJob() };
+    const job = await readJob();
+    return { version: CORE_VERSION, backupSchemaVersion: BACKUP_SCHEMA_VERSION, updateChannel: 'stable', deployment: deploymentMode(), updateEnabled: deploymentMode() !== 'unsupported', job: job ? publicJob(job) : null };
   });
 
   app.get('/api/system/update/latest', async (req) => {
     requireFrameworkAdmin(req);
     const release = await latestRelease();
-    const version = cleanVersion(release.tag_name);
+    if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(release.tag_name)) throw Object.assign(new Error('Latest release tag must use X.Y.Z'), { statusCode: 502 });
+    const version = release.tag_name;
     return { currentVersion: CORE_VERSION, latestVersion: version, updateAvailable: compareVersions(version, CORE_VERSION) > 0, name: release.name ?? release.tag_name, notes: (release.body ?? '').slice(0, 10_000), url: release.html_url, publishedAt: release.published_at ?? null, checkedAt: new Date().toISOString() };
   });
 
   app.get('/api/system/update/status', async (req) => {
     requireFrameworkAdmin(req);
-    return { job: await readJob() };
+    const job = await readJob(); return { job: job ? publicJob(job) : null };
   });
 
   app.post('/api/system/update', async (req, reply) => {
@@ -290,14 +312,15 @@ export function registerSystemMaintenanceRoutes(app: FastifyInstance, kernel: Ke
     const existing = await readJob();
     if (existing && ['pending', 'running', 'restarting'].includes(existing.status)) return reply.status(409).send({ error: 'A framework update is already running', job: publicJob(existing) });
     const release = await latestRelease();
-    const targetVersion = cleanVersion(release.tag_name);
+    const targetVersion = release.tag_name;
+    if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(targetVersion)) return reply.status(502).send({ error: 'Latest release tag must use X.Y.Z' });
     if (compareVersions(targetVersion, CORE_VERSION) <= 0) return reply.status(409).send({ error: 'The framework is already up to date' });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = join(backupDir(), `before-update-${CORE_VERSION}-${stamp}.emubackup`);
     const { archive } = await createBackupArchive(kernel, backupPath);
     await validateArchive(archive);
     const now = new Date().toISOString();
-    const job: UpdateJob = { id: randomUUID(), status: 'pending', currentVersion: CORE_VERSION, targetVersion, requestedBy, requestedAt: now, updatedAt: now, backupPath, deployment: deploymentMode() };
+    const job: UpdateJob = { id: randomUUID(), status: 'pending', phase: 'preparing', rollbackStatus: 'not_required', recoveryRequired: false, currentVersion: CORE_VERSION, targetVersion, requestedBy, requestedAt: now, updatedAt: now, backupPath, deployment: deploymentMode() };
     await writeJob(job);
     try { await launchUpdate(job); }
     catch (error) {
@@ -349,24 +372,24 @@ export function registerSystemMaintenanceRoutes(app: FastifyInstance, kernel: Ke
     if (!preview || preview.expiresAt < Date.now()) return reply.status(410).send({ error: 'Restore preview expired; upload the backup again' });
     if (preview.actor !== actor) return reply.status(403).send({ error: 'Restore preview belongs to another user' });
     const existing = await readRestoreJob();
-    if (existing && ['pending', 'running', 'restarting'].includes(existing.status)) return reply.status(409).send({ error: 'A restore is already running', job: existing });
+    if (existing && ['pending', 'running', 'restarting'].includes(existing.status)) return reply.status(409).send({ error: 'A restore is already running', job: publicRestoreJob(existing) });
     const id = randomUUID(); const stagePath = join(restoreStageDir(), id); await mkdir(stagePath, { recursive: true });
     for (const [name, bytes] of Object.entries(preview.files)) {
       if (name === 'manifest.json') continue;
       const target = join(stagePath, ...name.split('/')); await mkdir(dirname(target), { recursive: true }); await writeFile(target, bytes);
     }
     const now = new Date().toISOString();
-    const job: RestoreJob = { id, status: 'pending', components: preview.components, requestedBy: actor, requestedAt: now, updatedAt: now, deployment: deploymentMode(), stagePath };
+    const job: RestoreJob = { id, status: 'pending', phase: 'preparing', rollbackStatus: 'not_required', recoveryRequired: false, components: preview.components, requestedBy: actor, requestedAt: now, updatedAt: now, deployment: deploymentMode(), stagePath };
     await writeRestoreJob(job); restorePreviews.delete(req.body.previewId!);
     try { await launchRestore(job); }
     catch (error) {
       job.status = 'failed'; job.updatedAt = new Date().toISOString(); job.error = error instanceof Error ? error.message : String(error); await writeRestoreJob(job);
-      return reply.status(503).send({ error: job.error, job });
+      return reply.status(503).send({ error: job.error, job: publicRestoreJob(job) });
     }
-    return reply.status(202).send({ job });
+    return reply.status(202).send({ job: publicRestoreJob(job) });
   });
 
   app.get('/api/system/backup/restore/status', async (req) => {
-    requireFrameworkAdmin(req); return { job: await readRestoreJob() };
+    requireFrameworkAdmin(req); const job = await readRestoreJob(); return { job: job ? publicRestoreJob(job) : null };
   });
 }

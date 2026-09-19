@@ -404,6 +404,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   }
 
   app.decorate('kernel', kernel);
+  app.addHook('onClose', async () => { kernel.close(); });
   app.get('/api/health', () => ({ ok: true }));
 
   const systemCtx = () => kernel.context({ user: 'system' });
@@ -645,19 +646,23 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const isSystemAdmin = userRoles.includes('FW_SystemAdminRole');
 
     const forms = kernel.registry.allForms().filter((f) => !PROTECTED_TABLES.has(f.table) && canOpen(f.name)).map((f) => {
-      const secureAction = (action: NonNullable<typeof f.actions>[number]) => {
+      const canUseAction = (action: NonNullable<typeof f.actions>[number]) => {
         const target = action.target ?? action.action;
         const type = action.type ?? 'function';
-        const allowed = action.privilege ? policy.canPrivilege(action.privilege) : type === 'report' ? policy.canReport(target ?? '') : policy.canFunction(target ?? '');
-        return { ...action, disabled: !allowed };
+        const targetAllowed = type === 'report'
+          ? policy.canReport(target ?? '')
+          : type === 'picker'
+            ? Boolean(action.picker && policy.can(action.picker.table, 'read'))
+            : policy.canFunction(target ?? '');
+        return targetAllowed && (!action.privilege || policy.canPrivilege(action.privilege));
       };
       return {
         ...f,
-        actions: f.actions?.map(secureAction),
+        actions: f.actions?.filter(canUseAction).map((action) => ({ ...action, disabled: false })),
         charts: f.charts?.filter((embedded) => {
           try { return policy.canChart(embedded.chart) && canUseView(kernel.registry.getChart(embedded.chart).view); } catch { return false; }
         }),
-        lines: f.lines?.map((line) => ({ ...line, actions: line.actions?.map(secureAction) })),
+        lines: f.lines?.map((line) => ({ ...line, actions: line.actions?.filter(canUseAction).map((action) => ({ ...action, disabled: false })) })),
       };
     });
     const usedTables = new Set(forms.flatMap((f) => [f.table, ...(f.lines ?? []).map((l) => l.table)]));

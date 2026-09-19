@@ -1,0 +1,5 @@
+ARG BASE_IMAGE=ghcr.io/emu479p01/emu-framework:1.0.1
+FROM ${BASE_IMAGE}
+COPY packages/core/dist /app/packages/core/dist
+COPY packages/server/dist /app/packages/server/dist
+COPY packages/client/dist /app/packages/client/dist

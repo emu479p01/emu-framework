@@ -4,7 +4,7 @@
 
 EmuFramework is a metadata-driven TypeScript framework for building and operating business applications. This repository contains the framework source, tests, container definitions, and release tooling. Installation guides, tutorials, usage instructions, and detailed reference material live in the separate [EmuFramework documentation repository](https://github.com/emu479p01/emu-framework-docs).
 
-Current framework version: **1.0.1**
+Current framework version: **1.0.2**
 
 ## What it provides
 
@@ -41,39 +41,41 @@ New framework releases use exactly three components: **`Major.Minor.Patch`**.
 The latest canonical English release note remains below because the release workflow copies this marked block into the GitHub Release. The [release-note archive](release-notes/README.md) contains historical notes and guidance for future releases.
 
 <!-- release-notes:start -->
-## PU — EmuFramework v1.0.1
+## PU — EmuFramework v1.0.2
 
 ### Summary
 
-This proactive update improves the AI Proposal Inbox and makes container-based framework updates and restores safer to operate and recover.
+This proactive update makes container updates and restores durable, removes unauthorized actions from delivered metadata, and corrects Report Designer canvas sizing.
 
 ### Improvements
 
-- Adds status filtering, refresh controls, expand/collapse controls, clearer loading states, and responsive proposal cards to the AI Proposal Inbox.
-- Allows reviewed proposals to be removed from the Inbox without removing applied metadata or AI audit records.
-- Adds a health endpoint and container health check for the updater service.
+- Adds an atomic, phase-based maintenance journal with explicit rollback and recovery-required status.
+- Checkpoints and closes both SQLite databases during graceful application shutdown.
 
 ### Fixes
 
-- Rejects unpublished update images before changing the running application container.
-- Restores the previous container when an update fails after restart begins, and records background update failures reliably.
-- Detects interrupted update and restore jobs when the updater restarts, recovers the application container where possible, and marks the interrupted job as failed with an actionable message.
+- Restores the previous container and the pre-operation persistent-data snapshot when update health verification fails.
+- Compensates interrupted update and restore phases idempotently and retains recovery artifacts when automated rollback cannot finish.
+- Requires stable `X.Y.Z` update targets and supports a fail-closed local-image mode for unpublished test images.
+- Omits unauthorized form and line actions from `/api/metadata`, while direct action calls continue to return `403`.
+- Filters hidden or disabled actions defensively in the client.
+- Calculates Report Designer canvas width from left and right margins, including asymmetric margins.
 
 ### Breaking changes and migration
 
-None. This release does not require a metadata or business-data migration.
+None. The maintenance API adds optional `phase`, `rollbackStatus`, and `recoveryRequired` fields while preserving the existing `status` field.
 
 ### Upgrade notes
 
-Back up `data.db` and `designer.db`, preserve `.emu-secret.key`, and update both the application and updater images to `1.0.1`. After restart, verify login and **Settings → System Maintenance** diagnostics.
+Back up `data.db` and `designer.db`, preserve `.emu-secret.key`, and update both the application and updater images together to `1.0.2`. After restart, verify login and **Settings → System Maintenance** diagnostics.
 
 ### Validation
 
-The release workflow runs the automated tests, type checking, and production builds before publishing the application and updater images.
+The candidate passed the offline release policy, type checking, automated tests, production builds, fresh-container boot, local-image upgrade, failed-health rollback, failed-restore rollback, and byte-equality checks for restored `data.db`.
 
 ### Known issues
 
-None known.
+The local Docker acceptance stack requires Docker Desktop to be running and the previous release image to exist in the local image cache; the verifier never pulls it automatically.
 <!-- release-notes:end -->
 
 ## Repository structure

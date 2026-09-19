@@ -151,7 +151,7 @@ const columns = computed<DataTableColumns<Row>>(() => [
         ]);
       }
       return h(NSpace, {}, () => [
-        ...(props.line.actions ?? []).map((action) => h(NButton, { size: 'small', onClick: () => launchAction(action, row) }, () => action.label)),
+        ...(props.line.actions ?? []).filter((action) => !action.hidden && !action.disabled).map((action) => h(NButton, { size: 'small', onClick: () => launchAction(action, row) }, () => action.label)),
         h(NButton, { size: 'small', onClick: () => startEdit(row) }, () => 'Edit'),
         h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => confirmRemove(row) }, () => 'Del'),
       ]);
