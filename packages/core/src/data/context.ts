@@ -21,6 +21,8 @@ export class DataContext {
   readonly hooks: HookRegistry;
   private ttsLevel = 0;
   private deleting = new Set<string>();
+  private writeGuards = new Set<() => void>();
+  guardWrite(guard: () => void): void { guard(); if (this.ttsLevel > 0) this.writeGuards.add(guard); }
 
   constructor(
     private readonly db: Database,
@@ -30,6 +32,7 @@ export class DataContext {
     hooks?: HookRegistry,
     readonly policy: SecurityPolicy = allowAll,
     private readonly fieldEncryption?: FieldEncryption,
+    private readonly assertWritable?: (table: string) => void,
   ) {
     // events/hooks are usually shared kernel-wide so app logic registered at
     // boot applies to every request context
@@ -62,7 +65,8 @@ export class DataContext {
    */
   tts<T>(fn: () => T): T {
     const savepoint = `tts_${this.ttsLevel}`;
-    if (this.ttsLevel === 0) {
+    const ownsTransaction = this.ttsLevel === 0 && !this.db.inTransaction;
+    if (ownsTransaction) {
       this.db.exec('BEGIN');
     } else {
       this.db.exec(`SAVEPOINT ${savepoint}`);
@@ -70,20 +74,23 @@ export class DataContext {
     this.ttsLevel++;
     try {
       const result = fn();
-      this.ttsLevel--;
-      if (this.ttsLevel === 0) {
+      if (this.ttsLevel === 1) for (const guard of this.writeGuards) guard();
+      if (ownsTransaction) {
         this.db.exec('COMMIT');
       } else {
         this.db.exec(`RELEASE ${savepoint}`);
       }
+      this.ttsLevel--;
+      if (this.ttsLevel === 0) this.writeGuards.clear();
       return result;
     } catch (err) {
       this.ttsLevel--;
-      if (this.ttsLevel === 0) {
+      if (ownsTransaction) {
         this.db.exec('ROLLBACK');
       } else {
         this.db.exec(`ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`);
       }
+      if (this.ttsLevel === 0) this.writeGuards.clear();
       throw err;
     }
   }
@@ -91,6 +98,7 @@ export class DataContext {
   // ---- internal write path (called by Record) ----
 
   private assertAllowed(table: string, op: 'read' | 'create' | 'update' | 'delete'): void {
+    if (op !== 'read' && this.assertWritable) this.guardWrite(() => this.assertWritable!(table));
     if (!this.policy.can(table, op)) {
       throw new SecurityError(`Access denied: ${op} on '${table}' (user '${this.session.user}')`);
     }
@@ -120,6 +128,7 @@ export class DataContext {
   }
 
   _insert(rec: Record): void {
+    if (this.ttsLevel === 0) { this.tts(() => this._insert(rec)); return; }
     const table = rec.table;
     if (rec.id !== null) throw new ValidationError(`${table.name}: record already inserted`);
     this.assertAllowed(table.name, 'create');
@@ -139,6 +148,7 @@ export class DataContext {
   }
 
   _update(rec: Record): void {
+    if (this.ttsLevel === 0) { this.tts(() => this._update(rec)); return; }
     const table = rec.table;
     if (rec.id === null) throw new ValidationError(`${table.name}: cannot update unsaved record`);
     this.assertAllowed(table.name, 'update');

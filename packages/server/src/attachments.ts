@@ -67,6 +67,7 @@ function storageFile(root: string, storageKey: string): string {
 }
 
 function assertParent(kernel: Kernel, ctx: DataContext, table: string, id: number, operation: 'read' | 'update'): void {
+  if (operation !== 'read') kernel.assertArtifactWritable(table);
   if (!kernel.registry.hasTable(table) || table.startsWith('FW_')) throw Object.assign(new Error(`Unknown table '${table}'`), { statusCode: 404 });
   if (!ctx.policy.can(table, operation)) throw new SecurityError(`Access denied: ${operation} on '${table}'`);
   const found = kernel.db.prepare(`SELECT id FROM "${table}" WHERE id=?`).get(id);
@@ -150,6 +151,7 @@ export function registerAttachmentRoutes(app: FastifyInstance, kernel: Kernel, d
         kernel.db.prepare(`INSERT INTO "FW_Blob" (createdAt,createdBy,modifiedAt,modifiedBy,blobId,storageKey,originalName,mimeType,bytes,sha256)
           VALUES (?,?,?,?,?,?,?,?,?,?)`).run(now, ctx.session.user, now, ctx.session.user, blobId, storageKey, originalName, part.mimetype, bytes, hash.digest('hex'));
         insertAttachment(kernel, ctx.session.user, { attachmentId, parentTable: request.params.table, parentId: id, kind: 'file', name: originalName, blobId });
+        kernel.assertArtifactWritable(request.params.table);
         kernel.db.exec('COMMIT');
       } catch (error) { kernel.db.exec('ROLLBACK'); throw error; }
       return reply.status(201).send({ id: attachmentId, kind: 'file', name: originalName, mimeType: part.mimetype, bytes });

@@ -806,7 +806,7 @@ export interface AppManifest {
   icon?: IconName;
   dependsOn?: string[];
   /** Model definitions: name → layer */
-  models?: { name: string; label?: string; layer: LayerType }[];
+  models?: { name: string; label?: string; layer: LayerType; license?: { vendor: string } }[];
 }
 
 export type AnyMeta =

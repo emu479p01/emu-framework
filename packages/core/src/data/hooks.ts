@@ -16,9 +16,12 @@ export interface TableHooks {
 export class ValidationError extends Error {}
 
 export class HookRegistry {
+  constructor(private captureGuard?: () => (() => void) | undefined) {}
   private hooks = new Map<string, TableHooks[]>();
 
   register(table: string, hooks: TableHooks): void {
+    const guard = this.captureGuard?.();
+    if (guard) hooks = Object.fromEntries(Object.entries(hooks).map(([key, fn]) => [key, (record: Record, ctx: DataContext) => { ctx.guardWrite(guard); return fn(record, ctx); }])) as TableHooks;
     const list = this.hooks.get(table) ?? [];
     list.push(hooks);
     this.hooks.set(table, list);
@@ -26,6 +29,10 @@ export class HookRegistry {
 
   clear(): void {
     this.hooks.clear();
+  }
+  snapshot(): () => void {
+    const saved = new Map([...this.hooks].map(([key, value]) => [key, [...value]]));
+    return () => { this.hooks = saved; };
   }
 
   for(table: string): TableHooks[] {

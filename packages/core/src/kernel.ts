@@ -13,6 +13,7 @@ import { HookRegistry } from './data/hooks.js';
 import { DataContext, type SessionInfo } from './data/context.js';
 import { allowAll, type SecurityPolicy } from './security/policy.js';
 import { FieldEncryption } from './security/fieldEncryption.js';
+import { LicenseManager } from './licensing.js';
 
 export interface HttpRequestInput {
   url: string;
@@ -47,6 +48,13 @@ export interface FunctionServices {
 }
 
 export type ActionHandler = (ctx: DataContext, args: { [key: string]: unknown }, services?: FunctionServices) => unknown;
+class LicensedActions extends Map<string, ActionHandler> {
+  constructor(private capture: (name: string) => () => void) { super(); }
+  override set(name: string, handler: ActionHandler): this {
+    const guard = this.capture(name);
+    return super.set(name, (ctx, args, services) => { ctx.guardWrite(guard); return handler(ctx, args, services); });
+  }
+}
 
 type BootStep =
   | { kind: 'dir'; dir: string }
@@ -111,11 +119,44 @@ const WEB_KIND_ORDER = [
  * and shared event/hook registries.
  */
 export class Kernel {
+  /** Apply a validated package without retaining a partial runtime on failure. */
+  applyWebArtifactsAtomic(artifacts: AnyMeta[], persist: () => void): void {
+    const registry = this._registry, web = this._webArtifacts;
+    const executable = this.executableSignature, successful = this.successfulWebSignature;
+    const restoreEvents = this.events.snapshot(), restoreHooks = this.hooks.snapshot();
+    const actions = new Map(this.actions), modes = new Map(this.actionModes);
+    try {
+      this.designerDb.transaction(() => this.db.transaction(() => {
+        const errors = this.previewWebArtifacts(artifacts);
+        if (errors.length) throw Object.assign(new Error('Deployment validation failed'), { statusCode: 422, errors });
+        const applied = this.applyWebArtifacts(artifacts);
+        if (applied.length) throw Object.assign(new Error('Deployment apply failed'), { statusCode: 422, errors: applied });
+        persist();
+      })())();
+    } catch (error) {
+      this._registry = registry; this._webArtifacts = web;
+      this.executableSignature = executable; this.successfulWebSignature = successful;
+      restoreEvents(); restoreHooks(); this.actions.clear(); this.actionModes.clear();
+      for (const [key, value] of actions) this.actions.set(key, value);
+      for (const [key, value] of modes) this.actionModes.set(key, value);
+      throw error;
+    }
+  }
   readonly db: Database;
   readonly designerDb: Database;
-  readonly events = new EventBus();
-  readonly hooks = new HookRegistry();
-  readonly actions = new Map<string, ActionHandler>();
+  private scriptApp?: string;
+  private scriptGuard(): (() => void) | undefined { const owner = this.scriptApp; return owner ? () => this.licenses.assertApp(owner) : undefined; }
+  readonly events = new EventBus(() => this.scriptGuard());
+  readonly hooks = new HookRegistry(() => this.scriptGuard());
+  readonly actions = new LicensedActions((name) => { const owner = this.scriptApp; return () => { this.licenses.assertApp(owner); this.assertArtifactWritable(name); }; });
+  readonly licenses: LicenseManager;
+  assertArtifactWritable(name: string): void {
+    if (!this.registry.loadedApps().some(app => app.models?.some(model => model.license))) return;
+    this.licenses.assertApp(this.appForArtifact(name));
+    for (const kind of ['table', 'function', 'form', 'dataEntity']) {
+      for (const artifact of this.registry.customizationLayers(kind, name)) this.licenses.assertApp(artifact.app);
+    }
+  }
   readonly actionModes = new Map<string, 'transactional' | 'async'>();
   readonly fieldEncryption: FieldEncryption;
 
@@ -144,6 +185,7 @@ export class Kernel {
     this.designerDb.pragma('foreign_keys = ON');
     this.designerDb.pragma('busy_timeout = 5000');
     this.designerDb.pragma('wal_autocheckpoint = 1000');
+    this.licenses = new LicenseManager(this.designerDb, () => this.registry.loadedApps());
   }
 
   /** Flushes WAL state and closes both persistent stores before container shutdown. */
@@ -248,6 +290,14 @@ export class Kernel {
    * only - no FW_WebArtifact) and designer DB (FW_WebArtifact only).
    */
   applyWebArtifacts(artifacts: AnyMeta[]): WebArtifactError[] {
+    for (const current of this.registry.loadedApps()) {
+      const next = artifacts.find((a) => (a as { kind: string }).kind === 'app' && a.name === current.name) as unknown as AppManifest | undefined;
+      if (!next) continue;
+      for (const model of current.models ?? []) if (model.license) {
+        const replacement = next.models?.find((m) => m.name === model.name);
+        if (replacement?.layer !== 'ISV' || replacement.license?.vendor !== model.license.vendor) return [{ kind: 'app', name: current.name, error: `Cannot remove or change license requirement for '${model.name}'` }];
+      }
+    }
     const applyStartedAt = performance.now();
     const raw = artifacts as (AnyMeta & { app?: string })[];
     const sorted = [...raw].sort((a, b) => {
@@ -543,6 +593,7 @@ export class Kernel {
       if (!a.code) continue;
       try {
         const fn = new Function('kernel', 'ValidationError', 'DataEventCancelled', a.code);
+        this.scriptApp = a.app;
         fn(this, ValidationError, DataEventCancelled);
       } catch (err) {
         errors.push({
@@ -550,7 +601,7 @@ export class Kernel {
           name: a.name ?? 'unnamed',
           error: `Script '${a.name}': ${err instanceof Error ? err.message : String(err)}`,
         });
-      }
+      } finally { this.scriptApp = undefined; }
     }
   }
 
@@ -615,7 +666,7 @@ export class Kernel {
 
   /** DataContext connected to the data database. */
   context(session: SessionInfo = { user: 'system' }, policy: SecurityPolicy = allowAll): DataContext {
-    return new DataContext(this.db, this.registry, session, this.events, this.hooks, policy, this.fieldEncryption);
+    return new DataContext(this.db, this.registry, session, this.events, this.hooks, policy, this.fieldEncryption, (table) => this.assertArtifactWritable(table));
   }
 
   /** DataContext connected to the designer database. */

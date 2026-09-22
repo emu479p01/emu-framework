@@ -226,7 +226,7 @@ const dataEntityLineSchema = Type.Object({
 }, { additionalProperties: false });
 
 const artifactSchemas = [
-  Type.Object({ kind: Type.Literal('app'), name, label: Type.Optional(Type.String()), defaultLocale: Type.Optional(Type.String({ minLength: 2, maxLength: 35 })), icon, dependsOn: Type.Optional(Type.Array(Type.String())), models: Type.Optional(Type.Array(Type.Object({ name, label: Type.Optional(Type.String()), layer }))) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('app'), name, label: Type.Optional(Type.String()), defaultLocale: Type.Optional(Type.String({ minLength: 2, maxLength: 35 })), icon, dependsOn: Type.Optional(Type.Array(Type.String())), models: Type.Optional(Type.Array(Type.Object({ name, label: Type.Optional(Type.String()), layer, license: Type.Optional(Type.Object({ vendor: Type.String({ minLength: 1 }) }, { additionalProperties: false })) }))) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('table'), ...common, fields: Type.Array(fieldSchema), titleField: Type.Optional(Type.String()), indexes: Type.Optional(Type.Array(indexSchema)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('translation'), ...common, locale: Type.String({ pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$' }), resources: Type.Record(Type.String({ minLength: 1 }), Type.String()) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal('dataEntity'), ...common, rootTable: Type.String({ minLength: 1 }), businessKey: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), fields: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), lines: Type.Optional(Type.Array(dataEntityLineSchema)), archiveEligible: Type.Optional(Type.Boolean()), businessDateField: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: false }),
@@ -316,6 +316,7 @@ export function validateMetadataArtifact(value: unknown): SchemaDiagnostic[] {
   const artifact = value as { kind?: string; fields?: Array<{ name?: string; type?: string; mandatory?: boolean; readOnly?: boolean; multiline?: boolean; encrypted?: boolean; default?: unknown }> };
   const issues: SchemaDiagnostic[] = [];
   if (artifact.kind === 'app') {
+    for (const model of (value as AppManifest).models ?? []) if (model.license && model.layer !== 'ISV') issues.push({ path: '/models', code: 'license_layer', message: 'Only ISV models may require a license' });
     const locale = (value as { defaultLocale?: string }).defaultLocale;
     if (locale !== undefined) {
       try { normalizeLocale(locale, 'defaultLocale'); }

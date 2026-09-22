@@ -205,6 +205,7 @@ function validateReferences(kernel: Kernel, owned: TableMeta[], incoming: Map<st
 }
 
 function replaceData(kernel: Kernel, appName: string, rows: Map<string, Record<string, unknown>[]>): AppDataResult {
+  kernel.licenses.assertApp(appName);
   const tables = appTables(kernel, appName);
   const result: AppDataResult = { ok: true, app: appName, tables: [] };
   const tx = kernel.db.transaction(() => {
@@ -229,6 +230,7 @@ function replaceData(kernel: Kernel, appName: string, rows: Map<string, Record<s
     }
     const violations = kernel.db.pragma('foreign_key_check') as unknown[];
     if (violations.length) throw new Error('Imported data failed foreign-key integrity validation');
+    kernel.licenses.assertApp(appName);
   });
   tx();
   return result;

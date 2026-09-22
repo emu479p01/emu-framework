@@ -33,7 +33,8 @@ function recordNavigation(menuName?: string, itemId?: string) {
   drawerOpen.value = false;
   selectedNavRoot.value = null;
   if (menuName && itemId) {
-    void api.post('/api/navigation/recent', { menuName, itemId })
+    const owner = meta.apps.find(app => app.menus.some(menu => menu.name === menuName))?.name ?? 'system';
+    void api.post('/api/navigation/recent', { app: owner, menuName, itemId })
       .then(loadNavigationPreferences)
       .catch(() => undefined);
   }
@@ -59,7 +60,7 @@ const menuOptions = computed<NavMenuOption[]>(() => {
     recentKeys: navigationPreferences.value.recent.map((item) => `${item.menuName}\0${item.itemId}`),
   });
 });
-const activeKey = computed(() => findActiveKey(menuOptions.value, String(route.params.formName ?? ''), route.path) ?? '');
+const activeKey = computed(() => findActiveKey(menuOptions.value, String(route.params.formName ?? ''), route.path, String(route.params.appName ?? '') || undefined) ?? '');
 function containsNavKey(option: NavMenuOption, key: string): boolean {
   return option.key === key || ((option.children ?? []) as NavMenuOption[]).some((child) => containsNavKey(child, key));
 }
@@ -217,6 +218,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', updateViewport); wi
               </n-space>
             </n-alert>
             <n-layout-content class="page-content"><router-view /></n-layout-content>
+            <n-alert v-for="notice in meta.meta?.licenseNotices" :key="`${notice.app}/${notice.model}`" type="warning">ISV {{ notice.app }} / {{ notice.model }}: {{ notice.status }} {{ notice.expiresAt ? `(${notice.expiresAt})` : '' }}</n-alert>
           </n-layout>
         </n-layout>
       </template>

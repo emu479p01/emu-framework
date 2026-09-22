@@ -29,6 +29,7 @@ import {
 import { registerSystemApp, registerSystemHooks } from './systemApp.js';
 import { localizeMetadata } from './localization.js';
 import { registerNavigationPreferenceRoutes } from './navigationPreferences.js';
+import { registerAppModelRoutes } from './appModels.js';
 import { deleteRecordAttachments, registerAttachmentRoutes } from './attachments.js';
 import { registerDataEntityRoutes } from './dataEntities.js';
 import { registerArchiveRoutes } from './archive.js';
@@ -802,6 +803,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         if (isSystemAdmin) return true;
         return access.openApps.has(a.name);
       }),
+      licenseNotices: kernel.registry.loadedApps().filter(a => isSystemAdmin || access.openApps.has(a.name)).flatMap(a => (a.models ?? []).flatMap(m => {
+        const status = kernel.licenses.status(a.name, m);
+        return status.blocked || status.status === 'expiring' ? [{ app: a.name, model: m.name, status: status.status, expiresAt: status.expiresAt }] : [];
+      })),
     };
     return localizeMetadata(kernel.registry, metadata, user.locale);
   });
@@ -838,6 +843,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   };
   registerAiRoutes(app, kernel, { requireDesigner, designerScope, requireAdmin: requireFrameworkAdmin });
   registerSystemMaintenanceRoutes(app, kernel, requireFrameworkAdmin);
+  registerAppModelRoutes(app, kernel, requireFrameworkAdmin);
   registerArchiveRoutes(app, kernel, requireFrameworkAdmin);
   registerAppDataManagementRoutes(app, kernel, requireFrameworkAdmin);
   registerFontRoutes(app, kernel, requireFrameworkAdmin, requireUser);

@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AuthUser } from './auth.js';
 import type { Kernel, MenuItemMeta, SecurityPolicy } from '@emu/core';
 
-interface NavigationKey { menuName: string; itemId: string }
+interface NavigationKey { menuName: string; itemId: string; app?: string }
 
 /** Parses SQLite 'YYYY-MM-DD HH:MM:SS' (UTC) and ISO timestamps consistently. */
 function parseTimestamp(value: string | null | undefined): number {
@@ -31,7 +31,7 @@ export function registerNavigationPreferenceRoutes(app: FastifyInstance, kernel:
     const openApps = deps.openApps(username);
     const visit = (menuName: string, items: MenuItemMeta[], system: boolean): void => {
       for (const item of items) {
-        if (item.hidden || item.visible === false) continue;
+        if (!(item.visible ?? item.hidden !== true)) continue;
         if (item.items?.length) { visit(menuName, item.items, system); continue; }
         if (!item.id) continue;
         let permitted = false;
@@ -61,6 +61,7 @@ export function registerNavigationPreferenceRoutes(app: FastifyInstance, kernel:
   };
 
   const assertAllowed = (username: string, key: NavigationKey): void => {
+    if (key.app && kernel.appForArtifact(key.menuName) !== key.app) throw Object.assign(new Error('Navigation app mismatch'), { statusCode: 404 });
     if (!catalog(username).has(`${key.menuName}\0${key.itemId}`)) throw Object.assign(new Error('Navigation item is unavailable'), { statusCode: 404 });
   };
 
@@ -72,11 +73,12 @@ export function registerNavigationPreferenceRoutes(app: FastifyInstance, kernel:
       kernel.db.prepare('DELETE FROM "FW_NavigationItem" WHERE id=?').run(row.id);
       return false;
     });
-    const shape = (row: typeof visible[number]) => ({ menuName: row.menuName, itemId: row.itemId, lastOpenedAt: row.lastOpenedAt ?? null });
+    const shape = (row: typeof visible[number]) => ({ app: kernel.appForArtifact(row.menuName), menuName: row.menuName, itemId: row.itemId, lastOpenedAt: row.lastOpenedAt ?? null });
     const byRecent = (a: typeof visible[number], b: typeof visible[number]) => (parseTimestamp(b.lastOpenedAt) || 0) - (parseTimestamp(a.lastOpenedAt) || 0);
+    const counts = new Map<string, number>();
     return {
       favorites: visible.filter((row) => Boolean(row.favorite)).map(shape),
-      recent: visible.filter((row) => row.lastOpenedAt).sort(byRecent).slice(0, 10).map(shape),
+      recent: visible.filter((row) => row.lastOpenedAt).sort(byRecent).filter((row) => { const owner = kernel.appForArtifact(row.menuName) ?? 'system'; const count = (counts.get(owner) ?? 0) + 1; counts.set(owner, count); return count <= 10; }).map(shape),
     };
   });
 
@@ -94,7 +96,7 @@ export function registerNavigationPreferenceRoutes(app: FastifyInstance, kernel:
         VALUES (CURRENT_TIMESTAMP,?,CURRENT_TIMESTAMP,?,?,?,?,0,?)
         ON CONFLICT(userId,menuName,itemId) DO UPDATE SET lastOpenedAt=excluded.lastOpenedAt,modifiedAt=CURRENT_TIMESTAMP,modifiedBy=excluded.modifiedBy`)
         .run(user.username, user.username, id, key.menuName, key.itemId, stamp);
-      const stale = kernel.db.prepare('SELECT id,favorite,lastOpenedAt FROM "FW_NavigationItem" WHERE userId=? AND lastOpenedAt IS NOT NULL').all(id) as Array<{ id: number; favorite: number; lastOpenedAt: string }>;
+      const stale = (kernel.db.prepare('SELECT id,menuName,favorite,lastOpenedAt FROM "FW_NavigationItem" WHERE userId=? AND lastOpenedAt IS NOT NULL').all(id) as Array<{ id: number; menuName: string; favorite: number; lastOpenedAt: string }>).filter((row) => kernel.appForArtifact(row.menuName) === kernel.appForArtifact(key.menuName));
       stale.sort((a, b) => parseTimestamp(b.lastOpenedAt) - parseTimestamp(a.lastOpenedAt));
       for (const row of stale.slice(10)) {
         if (row.favorite) kernel.db.prepare('UPDATE "FW_NavigationItem" SET lastOpenedAt=NULL WHERE id=?').run(row.id);

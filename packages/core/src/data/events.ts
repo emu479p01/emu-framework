@@ -44,9 +44,12 @@ export interface DataEventArgs {
 export type DataEventHandler = (e: DataEventArgs) => void;
 
 export class EventBus {
+  constructor(private captureGuard?: () => (() => void) | undefined) {}
   private handlers = new Map<string, DataEventHandler[]>();
 
   on(table: string, event: DataEventType, handler: DataEventHandler): void {
+    const guard = this.captureGuard?.();
+    if (guard) { const original = handler; handler = (args) => { args.ctx.guardWrite(guard); original(args); }; }
     const key = `${table}.${event}`;
     const list = this.handlers.get(key) ?? [];
     list.push(handler);
@@ -55,6 +58,10 @@ export class EventBus {
 
   clear(): void {
     this.handlers.clear();
+  }
+  snapshot(): () => void {
+    const saved = new Map([...this.handlers].map(([key, value]) => [key, [...value]]));
+    return () => { this.handlers = saved; };
   }
 
   emit(table: string, event: DataEventType, record: Record, ctx: DataContext): void {
