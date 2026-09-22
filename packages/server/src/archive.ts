@@ -64,6 +64,7 @@ async function attachmentPayload(kernel: Kernel, parentPairs: Array<{ table: str
 }
 
 async function archiveBatch(kernel: Kernel, entity: DataEntityMeta, policy: Record<string, unknown>, actor: string): Promise<Record<string, unknown>> {
+  kernel.assertArtifactWritable(entity.name); kernel.assertArtifactWritable(entity.rootTable);
   const dateField = String(policy.businessDateField); const limit = Math.max(1, Math.min(10_000, Number(policy.batchSize) || 100)); const ageDays = Math.max(0, Number(policy.ageDays) || 0);
   const ctx = kernel.context({ user: actor }); const candidates = ctx.select(entity.rootTable).where(dateField, '<=', cutoff(ageDays)).orderBy(dateField).limit(limit).toArray();
   const catalog = openCatalog(); let archived = 0; const failed: Array<{ key: string; error: string }> = [];
@@ -71,6 +72,7 @@ async function archiveBatch(kernel: Kernel, entity: DataEntityMeta, policy: Reco
     for (const header of candidates) {
       const key = Object.fromEntries(entity.businessKey.map((field) => [field, header.get(field)])); const keyText = JSON.stringify(key);
       try {
+        kernel.assertArtifactWritable(entity.name); kernel.assertArtifactWritable(entity.rootTable);
         if (catalog.prepare('SELECT 1 FROM documents WHERE entityName=? AND businessKey=?').get(entity.name, keyText)) throw new Error('Document is already archived');
         const lines: Record<string, Record<string, unknown>[]> = {}; const parents = [{ table: entity.rootTable, id: header.id! }];
         for (const source of entity.lines ?? []) {
@@ -86,6 +88,7 @@ async function archiveBatch(kernel: Kernel, entity: DataEntityMeta, policy: Reco
         // Catalog and immutable payload are durable before live deletion begins.
         const liveFiles = parents.flatMap((parent) => (kernel.db.prepare(`SELECT b.storageKey FROM "FW_Attachment" a JOIN "FW_Blob" b ON b.blobId=a.blobId WHERE a.parentTable=? AND a.parentId=?`).all(parent.table, parent.id) as Array<{ storageKey: string }>).map((item) => item.storageKey));
         ctx.tts(() => {
+          ctx.guardWrite(() => kernel.assertArtifactWritable(entity.name));
           for (const parent of parents) {
             const attachmentRows = kernel.db.prepare('SELECT blobId FROM "FW_Attachment" WHERE parentTable=? AND parentId=?').all(parent.table, parent.id) as Array<{ blobId?: string }>;
             kernel.db.prepare('DELETE FROM "FW_Attachment" WHERE parentTable=? AND parentId=?').run(parent.table, parent.id);

@@ -107,6 +107,19 @@ describe('recent navigation history', () => {
     expect(adminPrefs.recent.some((entry: any) => entry.itemId === account!.itemId)).toBe(false);
   });
 
+  it('keeps ten recent items in each app independently and rejects a forged app', async () => {
+    const second = manyAppArtifacts().map(a => JSON.parse(JSON.stringify(a).replaceAll('manyapp','otherapp').replaceAll('MANYAPP','OTHERAPP'))) as AnyMeta[];
+    const candidates = [...storedOf(kernel), ...second];
+    expect(kernel.applyWebArtifacts(candidates)).toEqual([]); persistStoredArtifacts(kernel, candidates);
+    for (let i=1;i<=12;i++) {
+      await open(`many-${i}`);
+      expect((await app.inject({ method:'POST',url:'/api/navigation/recent',headers:auth,payload:{ app:'otherapp',menuName:'OTHERAPP_Menu',itemId:`many-${i}` } })).statusCode).toBe(200);
+    }
+    const prefs = await preferences();
+    expect(prefs.recent.filter((r:any) => r.app === 'manyapp')).toHaveLength(10);
+    expect(prefs.recent.filter((r:any) => r.app === 'otherapp')).toHaveLength(10);
+    expect((await app.inject({ method:'POST',url:'/api/navigation/recent',headers:auth,payload:{ app:'manyapp',menuName:'OTHERAPP_Menu',itemId:'many-1' } })).statusCode).toBe(404);
+  });
   it('prunes history for menus that no longer exist', async () => {
     expect((await app.inject({ method: 'DELETE', url: '/api/designer/artifacts/app/manyapp', headers: auth })).statusCode).toBe(200);
     const prefs = await preferences();

@@ -24,7 +24,7 @@ import {
   useMessage,
 } from 'naive-ui';
 import { useDesigner } from '../../stores/designer';
-import { ApiError } from '../../api';
+import { api, ApiError } from '../../api';
 import type { MetadataPackagePreview } from '../../api';
 import SimpleBuilder from './SimpleBuilder.vue';
 
@@ -97,6 +97,7 @@ function appMenuOptions(appName: string) {
   const opts = [{ key: 'edit', label: 'Edit App' }];
   if (appName !== 'system') opts.push(
     { key: 'export', label: 'Export App' },
+    { key: 'deploy', label: 'Build deployment package' },
     { key: 'import', label: 'Import / Merge App' },
     { key: 'delete', label: 'Delete App' },
   );
@@ -113,6 +114,7 @@ function modelMenuOptions(appName: string, modelName: string) {
   return opts;
 }
 function handleAppMenu(appName: string, key: string) {
+  if (key === 'deploy') { deployApp.value = appName; deployModels.value = []; showDeploy.value = true; return; }
   if (key === 'edit') router.push(`/designer/app/${encodeURIComponent(appName)}`);
   else if (key === 'export') downloadPackage(designer.exportAppUrl(appName));
   else if (key === 'import') choosePackage();
@@ -128,6 +130,21 @@ function handleModelMenu(appName: string, model: { name: string; label?: string;
 const showPackagePreview = ref(false);
 const packagePreview = ref<MetadataPackagePreview | null>(null);
 const packageBusy = ref(false);
+const showDeploy = ref(false);
+const deployApp = ref('');
+const deployMode = ref<'vendor' | 'promotion'>('vendor');
+const deployModels = ref<string[]>([]);
+const deployOptions = computed(() => (designer.apps.find(a => a.name === deployApp.value)?.models ?? []).filter(m => deployMode.value === 'promotion' || ['SYS','LOC','ISV'].includes(m.layer)).map(m => ({ label: `${m.name} (${m.layer})`, value: m.name })));
+watch(deployMode, () => { deployModels.value = []; });
+async function buildDeployment() {
+  packageBusy.value = true;
+  try {
+    const pkg = await api.post(`/api/designer/packages/models/${encodeURIComponent(deployApp.value)}/export`, { mode: deployMode.value, models: deployModels.value });
+    const url = URL.createObjectURL(new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = `${deployApp.value}.${deployMode.value}.emuapp.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showDeploy.value = false;
+  } catch(e) { message.error((e as Error).message); } finally { packageBusy.value = false; }
+}
 
 function downloadPackage(url: string) {
   const link = document.createElement('a');
@@ -214,7 +231,7 @@ function layerType(layer: string): 'default' | 'info' | 'success' | 'warning' {
 const showModelDialog = ref(false);
 const modelDialogTitle = ref('');
 const editingModel = ref<{ app: string; originalName: string }>({ app: '', originalName: '' });
-const modelForm = reactive({ name: '', label: '', layer: 'CUS' });
+const modelForm = reactive({ name: '', label: '', layer: 'CUS', vendor: '' });
 
 const LAYER_OPTIONS = [
   { label: 'SYS — System', value: 'SYS' },
@@ -230,6 +247,7 @@ function openAddModel(appName: string) {
   modelForm.name = '';
   modelForm.label = '';
   modelForm.layer = 'CUS';
+  modelForm.vendor = '';
   showModelDialog.value = true;
 }
 
@@ -239,6 +257,7 @@ function openEditModel(appName: string, modelName: string, label: string, layer:
   modelForm.name = modelName;
   modelForm.label = label;
   modelForm.layer = layer;
+  modelForm.vendor = designer.apps.find(a => a.name === appName)?.models?.find(m => m.name === modelName)?.license?.vendor ?? '';
   showModelDialog.value = true;
 }
 
@@ -248,7 +267,7 @@ async function handleSaveModel() {
     await designer.saveModel(
       editingModel.value.app,
       editingModel.value.originalName || modelForm.name.trim(),
-      { label: modelForm.label || undefined, layer: modelForm.layer },
+      { label: modelForm.label || undefined, layer: modelForm.layer, license: modelForm.layer === 'ISV' && modelForm.vendor.trim() ? { vendor: modelForm.vendor.trim() } : undefined },
     );
     message.success(editingModel.value.originalName ? 'Model updated' : 'Model created');
     showModelDialog.value = false;
@@ -717,6 +736,7 @@ async function onReload() {
         <n-form-item label="Layer">
           <n-select v-model:value="modelForm.layer" :options="LAYER_OPTIONS" />
         </n-form-item>
+        <n-form-item v-if="modelForm.layer === 'ISV'" label="License vendor ID (optional)"><n-input v-model:value="modelForm.vendor" placeholder="Blank for an unlicensed model" /></n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
@@ -727,10 +747,17 @@ async function onReload() {
         </n-space>
       </template>
     </n-modal>
+    <n-modal v-model:show="showDeploy" preset="card" title="Build deployment package" style="width:min(620px,92vw)">
+      <n-space vertical><n-select v-model:value="deployMode" :options="[{ label: 'Vendor update — SYS / LOC / ISV', value: 'vendor' }, { label: 'UAT → Prod — all layers', value: 'promotion' }]" />
+        <n-select v-model:value="deployModels" multiple :options="deployOptions" placeholder="Select complete models" />
+        <n-alert type="info">Selected models replace their metadata at the destination. Other models and business data are preserved. Dependencies are checked during import preview.</n-alert>
+        <n-button type="primary" :disabled="!deployModels.length" :loading="packageBusy" @click="buildDeployment">Download package</n-button>
+      </n-space>
+    </n-modal>
     <n-modal v-model:show="showPackagePreview" preset="card" title="Review Metadata Import" style="width:min(720px, 92vw)">
       <template v-if="packagePreview">
         <n-alert v-if="packagePreview.diff.some((item) => item.highRisk)" type="warning" style="margin-bottom:16px">
-          This package contains executable scripts. Import only packages from a trusted source.
+          This package contains executable code or metadata deletions. Review high-risk changes before confirming.
         </n-alert>
         <n-alert v-if="packagePreview.warnings?.length" type="warning" style="margin-bottom:16px">
           <div v-for="warning in packagePreview.warnings" :key="warning.path">{{ warning.message }}</div>
@@ -740,6 +767,9 @@ async function onReload() {
           {{ packagePreview.package.scope.app }}<template v-if="packagePreview.package.scope.type === 'model'"> / {{ packagePreview.package.scope.model }}</template>
           · {{ packagePreview.package.artifactCount }} artifacts
           · from v{{ packagePreview.package.frameworkVersion }}
+          <p v-if="packagePreview.package.scope.type === 'models'">Mode: {{ packagePreview.package.scope.mode }} · Selected: {{ packagePreview.package.scope.models.map(m => m.name).join(', ') }}</p>
+          <p v-if="packagePreview.preservedModels?.length">Preserved: {{ packagePreview.preservedModels.map(m => m.name).join(', ') }}</p>
+          <p v-for="effect in packagePreview.schemaEffects" :key="`${effect.type}:${effect.target}`">{{ effect.type }}: {{ effect.target }}</p>
         </div>
         <n-table size="small" :bordered="false" style="margin-top:16px;max-height:360px;overflow:auto">
           <thead><tr><th>Change</th><th>Kind</th><th>Name</th><th>Risk</th></tr></thead>
@@ -751,7 +781,7 @@ async function onReload() {
       </template>
       <template #footer><n-space justify="end">
         <n-button @click="showPackagePreview=false">Cancel</n-button>
-        <n-button type="primary" :loading="packageBusy" @click="commitPackage">Confirm Merge</n-button>
+        <n-button type="primary" :loading="packageBusy" @click="commitPackage">Confirm deployment</n-button>
       </n-space></template>
     </n-modal>
     </div>

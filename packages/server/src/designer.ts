@@ -19,7 +19,7 @@ import { readdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { createMetadataPackage, mergeAppManifest, parseMetadataPackage } from './metadataPackage.js';
+import { createMetadataPackage, mergeAppManifest, parseMetadataPackage, modelPackageOperations } from './metadataPackage.js';
 import { missingReportFonts } from './fontManager.js';
 
 const MAX_METADATA_PACKAGE_BYTES = 20 * 1024 * 1024;
@@ -195,7 +195,14 @@ export function registerDesignerRoutes(
         throw Object.assign(new Error(`Artifact '${artifact.name}' cannot change kind`), { statusCode: 422 });
       }
     }
-    if (artifact.kind === 'app') return;
+    if (artifact.kind === 'app') {
+      const previous = kernel.registry.loadedApps().find(a => a.name === artifact.name);
+      for (const model of previous?.models ?? []) if (model.license) {
+        const next = artifact.models?.find(m => m.name === model.name);
+        if (next?.layer !== 'ISV' || next.license?.vendor !== model.license.vendor) throw Object.assign(new Error(`Cannot remove or change license requirement for '${model.name}'`), { statusCode: 422 });
+      }
+      return;
+    }
     const currentApp = stored && 'app' in stored ? stored.app : kernel.registry.appForArtifact(artifact.name);
     if (currentApp && currentApp !== artifact.app) {
       throw Object.assign(new Error(`Artifact '${artifact.name}' cannot move from app '${currentApp}' to '${artifact.app}'`), { statusCode: 422 });
@@ -498,6 +505,20 @@ export function registerDesignerRoutes(
     return reply.send(JSON.stringify(pkg, null, 2));
   });
 
+  app.post<{ Params: { app: string }; Body: { mode: 'vendor' | 'promotion'; models: string[] } }>('/api/designer/packages/models/:app/export', (req, reply) => {
+    requireDesigner(req); assertScope(req, { kind: 'app', name: req.params.app });
+    const artifacts = exportArtifacts(req.params.app);
+    const manifest = artifacts.find((a) => a.kind === 'app')!;
+    if (manifest.kind !== 'app' || !Array.isArray(req.body?.models) || !req.body.models.length) return reply.status(422).send({ error: 'Select models to deploy' });
+    const models = req.body.models.map((name) => manifest.models?.find((m) => m.name === name));
+    if (models.some((m) => !m)) return reply.status(422).send({ error: 'Unknown model selection' });
+    const definitions = models as NonNullable<typeof manifest.models>;
+    const selected = new Set(req.body.models);
+    const pkg = createMetadataPackage(CORE_VERSION, { type: 'models', app: req.params.app, mode: req.body.mode, models: definitions }, [{ ...manifest, models: definitions }, ...artifacts.filter((a) => a.kind !== 'app' && selected.has(a.model ?? ''))]);
+    try { modelPackageOperations(pkg, []); } catch (error) { return reply.status(422).send({ error: (error as Error).message }); }
+    return pkg;
+  });
+
   app.post('/api/designer/packages/import/preview', async (req, reply) => {
     const actor = requireDesigner(req);
     const file = await req.file({ limits: { fileSize: MAX_METADATA_PACKAGE_BYTES }, throwFileSizeLimit: false });
@@ -521,11 +542,21 @@ export function registerDesignerRoutes(
 
     const stored = loadStored(kernel);
     const incomingNames = new Set<string>();
-    const operations: MetadataChangeSet['operations'] = [];
-    for (const raw of pkg.artifacts) {
+    let operations: MetadataChangeSet['operations'] = [];
+    if (pkg.scope.type === 'models') {
+      try { operations = modelPackageOperations(pkg, stored); } catch (error) { return reply.status(422).send({ error: (error as Error).message }); }
+      for (const operation of operations) if (operation.op === 'upsert') {
+        assertExplicitPlacement(operation.artifact); assertArtifactTransition(req, operation.artifact);
+        const diagnostics = validateMetadataArtifact(operation.artifact);
+        if (diagnostics.length) return reply.status(422).send({ error: `Invalid artifact '${operation.name}'`, diagnostics });
+        if (operation.artifact.kind !== 'app' && !stored.some((a) => a.name === operation.name) && kernel.appForArtifact(operation.name)) return reply.status(422).send({ error: `File-based artifact '${operation.name}' cannot be replaced by a deployment` });
+      }
+    }
+    for (const raw of pkg.scope.type === 'models' ? [] : pkg.artifacts) {
       const artifact = raw.kind === 'app'
         ? mergeAppManifest(stored.find((candidate) => candidate.kind === 'app' && candidate.name === raw.name), raw)
         : raw;
+      assertArtifactTransition(req, artifact);
       assertExplicitPlacement(artifact);
       if (incomingNames.has(artifact.name)) return reply.status(422).send({ error: `Duplicate artifact '${artifact.name}' in package` });
       incomingNames.add(artifact.name);
@@ -558,6 +589,7 @@ export function registerDesignerRoutes(
       previewId,
       expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
       package: { scope: pkg.scope, frameworkVersion: pkg.frameworkVersion, exportedAt: pkg.exportedAt, artifactCount: pkg.artifacts.length },
+      preservedModels: pkg.scope.type === 'models' ? (stored.find((a) => a.kind === 'app' && a.name === pkg.scope.app) as import('@emu/core').AppManifest | undefined)?.models?.filter((m) => pkg.scope.type === 'models' && !pkg.scope.models.some((selected) => selected.name === m.name)) ?? [] : [],
     };
   });
 
@@ -590,14 +622,14 @@ export function registerDesignerRoutes(
       if (metadataRevision(loadStored(kernel)) !== cached.preview.baseRevision) {
         return reply.status(409).send({ error: 'Workspace changed; validate the change set again' });
       }
-      lastErrors = kernel.applyWebArtifacts(cached.preview.candidateArtifacts as unknown as AnyMeta[]);
-      if (lastErrors.length > 0) return reply.status(422).send({ error: 'Change set no longer validates', errors: lastErrors });
+      kernel.applyWebArtifactsAtomic(cached.preview.candidateArtifacts as unknown as AnyMeta[], () => {
       saveCandidate(cached.preview.candidateArtifacts);
       kernel.designerDb.prepare(`
         INSERT INTO "FW_ChangeSetAudit" (createdAt, actor, source, baseRevision, nextRevision, description, changeSetJson, resultJson)
         VALUES (CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)
       `).run(actor, cached.changeSet.source ?? 'designer', cached.preview.baseRevision, cached.preview.nextRevision,
         cached.changeSet.description ?? null, JSON.stringify(cached.changeSet), JSON.stringify({ diff: cached.preview.diff, schemaEffects: cached.preview.schemaEffects }));
+      });
       previews.delete(req.body.previewId!);
       return { ok: true, revision: cached.preview.nextRevision, diff: cached.preview.diff };
     },
@@ -749,7 +781,7 @@ export function registerDesignerRoutes(
   );
 
   // Create or update a Model on an app manifest
-  app.put<{ Params: { app: string; model: string }; Body: { label?: string; layer: string } }>(
+  app.put<{ Params: { app: string; model: string }; Body: { label?: string; layer: string; license?: { vendor: string } } }>(
     '/api/designer/artifacts/model/:app/:model',
     (req, reply) => {
       requireDesigner(req);
@@ -776,12 +808,14 @@ export function registerDesignerRoutes(
       if (!Array.isArray(manifest.models)) manifest.models = [];
       const existing = manifest.models.find((m: any) => m.name === model);
       const oldLayer = existing?.layer;
+      if (existing?.license && (layer !== 'ISV' || (req.body.license && req.body.license.vendor !== existing.license.vendor))) return reply.status(422).send({ error: 'Cannot change an installed license requirement' });
 
       if (existing) {
         if (label !== undefined) existing.label = label;
         existing.layer = layer;
+        if (req.body.license) existing.license = req.body.license;
       } else {
-        manifest.models.push({ name: model, label: label ?? model, layer });
+        manifest.models.push({ name: model, label: label ?? model, layer, ...(req.body.license ? { license: req.body.license } : {}) });
       }
       const manifestDiagnostics = validateMetadataArtifact({ ...manifest, kind: 'app', name: appName });
       if (manifestDiagnostics.length) return reply.status(422).send({ error: 'Model does not match the metadata schema', diagnostics: manifestDiagnostics });
@@ -818,6 +852,7 @@ export function registerDesignerRoutes(
       requireDesigner(req);
       const { app, model } = req.params;
       if (app === 'system') return reply.status(400).send({ error: 'Cannot modify system models' });
+      if (kernel.registry.loadedApps().find(a => a.name === app)?.models?.find(m => m.name === model)?.license) return reply.status(422).send({ error: 'Cannot remove a licensed model through ordinary customization' });
       assertScope(req, { app });
 
       const ctx = kernel.designerContext();

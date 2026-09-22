@@ -50,6 +50,7 @@ export const router = createRouter({
     { path: '/designer/:kind/:name', component: DesignerEditPage, props: (r) => ({ kind: r.params.kind, name: r.params.name }), meta: { capability: 'designer' } },
     { path: '/system/maintenance', component: SystemMaintenancePage, meta: { capability: 'maintenance' } },
     { path: '/system/app-data', component: AppDataManagementPage, meta: { capability: 'maintenance' } },
+    { path: '/system/apps-models', component: () => import('./views/AppsModelsPage.vue'), meta: { capability: 'maintenance' } },
     { path: '/system/fonts', component: FontManagerPage, meta: { capability: 'maintenance' } },
     { path: '/system/integrations/smtp', component: SmtpSettingsPage, meta: { capability: 'maintenance' } },
     { path: '/system/tables', component: TableBrowserPage, meta: { capability: 'tableBrowser' } },

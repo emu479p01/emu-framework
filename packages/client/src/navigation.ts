@@ -3,7 +3,7 @@ import { RouterLink } from 'vue-router';
 import type { IconName, MenuItemMeta, MenuMeta } from '@emu/core';
 import type { MenuOption } from 'naive-ui';
 
-export type NavMenuOption = MenuOption & { formName?: string; routeTo?: string; menuName?: string; itemId?: string };
+export type NavMenuOption = MenuOption & { formName?: string; routeTo?: string; menuName?: string; itemId?: string; appName?: string; recent?: boolean };
 export interface NavigationApp {
   name: string;
   label: string;
@@ -57,7 +57,7 @@ export function itemToOption(item: MenuItemMeta, parentKey: string, appName: str
   onNavigate: (menuName?: string, itemId?: string) => void;
 }): NavMenuOption {
   const typedName = item.target && 'name' in item.target ? item.target.name : '';
-  const key = `${parentKey}:${item.route || item.form || item.action || typedName || item.label || 'sub'}`;
+  const key = `${parentKey}:${item.id ? `${menuName}:${item.id}:` : ''}${item.route || item.form || item.action || typedName || item.label || 'sub'}`;
   const icon = renderIcon(iconForItem(item), item.label);
   if (item.items?.length) {
     const label = item.label ?? '';
@@ -67,7 +67,7 @@ export function itemToOption(item: MenuItemMeta, parentKey: string, appName: str
   const targetName = typedName || item.form || item.action || '';
   const to = item.route || (targetType === 'function' ? `/action/${encodeURIComponent(targetName)}` : targetType === 'report' ? `/report/${encodeURIComponent(targetName)}` : `/app/${appName}/form/${targetName}`);
   return {
-    key, menuName, itemId: item.id, routeTo: item.route || (targetType === 'report' ? to : undefined), formName: targetType === 'form' ? targetName : undefined, icon,
+    key, menuName, appName, itemId: item.id, routeTo: to, formName: targetType === 'form' ? targetName : undefined, icon,
     label: () => h(RouterLink, { to, onClick: () => input.onNavigate(menuName, item.id), title: item.label ?? item.form ?? to }, { default: () => item.label ?? item.form ?? to }),
   };
 }
@@ -101,23 +101,29 @@ export function buildNavigationOptions(input: {
     }
   };
   collect(options);
-  const recentChildren = (input.recentKeys ?? [])
+  for (const root of options) {
+  const rootLeaves = new Set<string>();
+  const visit = (items: NavMenuOption[]) => { for (const item of items) { if (item.menuName && item.itemId) rootLeaves.add(`${item.menuName}\0${item.itemId}`); visit((item.children ?? []) as NavMenuOption[]); } };
+  visit((root.children ?? []) as NavMenuOption[]);
+  const recentChildren = (input.recentKeys ?? []).filter((key) => rootLeaves.has(key))
     .map((itemKey) => leaves.get(itemKey))
     .filter((item): item is NavMenuOption => Boolean(item))
-    .map((item, index) => ({ ...item, key: `recent:${index}:${String(item.key)}` }));
-  // The Recent root is always visible; an empty history shows an inert hint row.
+    .slice(0, 10).map((item) => ({ ...item, recent: true, key: `recent:${String(item.key)}` }));
+  // Each app (including Settings) owns its Recent submenu.
   const children: NavMenuOption[] = recentChildren.length
     ? recentChildren
-    : [{ key: 'recent:empty', label: () => h('span', { class: 'nav-recent-empty' }, input.recentEmptyLabel), disabled: true }];
-  const recent: NavMenuOption = { key: 'recent', label: input.recentLabel, icon: renderIcon('file', input.recentLabel), children };
-  options.unshift(recent);
+    : [{ key: `${root.key}:recent:empty`, label: () => h('span', { class: 'nav-recent-empty' }, input.recentEmptyLabel), disabled: true }];
+  const recent: NavMenuOption = { key: `${root.key}:recent`, recent: true, label: input.recentLabel, icon: renderIcon('file', input.recentLabel), children };
+  root.children = [recent, ...((root.children ?? []) as NavMenuOption[])];
+  }
   return options;
 }
 
-export function findActiveKey(options: NavMenuOption[], formName: string, path: string): string | undefined {
+export function findActiveKey(options: NavMenuOption[], formName: string, path: string, appName?: string): string | undefined {
   for (const option of options) {
-    if ((formName && option.formName === formName) || option.routeTo === path) return option.key as string;
-    const found = option.children && findActiveKey(option.children as NavMenuOption[], formName, path);
+    if (option.recent) continue;
+    if ((!appName || option.appName === appName) && (option.routeTo === path || (formName && option.formName === formName && (!option.routeTo || path.startsWith(`${option.routeTo}/`))))) return option.key as string;
+    const found = option.children && findActiveKey(option.children as NavMenuOption[], formName, path, appName);
     if (found) return found;
   }
 }

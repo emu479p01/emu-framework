@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Kernel, WebArtifactError } from '../kernel.js';
 import { EXTENSION_KINDS, canonicalExtensionName, type AnyMeta } from './types.js';
-import { validateMetadataChangeSet, type MetadataArtifact, type MetadataChangeSet, type SchemaDiagnostic } from './schema.js';
+import { validateMetadataArtifact, validateMetadataChangeSet, type MetadataArtifact, type MetadataChangeSet, type SchemaDiagnostic } from './schema.js';
 
 export interface ArtifactDiff { op: 'create' | 'update' | 'delete'; kind: string; name: string; highRisk?: boolean }
 export interface SchemaEffect { type: 'create-table' | 'add-field' | 'orphan-table' | 'metadata-only'; target: string }
@@ -66,6 +66,7 @@ export function previewMetadataChangeSet(
       continue;
     }
     const artifact = operation.artifact as MetadataArtifact;
+    diagnostics.push(...validateMetadataArtifact(artifact));
     if (artifact.kind !== operation.kind || artifact.name !== operation.name) {
       diagnostics.push({ path: `/operations/${operation.name}`, code: 'identity_mismatch', message: 'Operation kind/name must match the artifact' });
     }

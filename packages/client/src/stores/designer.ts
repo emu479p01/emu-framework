@@ -16,7 +16,7 @@ export interface DesignerApp {
   name: string;
   label?: string;
   icon?: import('@emu/core').IconName;
-  models?: { name: string; label?: string; layer: string }[];
+  models?: { name: string; label?: string; layer: string; license?: { vendor: string } }[];
   dependsOn?: string[];
 }
 export interface ChangeSetPreview {
@@ -80,7 +80,7 @@ export const useDesigner = defineStore('designer', {
       await api.delete(`/api/designer/artifacts/${kind}/${name}`);
       await Promise.all([this.load(), useMeta().load()]);
     },
-    async saveModel(app: string, model: string, data: { label?: string; layer: string }) {
+    async saveModel(app: string, model: string, data: { label?: string; layer: string; license?: { vendor: string } }) {
       await api.put(`/api/designer/artifacts/model/${app}/${model}`, data);
       await Promise.all([this.load(), useMeta().load()]);
     },

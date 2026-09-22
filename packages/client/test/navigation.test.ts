@@ -7,6 +7,20 @@ function allOptions(options: NavMenuOption[]): NavMenuOption[] {
 }
 
 describe('sidebar navigation', () => {
+  it('keeps Recent copies out of active selection and matches app and detail routes', () => {
+    const apps = ['one','two'].map(name => ({ name, label: name, menus: [{ kind: 'menu' as const, name: `${name}_Menu`, items: [{ id: 'item', form: 'SharedForm', label: 'Shared' }] }] }));
+    const options = buildNavigationOptions({ apps, frameworkMenus: [], settingsLabel:'Settings', recentLabel:'Recent', recentEmptyLabel:'Empty', recentKeys:['one_Menu\0item','two_Menu\0item'], onNavigate: vi.fn() });
+    for (const name of ['one','two']) {
+      for (const path of [`/app/${name}/form/SharedForm`, `/app/${name}/form/SharedForm/42`]) {
+        const key = findActiveKey(options, 'SharedForm', path, name)!;
+        expect(key.startsWith(`app-${name}:`)).toBe(true);
+        expect(key.startsWith('recent:')).toBe(false);
+      }
+      const root = options.find(o => o.key === `app-${name}`)!;
+      const recent = (root.children as NavMenuOption[])[0]!;
+      expect((recent.children as NavMenuOption[]).map(o => o.menuName)).toEqual([`${name}_Menu`]);
+    }
+  });
   const settings: MenuMeta = {
     kind: 'menu', name: 'FW_Settings', items: [
       { label: 'Users', icon: 'users', form: 'FW_UserForm' },
@@ -25,25 +39,25 @@ describe('sidebar navigation', () => {
       frameworkMenus: [settings],
       apps: [{ name: 'sales', label: 'Sales', menus: [appMenu] }], onNavigate: vi.fn(),
     });
-    expect(options.map((option) => option.key)).toEqual(['recent', 'app-sales', 'framework-settings']);
+    expect(options.map((option) => option.key)).toEqual(['app-sales', 'framework-settings']);
     expect(options.every((option) => option.type !== 'group' && typeof option.icon === 'function')).toBe(true);
     // every navigable row carries an icon; the inert Recent empty hint is exempt
     expect(allOptions(options).filter((option) => !option.disabled).every((option) => typeof option.icon === 'function')).toBe(true);
-    expect(findActiveKey(options, 'SALES_OrderForm', '/')).toContain('SALES_OrderForm');
+    expect(findActiveKey(options, 'SALES_OrderForm', '/app/sales/form/SALES_OrderForm')).toContain('SALES_OrderForm');
     expect(findActiveKey(options, '', '/system/maintenance')).toContain('/system/maintenance');
-    const active = findActiveKey(options, 'SALES_OrderForm', '/')!;
+    const active = findActiveKey(options, 'SALES_OrderForm', '/app/sales/form/SALES_OrderForm')!;
     expect(findNavigationKeyPath(options, active)).toEqual(['app-sales', 'app-sales:Sales', active]);
   });
 
-  it('always shows the Recent root and an inert empty hint without history', () => {
+  it('shows an app-local inert Recent hint without history', () => {
     const options = buildNavigationOptions({
       settingsLabel: 'Settings', recentLabel: 'Recent', recentEmptyLabel: 'No recently opened items',
-      frameworkMenus: [], apps: [], onNavigate: vi.fn(),
+      frameworkMenus: [], apps: [{ name: 'sales', label: 'Sales', menus: [appMenu] }], onNavigate: vi.fn(),
     });
-    expect(options.map((option) => option.key)).toEqual(['recent']);
-    const recent = options[0]!;
+    expect(options.map((option) => option.key)).toEqual(['app-sales']);
+    const recent = (options[0]!.children as NavMenuOption[])[0]!;
     expect((recent.children ?? [])).toHaveLength(1);
-    expect(String((recent.children as NavMenuOption[])[0]!.key)).toBe('recent:empty');
+    expect(String((recent.children as NavMenuOption[])[0]!.key)).toBe('app-sales:recent:empty');
     expect((recent.children as NavMenuOption[])[0]!.disabled).toBe(true);
   });
 
@@ -60,7 +74,7 @@ describe('sidebar navigation', () => {
       { label: 'Statement', target: { type: 'report', name: 'CustomerStatement' } },
     ] };
     const options = buildNavigationOptions({ isFrameworkUser: false, settingsLabel: 'Settings', recentLabel: 'Recent', recentEmptyLabel: 'Empty', frameworkMenus: [], apps: [{ name: 'sales', label: 'Sales', menus: [menu] }], onNavigate: vi.fn() });
-    expect(findActiveKey(options, 'SALES_OrderForm', '/')).toContain('SALES_OrderForm');
+    expect(findActiveKey(options, 'SALES_OrderForm', '/app/sales/form/SALES_OrderForm')).toContain('SALES_OrderForm');
     expect(findActiveKey(options, '', '/report/CustomerStatement')).toContain('CustomerStatement');
     expect(allOptions(options).some((option) => String(option.key).includes('Recalculate'))).toBe(true);
   });

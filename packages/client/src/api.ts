@@ -38,7 +38,10 @@ export async function requestForm<T>(url: string, form: FormData): Promise<T> {
   if (!res.ok) {
     let message = res.statusText;
     try {
-      message = ((await res.json()) as { error?: string }).error ?? message;
+      const payload = await res.json() as { error?: string; diagnostics?: { path: string; message: string }[]; registryErrors?: { name: string; error: string }[] };
+      message = payload.error ?? 'Package validation failed';
+      const details = [...(payload.diagnostics ?? []).map(d => `${d.path}: ${d.message}`), ...(payload.registryErrors ?? []).map(d => `${d.name}: ${d.error}`)];
+      if (details.length) message += `\n${details.join('\n')}`;
     } catch {
       /* non-JSON error body */
     }
@@ -62,6 +65,8 @@ export interface ImportResult {
 }
 
 export interface MetadataPackagePreview {
+  preservedModels?: { name: string }[];
+  schemaEffects?: { type: string; target: string }[];
   previewId: string;
   expiresAt: string;
   valid: boolean;
@@ -70,7 +75,7 @@ export interface MetadataPackagePreview {
   diagnostics: { path: string; code: string; message: string }[];
   warnings?: { path: string; code: string; message: string }[];
   package: {
-    scope: { type: 'app'; app: string } | { type: 'model'; app: string; model: string };
+    scope: { type: 'app'; app: string } | { type: 'model'; app: string; model: string } | { type: 'models'; app: string; mode: string; models: { name: string; layer: string }[] };
     frameworkVersion: string;
     exportedAt: string;
     artifactCount: number;

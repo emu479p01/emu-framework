@@ -1,4 +1,4 @@
-export const CORE_VERSION = '1.2.0';
+export const CORE_VERSION = '1.3.0';
 
 export {
   Kernel,
@@ -19,6 +19,7 @@ export {
 } from './security/policy.js';
 
 export * from './metadata/types.js';
+export * from './licensing.js';
 export * from './metadata/schema.js';
 export * from './metadata/changeSet.js';
 export * from './metadata/workspace.js';

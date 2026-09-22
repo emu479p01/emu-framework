@@ -1187,6 +1187,10 @@ export class MetadataRegistry {
   loadedApps(): AppManifest[] {
     return this.apps.map((a) => a.manifest);
   }
+  /** Unmerged metadata for inventory revisions; never expose executable contents to users. */
+  modelArtifacts(app: string, model: string): AnyMeta[] {
+    return this.artifactSources.filter(artifact => artifact.app === app && artifact.model === model).map(artifact => structuredClone(artifact));
+  }
 
   /** Effective default locale for an app manifest ('en' when not declared). */
   defaultLocaleOf(appName: string): string {

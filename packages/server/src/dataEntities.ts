@@ -80,10 +80,12 @@ function findByKey(ctx: DataContext, tableName: string, keys: string[], row: Obj
   const query = ctx.select(tableName); for (const key of keys) query.where(key, '=', row[key] as FieldValue); return query.firstOnly();
 }
 export function importEntityDocument(kernel: Kernel, ctx: DataContext, entity: DataEntityMeta, header: ObjectRow, allLines: Record<string, ObjectRow[]>): { inserted: number; updated: number; linesInserted: number; linesUpdated: number } {
+  kernel.assertArtifactWritable(entity.name);
   const rootMeta = table(kernel, entity.rootTable);
   for (const key of entity.businessKey) if (header[key] === null || header[key] === undefined || header[key] === '') throw new ValidationError(`Header business key '${key}' is required`);
   let inserted = 0; let updated = 0; let linesInserted = 0; let linesUpdated = 0;
   ctx.tts(() => {
+    ctx.guardWrite(() => kernel.assertArtifactWritable(entity.name));
     let root = findByKey(ctx, entity.rootTable, entity.businessKey, header);
     if (root) { root.setMany(writable(rootMeta, header, entity.fields, 'update')).update(); updated += 1; }
     else { root = ctx.newRecord(entity.rootTable).setMany(writable(rootMeta, header, entity.fields, 'create')); root.insert(); inserted += 1; }

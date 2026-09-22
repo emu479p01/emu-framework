@@ -12,6 +12,7 @@ export type SecurityMeta = Pick<PrivilegeMeta | DutyMeta | RoleMeta, 'name' | 'l
 export interface ModelEntry { name: string; label?: string; layer: string }
 export interface AppEntry { name: string; label: string; defaultLocale: string; availableLocales: string[]; icon?: import('@emu/core').IconName; dependsOn?: string[]; models?: ModelEntry[]; modules: string[]; menus: MenuMeta[] }
 export interface Metadata {
+  licenseNotices?: { app: string; model: string; status: string; expiresAt: string | null }[];
   branding: { title: string };
   capabilities: { designer: boolean; maintenance: boolean; tableBrowser: boolean; securityAdmin: boolean; myAccount: boolean };
   tables: TableMeta[]; enums: EnumMeta[]; forms: FormMeta[]; reports: ReportMeta[]; views: ViewMeta[]; charts: ChartMeta[]; dataEntities: import('@emu/core').DataEntityMeta[];
