@@ -2,11 +2,16 @@
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { NAlert, NButton, NCard } from 'naive-ui';
+import FunctionImages from '../components/FunctionImages.vue';
+import { useMeta } from '../stores/meta';
 import { api, ApiError } from '../api';
 
 const props = defineProps<{ name: string }>();
 const router = useRouter();
 const route = useRoute();
+const meta = useMeta();
+const imageInput = computed(() => meta.meta?.functionInputs?.find(entry => entry.name === props.name)?.imageInput);
+const images = ref<InstanceType<typeof FunctionImages> | null>(null);
 const busy = ref(false);
 const error = ref('');
 const result = ref<unknown>();
@@ -20,8 +25,9 @@ const args = computed<Record<string, string>>(() => {
   return output;
 });
 async function run() {
+  if (busy.value) return;
   busy.value = true; error.value = ''; result.value = undefined;
-  try { result.value = await api.post(`/api/action/${encodeURIComponent(props.name)}`, args.value); }
+  try { result.value = await api.post(`/api/action/${encodeURIComponent(props.name)}`, { ...args.value, ...(imageInput.value ? { attachmentIds: await images.value!.upload() } : {}) }); }
   catch (e) { error.value = e instanceof ApiError ? e.message : String(e); }
   finally { busy.value = false; }
 }
@@ -30,9 +36,10 @@ function back() { window.history.length > 1 ? router.back() : router.push('/'); 
 <template>
   <n-card :title="name" style="max-width:720px;margin:auto">
     <n-alert v-if="error" type="error" title="Function failed">{{ error }}</n-alert>
-    <n-alert v-else-if="result !== undefined" type="success" title="Function completed"><pre>{{ JSON.stringify(result, null, 2) }}</pre></n-alert>
+    <n-alert v-if="result !== undefined" type="success" title="Function completed"><pre>{{ JSON.stringify(result, null, 2) }}</pre></n-alert>
     <template v-else>
       <n-alert type="info" title="Confirm function">Review the arguments below, then confirm to run this server function.</n-alert>
+      <FunctionImages v-if="imageInput" ref="images" :name="name" :config="imageInput" :record-id="args[imageInput.recordIdArgument]" :disabled="busy" />
       <pre class="function-args">{{ JSON.stringify(args, null, 2) }}</pre>
     </template>
     <div class="function-actions"><n-button @click="back">Back</n-button><n-button v-if="result === undefined" type="primary" :loading="busy" @click="run">Run function</n-button></div>

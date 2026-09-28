@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDatetime } from '../../utils/formatValue';
 import { computed, onMounted, ref } from 'vue';
 import { NAlert, NButton, NCard, NCode, NEmpty, NSelect, NSpace, NSpin, NTag, useDialog, useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
@@ -60,7 +61,7 @@ onMounted(load);
       <n-card v-for="proposal in visibleProposals" :key="proposal.id" size="small" class="proposal-card">
         <n-space justify="space-between" align="center">
           <button class="proposal-heading" type="button" :aria-expanded="isExpanded(proposal.id)" @click="toggle(proposal.id)">
-            <span class="disclosure">{{ isExpanded(proposal.id) ? '▾' : '▸' }}</span><span><strong>{{ proposal.changeSet.description || proposal.id }}</strong><span class="muted">{{ proposal.tokenName }} · {{ proposal.createdAt }}</span></span>
+            <span class="disclosure">{{ isExpanded(proposal.id) ? '▾' : '▸' }}</span><span><strong>{{ proposal.changeSet.description || proposal.id }}</strong><span class="muted">{{ proposal.tokenName }} · {{ formatDatetime(proposal.createdAt) }}</span></span>
           </button>
           <n-space align="center"><n-tag :type="proposal.status === 'pending' ? 'warning' : proposal.status === 'approved' ? 'success' : 'default'">{{ proposal.status }}</n-tag><n-button size="small" @click="toggle(proposal.id)">{{ isExpanded(proposal.id) ? 'Collapse' : 'Expand' }}</n-button></n-space>
         </n-space>

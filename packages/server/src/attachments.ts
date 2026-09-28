@@ -6,10 +6,47 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { DataContext, Kernel } from '@emu/core';
-import { SecurityError } from '@emu/core';
+import { SecurityError, ValidationError } from '@emu/core';
 import { attachmentStoragePath } from './storagePaths.js';
 
 export { attachmentStoragePath } from './storagePaths.js';
+
+async function imageSignature(path: string): Promise<string> {
+  const handle = await open(path, 'r');
+  try {
+    const { buffer, bytesRead } = await handle.read({ buffer: Buffer.alloc(12), length: 12, position: 0 });
+    if (bytesRead >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return 'image/png';
+    if (bytesRead >= 3 && buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255) return 'image/jpeg';
+    if (bytesRead === 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+    return '';
+  } finally { await handle.close(); }
+}
+
+function assertImageFunction(kernel: Kernel, ctx: DataContext, name: string, table: string, id: number): void {
+  const fn = kernel.registry.allFunctions().find(entry => entry.name === name);
+  if (!fn?.imageInput || fn.imageInput.table !== table) throw new ValidationError('Function does not accept images for this table');
+  if (!ctx.policy.canFunction(name)) throw new SecurityError(`Access denied: function '${name}'`);
+  kernel.assertArtifactWritable(name);
+  assertParent(kernel, ctx, table, id, 'update');
+}
+
+export async function validateFunctionImages(kernel: Kernel, ctx: DataContext, name: string, args: Record<string, unknown>): Promise<void> {
+  const config = kernel.registry.allFunctions().find(entry => entry.name === name)?.imageInput;
+  if (!config) return;
+  const id = positiveId(String(args[config.recordIdArgument] ?? ''));
+  assertImageFunction(kernel, ctx, name, config.table, id);
+  const ids = args.attachmentIds;
+  if (!Array.isArray(ids) || !ids.length || (!config.multiple && ids.length !== 1) || new Set(ids).size !== ids.length) throw new ValidationError('Select the required images before running the Function');
+  for (const attachmentId of ids) {
+    if (typeof attachmentId !== 'string') throw new ValidationError('Invalid attachment ID');
+    const row = attachmentRow(kernel, attachmentId);
+    if (row.parentTable !== config.table || Number(row.parentId) !== id || row.createdBy !== ctx.session.user) throw new SecurityError('Image belongs to another record or user');
+    if (!['image/png','image/jpeg','image/webp'].includes(String(row.mimeType)) || await imageSignature(storageFile(attachmentStoragePath(), String(row.storageKey))) !== row.mimeType) throw new ValidationError('Attachment is not a supported image');
+  }
+  // Recheck after filesystem awaits, before invoking business logic.
+  assertImageFunction(kernel, ctx, name, config.table, id);
+  args[config.recordIdArgument] = id;
+}
 
 type AttachmentKind = 'file' | 'note' | 'url';
 interface ParentParams { table: string; id: string }
@@ -21,7 +58,7 @@ const BUILTIN_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'text/csv', 'text/plain', 'image/png', 'image/jpeg',
+  'text/csv', 'text/plain', 'image/png', 'image/jpeg', 'image/webp',
 ]);
 const MIME_BY_EXTENSION: Record<string, Set<string>> = {
   '.pdf': new Set(['application/pdf']),
@@ -33,6 +70,7 @@ const MIME_BY_EXTENSION: Record<string, Set<string>> = {
   '.png': new Set(['image/png']),
   '.jpg': new Set(['image/jpeg']),
   '.jpeg': new Set(['image/jpeg']),
+  '.webp': new Set(['image/webp']),
 };
 
 function configuredMaxBytes(): number {
@@ -122,14 +160,26 @@ export function registerAttachmentRoutes(app: FastifyInstance, kernel: Kernel, d
     return { items: rows.map(publicAttachment) };
   });
 
-  app.post<{ Params: ParentParams }>('/api/attachments/:table/:id/file', async (request, reply) => {
+  app.post<{ Params: ParentParams; Querystring: { function?: string; uploadId?: string } }>('/api/attachments/:table/:id/file', async (request, reply) => {
     const ctx = deps.userCtx(request); const id = positiveId(request.params.id);
     assertParent(kernel, ctx, request.params.table, id, 'update');
     const part = await request.file({ limits: { files: 1, fileSize: configuredMaxBytes() } });
     if (!part) return reply.status(400).send({ error: 'A file is required' });
+    const functionName = request.query.function;
+    if (functionName) {
+      assertImageFunction(kernel, ctx, functionName, request.params.table, id);
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(part.mimetype)) throw Object.assign(new Error('Only JPEG, PNG and WebP images are supported'), { statusCode: 415 });
+      if (!/^[0-9a-f-]{36}$/i.test(request.query.uploadId ?? '')) throw new ValidationError('An image upload ID is required');
+      const old = kernel.db.prepare('SELECT * FROM FW_Attachment WHERE attachmentId=?').get(request.query.uploadId) as Record<string, unknown> | undefined;
+      if (old) {
+        part.file.resume();
+        if (old.createdBy !== ctx.session.user || old.parentTable !== request.params.table || Number(old.parentId) !== id) throw new SecurityError('Upload ID belongs to another record or user');
+        return reply.status(201).send({ id: old.attachmentId, name: old.name, kind: old.kind });
+      }
+    }
     const originalName = basename(part.filename || 'attachment');
     validateFile(originalName, part.mimetype);
-    const blobId = randomUUID(); const attachmentId = randomUUID();
+    const blobId = randomUUID(); const attachmentId = functionName ? request.query.uploadId! : randomUUID();
     const storageKey = `${blobId.slice(0, 2)}/${randomUUID()}`;
     const finalPath = storageFile(root, storageKey); const tempPath = `${finalPath}.upload`;
     await mkdir(resolve(finalPath, '..'), { recursive: true });
@@ -144,6 +194,16 @@ export function registerAttachmentRoutes(app: FastifyInstance, kernel: Kernel, d
     try {
       await pipeline(part.file, meter, createWriteStream(tempPath, { flags: 'wx' }));
       if (part.file.truncated) throw Object.assign(new Error('Attachment exceeds the configured size limit'), { statusCode: 413 });
+      if (functionName && await imageSignature(tempPath) !== part.mimetype) throw Object.assign(new Error('Image content does not match its file type'), { statusCode: 415 });
+      if (functionName) {
+        assertImageFunction(kernel, ctx, functionName, request.params.table, id);
+        const existing = kernel.db.prepare('SELECT * FROM FW_Attachment WHERE attachmentId=?').get(attachmentId) as Record<string, unknown> | undefined;
+        if (existing) {
+          if (existing.createdBy !== ctx.session.user || existing.parentTable !== request.params.table || Number(existing.parentId) !== id) throw new SecurityError('Upload ID belongs to another record or user');
+          await unlink(tempPath);
+          return reply.status(201).send({ id: existing.attachmentId, name: existing.name, kind: existing.kind });
+        }
+      }
       await rename(tempPath, finalPath);
       const now = new Date().toISOString();
       kernel.db.exec('BEGIN');
@@ -189,13 +249,13 @@ export function registerAttachmentRoutes(app: FastifyInstance, kernel: Kernel, d
     return reply.send(createReadStream(path));
   });
 
-  const PREVIEWABLE: Record<string, string> = { 'image/png': 'image/png', 'image/jpeg': 'image/jpeg' };
+  const PREVIEWABLE: Record<string, string> = { 'image/png': 'image/png', 'image/jpeg': 'image/jpeg', 'image/webp': 'image/webp' };
   app.get<{ Params: AttachmentParams }>('/api/attachments/:attachmentId/preview', async (request, reply) => {
     const ctx = deps.userCtx(request); const row = attachmentRow(kernel, request.params.attachmentId);
     assertParent(kernel, ctx, String(row.parentTable), Number(row.parentId), 'read');
     if (row.kind !== 'file' || !row.storageKey) return reply.status(409).send({ error: 'This attachment is not a file' });
     const mimeType = String(row.mimeType ?? '').toLowerCase().split(';', 1)[0]!;
-    if (!PREVIEWABLE[mimeType]) return reply.status(415).send({ error: 'Only PNG and JPEG images can be previewed' });
+    if (!PREVIEWABLE[mimeType]) return reply.status(415).send({ error: 'Only PNG, JPEG and WebP images can be previewed' });
     const path = storageFile(root, String(row.storageKey));
     if (!existsSync(path)) return reply.status(410).send({ error: 'Attachment content is missing; contact an administrator' });
     // Verify the file signature before serving; a renamed file must not be
@@ -207,12 +267,12 @@ export function registerAttachmentRoutes(app: FastifyInstance, kernel: Kernel, d
       const isPng = bytesRead >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47
         && buffer[4] === 0x0d && buffer[5] === 0x0a && buffer[6] === 0x1a && buffer[7] === 0x0a;
       const isJpeg = bytesRead >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
-      signatureType = isPng ? 'image/png' : isJpeg ? 'image/jpeg' : '';
+      signatureType = isPng ? 'image/png' : isJpeg ? 'image/jpeg' : await imageSignature(path);
     } finally {
       await handle.close();
     }
     if (signatureType !== PREVIEWABLE[mimeType]) {
-      return reply.status(415).send({ error: 'Attachment content does not match a PNG or JPEG image' });
+      return reply.status(415).send({ error: 'Attachment content does not match a PNG, JPEG or WebP image' });
     }
     reply.header('Content-Type', signatureType);
     reply.header('Content-Length', String(row.bytes));

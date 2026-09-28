@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { formatValue } from '../utils/formatValue';
 import { computed, h, ref, watch } from 'vue';
 import { NAlert, NButton, NCheckbox, NDataTable, NInput, NInputNumber, NModal, NSpace, useMessage, type DataTableColumns } from 'naive-ui';
 import type { FormAction, ReportMeta } from '@emu/core';
 import { api, ApiError, type Row } from '../api';
 import { useMeta } from '../stores/meta';
+import FunctionImages from './FunctionImages.vue';
 import FieldControl from './FieldControl.vue';
 
 const props = defineProps<{ show: boolean; action: FormAction | null; recordId?: number; lineId?: number; record?: Record<string, unknown>; lineRecord?: Record<string, unknown> }>();
@@ -11,6 +13,9 @@ const emit = defineEmits<{ 'update:show': [value: boolean]; completed: [] }>();
 const meta = useMeta(); const message = useMessage();
 const busy = ref(false); const error = ref(''); const rows = ref<Row[]>([]); const search = ref('');
 const selectedIds = ref<number[]>([]); const quantities = ref<Record<number, number>>({}); const reportValues = ref<Record<string, unknown>>({});
+const images = ref<InstanceType<typeof FunctionImages> | null>(null);
+const imageInput = computed(() => type.value === 'function' ? meta.meta?.functionInputs?.find(entry => entry.name === target.value)?.imageInput : undefined);
+const imageRecordId = computed(() => imageInput.value?.recordIdArgument === 'lineId' ? props.lineId : props.recordId);
 const type = computed(() => props.action?.type ?? 'function');
 const target = computed(() => props.action?.target ?? props.action?.action ?? '');
 const report = computed<ReportMeta | undefined>(() => type.value === 'report' ? meta.meta?.reports.find((entry) => entry.name === target.value) : undefined);
@@ -27,7 +32,7 @@ function pickerValue(row: Row, name: string) {
   const field = table.value?.fields.find((entry) => entry.name === name);
   const value = row[name];
   if (field?.type === 'enum' && field.enumName) return meta.enumLabel(field.enumName, value);
-  return String(value ?? '—');
+  return field ? formatValue(field, value) : String(value ?? '—');
 }
 function resolveFilterValue(value: NonNullable<NonNullable<FormAction['picker']>['filters']>[number]['value']): unknown {
   if (typeof value !== 'object' || value === null || !('source' in value)) return value;
@@ -50,10 +55,10 @@ watch(() => props.show, (show) => { if (!show) return; error.value = ''; selecte
 const pickerColumns = computed<DataTableColumns<Row>>(() => {
   if (!picker.value) return [];
   const columns: DataTableColumns<Row> = [{ type: 'selection', multiple: picker.value.multiple !== false }];
-  for (const name of picker.value.columns) columns.push({ title: table.value?.fields.find((field) => field.name === name)?.label ?? name, key: name, ellipsis: { tooltip: true } });
+  for (const name of picker.value.columns) columns.push({ title: table.value?.fields.find((field) => field.name === name)?.label ?? name, key: name, render: (row: Row) => pickerValue(row, name), ellipsis: { tooltip: true } });
   if (picker.value.allocation && !picker.value.columns.includes(picker.value.allocation.availableField)) {
     const availableName = picker.value.allocation.availableField;
-    columns.push({ title: table.value?.fields.find((field) => field.name === availableName)?.label ?? availableName, key: availableName });
+    columns.push({ title: table.value?.fields.find((field) => field.name === availableName)?.label ?? availableName, key: availableName, render: (row: Row) => pickerValue(row, availableName) });
   }
   if (picker.value.allocation) columns.push({
     title: picker.value.allocation.quantityLabel ?? 'Selected quantity', key: '_quantity', width: 190,
@@ -73,7 +78,7 @@ function toggleMobileRow(row: Row, checked: boolean) {
 }
 function parameterKey(parameter: NonNullable<ReportMeta['parameters']>[number]) { return `${parameter.field}:${parameter.operator ?? 'eq'}`; }
 async function confirm() {
-  if (!props.action || !target.value) return;
+  if (!props.action || !target.value || busy.value) return;
   if (type.value === 'report') {
     const query = new URLSearchParams();
     for (const parameter of report.value?.parameters ?? []) {
@@ -101,6 +106,7 @@ async function confirm() {
       lineId: props.lineId,
       lineRecord: props.lineRecord,
       ...(type.value === 'picker' ? { selections } : {}),
+      ...(imageInput.value ? { [imageInput.value.recordIdArgument]: imageRecordId.value, attachmentIds: await images.value!.upload() } : {}),
     });
     message.success(`${props.action.label} completed`); emit('completed'); emit('update:show', false);
   } catch (e) { error.value = e instanceof ApiError ? e.message : String(e); }
@@ -129,6 +135,7 @@ async function confirm() {
       <div v-for="parameter in report.parameters ?? []" :key="parameterKey(parameter)" class="parameter-field"><label>{{ parameter.label ?? parameter.field }}<span v-if="parameter.required"> *</span></label><FieldControl :field="meta.field(report.dataSource, parameter.field)!" :model-value="reportValues[parameterKey(parameter)]" create-mode @update:model-value="(value) => reportValues[parameterKey(parameter)] = value" /></div>
       <n-alert v-if="!(report.parameters?.length)" type="info">This report has no parameters and is ready to open.</n-alert>
     </template>
+    <FunctionImages v-else-if="imageInput" :key="target" ref="images" :name="target" :config="imageInput" :record-id="imageRecordId" :disabled="busy" />
     <n-alert v-else-if="type === 'function'" type="info">Run server function <b>{{ target }}</b> for the current record?</n-alert>
     <template #footer><n-space class="action-modal-footer" justify="end"><n-button @click="emit('update:show', false)">Cancel</n-button><n-button type="primary" :loading="busy" @click="confirm">{{ type === 'report' ? 'Open PDF' : type === 'picker' ? 'Confirm selection' : 'Run function' }}</n-button></n-space></template>
   </n-modal>

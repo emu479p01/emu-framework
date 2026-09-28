@@ -14,12 +14,22 @@ export interface TableHooks {
 }
 
 export class ValidationError extends Error {}
+export function assertSynchronous(result: unknown, label: string): void {
+  if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+    void Promise.resolve(result).catch(() => undefined);
+    throw new ValidationError(label + ': async lifecycle handlers are not supported');
+  }
+}
+export function rejectAsync(fn: Function, label: string): void {
+  if (fn.constructor.name === 'AsyncFunction') throw new ValidationError(label + ': async lifecycle handlers are not supported');
+}
 
 export class HookRegistry {
   constructor(private captureGuard?: () => (() => void) | undefined) {}
   private hooks = new Map<string, TableHooks[]>();
 
   register(table: string, hooks: TableHooks): void {
+    for (const [name, fn] of Object.entries(hooks)) if (fn) rejectAsync(fn, table + '.' + name);
     const guard = this.captureGuard?.();
     if (guard) hooks = Object.fromEntries(Object.entries(hooks).map(([key, fn]) => [key, (record: Record, ctx: DataContext) => { ctx.guardWrite(guard); return fn(record, ctx); }])) as TableHooks;
     const list = this.hooks.get(table) ?? [];

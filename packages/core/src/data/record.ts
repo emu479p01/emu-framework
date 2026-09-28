@@ -1,5 +1,5 @@
 import type { TableMeta } from '../metadata/types.js';
-import { SYSTEM_FIELDS } from '../metadata/types.js';
+import { SYSTEM_FIELDS, storageField } from '../metadata/types.js';
 import { ValidationError } from './hooks.js';
 import type { DataContext } from './context.js';
 
@@ -57,12 +57,12 @@ export class Record {
 
   get(field: string): FieldValue {
     this.assertField(field);
-    return this.values.get(field) ?? null;
+    return this.values.get(storageField(field)) ?? null;
   }
 
   set(field: string, value: FieldValue): this {
     this.assertField(field);
-    this.values.set(field, value);
+    this.values.set(storageField(field), value);
     return this;
   }
 
@@ -73,7 +73,7 @@ export class Record {
 
   toObject(): { [field: string]: FieldValue } {
     const out: { [field: string]: FieldValue } = {};
-    for (const name of SYSTEM_FIELDS) out[name] = this.values.get(name) ?? null;
+    for (const name of SYSTEM_FIELDS) out[name] = this.get(name);
     for (const f of this.table.fields) out[f.name] = this.values.get(f.name) ?? null;
     return out;
   }

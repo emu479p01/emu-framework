@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatValue } from '../utils/formatValue';
 import { computed, h, ref, watch } from 'vue';
 import { NButton, NCard, NInput, NModal, NSelect, NSpace, useDialog, useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
@@ -8,12 +9,14 @@ import FieldControl from '../components/FieldControl.vue';
 import BusinessDataTable from '../components/BusinessDataTable.vue';
 const meta = useMeta(); const router = useRouter(); const message = useMessage(); const dialog = useDialog();
 const tableName = ref(''); const rows = ref<Row[]>([]); const search = ref(''); const editing = ref<Record<string, unknown> | null>(null);
+const draftToken = ref(''); const busy = ref(false);
+async function create() { if (!table.value || busy.value) return; busy.value = true; try { const draft = await api.post<{ token: string; record: Row }>(`/api/data/${table.value.name}/drafts`, {}); draftToken.value = draft.token; editing.value = draft.record; } catch (error) { message.error(error instanceof Error ? error.message : String(error)); } finally { busy.value = false; } }
 const table = computed(() => meta.table(tableName.value));
 const tableOptions = computed(() => (meta.meta?.tables ?? []).filter((t) => !t.name.startsWith('FW_')).map((t) => ({ label: t.label ?? t.name, value: t.name })));
-const columns = computed(() => table.value ? [{ title: 'ID', key: 'id', width: 70 }, ...table.value.fields.map((f) => ({ title: f.label ?? f.name, key: f.name, ellipsis: { tooltip: true } })), { title: '', key: '_actions', render: (row: Row) => h(NButton, { size: 'small', onClick: () => editing.value = { ...row } }, () => 'Edit') }] : []);
+const columns = computed(() => table.value ? [{ title: 'ID', key: 'id', width: 70 }, ...table.value.fields.filter(f => !['id','createdAt','createdBy','modifiedAt','modifiedBy'].includes(f.name)).map((f) => ({ title: f.label ?? f.name, key: f.name, render: (row: Row) => formatValue(f, row[f.name]), ellipsis: { tooltip: true } })), { title: '', key: '_actions', render: (row: Row) => h(NButton, { size: 'small', onClick: () => editing.value = { ...row } }, () => 'Edit') }] : []);
 async function load() { if (!tableName.value) return; const result = await api.list(tableName.value, { limit: 500, search: search.value }); rows.value = result.data; }
 watch(tableName, load);
-async function save() { if (!table.value || !editing.value) return; try { const id = editing.value.id; if (id) await api.patch(`/api/data/${table.value.name}/${id}`, editing.value); else await api.post(`/api/data/${table.value.name}`, editing.value); editing.value = null; await load(); message.success('Saved'); } catch (e) { message.error(e instanceof ApiError ? e.message : String(e)); } }
+async function save() { if (!table.value || !editing.value || busy.value) return; busy.value = true; try { const id = editing.value.id; const payload = Object.fromEntries(table.value.fields.filter(f => !f.readOnly && (id ? f.allowEdit !== false : f.allowEditOnCreate !== false) && !(f.encrypted && editing.value![f.name] === '••••••••')).filter(f => Object.hasOwn(editing.value!, f.name)).map(f => [f.name, editing.value![f.name]])); if (id) await api.patch(`/api/data/${table.value.name}/${id}`, payload); else await api.post(`/api/data/${table.value.name}/drafts/${draftToken.value}/save`, payload); editing.value = null; await load(); message.success('Saved'); } catch (e) { message.error(e instanceof ApiError ? e.message : String(e)); } finally { busy.value = false; } }
 function remove() { if (!editing.value?.id || !table.value) return; dialog.warning({ title: 'Delete record', content: 'Delete this record?', positiveText: 'Delete', negativeText: 'Cancel', onPositiveClick: async () => { await api.delete(`/api/data/${table.value!.name}/${editing.value!.id}`); editing.value = null; await load(); } }); }
 function back() { window.history.length > 1 ? router.back() : router.push('/'); }
 </script>
@@ -21,15 +24,15 @@ function back() { window.history.length > 1 ? router.back() : router.push('/'); 
   <div class="table-browser">
     <div class="table-browser-heading"><h2>Table Browser</h2><n-button @click="back">Back</n-button></div>
     <n-card>
-      <div class="table-browser-tools"><n-select v-model:value="tableName" :options="tableOptions" filterable placeholder="Business table"/><n-input v-model:value="search" placeholder="Search" @keyup.enter="load"/><n-button @click="load">Search</n-button><n-button :disabled="!table" @click="editing = {}">New</n-button></div>
+      <div class="table-browser-tools"><n-select v-model:value="tableName" :options="tableOptions" filterable placeholder="Business table"/><n-input v-model:value="search" placeholder="Search" @keyup.enter="load"/><n-button @click="load">Search</n-button><n-button :disabled="!table" :loading="busy" @click="create">New</n-button></div>
       <BusinessDataTable class="table-browser-desktop" :columns="columns" :data="rows" :row-key="(r: Row) => r.id" :storage-key="`table-browser:${tableName}`" />
       <div class="table-browser-mobile">
-        <button v-for="row in rows" :key="row.id" class="table-browser-record" @click="editing = { ...row }"><span><small>ID</small>{{ row.id }}</span><span v-for="field in table?.fields" :key="field.name"><small>{{ field.label ?? field.name }}</small>{{ row[field.name] ?? '—' }}</span><strong>Edit</strong></button>
+        <button v-for="row in rows" :key="row.id" class="table-browser-record" @click="editing = { ...row }"><span><small>ID</small>{{ row.id }}</span><span v-for="field in table?.fields" :key="field.name"><small>{{ field.label ?? field.name }}</small>{{ formatValue(field, row[field.name]) || '—' }}</span><strong>Edit</strong></button>
         <div v-if="!rows.length" class="table-browser-empty">No data</div>
       </div>
     </n-card>
     <n-modal :show="editing !== null" preset="card" :title="editing?.id ? `Edit #${editing.id}` : 'New record'" class="table-editor-modal" style="width:min(700px,95vw)" @update:show="(v) => { if (!v) editing = null }">
-      <template v-if="editing && table"><div v-for="field in table.fields" :key="field.name" class="table-editor-field"><label>{{ field.label ?? field.name }}</label><FieldControl :field="field" :model-value="editing[field.name]" :create-mode="!editing.id" @update:model-value="(v) => editing![field.name] = v" /></div><n-space class="table-editor-actions" justify="end"><n-button v-if="editing.id" type="error" quaternary @click="remove">Delete</n-button><n-button @click="editing = null">Cancel</n-button><n-button type="primary" @click="save">Save</n-button></n-space></template>
+      <template v-if="editing && table"><div v-for="field in table.fields" :key="field.name" class="table-editor-field"><label>{{ field.label ?? field.name }}</label><FieldControl :field="field" :model-value="editing[field.name]" :create-mode="!editing.id" @update:model-value="(v) => editing![field.name] = v" /></div><n-space class="table-editor-actions" justify="end"><n-button v-if="editing.id" type="error" quaternary @click="remove">Delete</n-button><n-button @click="editing = null">Cancel</n-button><n-button type="primary" :loading="busy" @click="save">Save</n-button></n-space></template>
     </n-modal>
   </div>
 </template>

@@ -18,7 +18,7 @@ const failedThumbnails = ref(new Set<string>());
 let viewerTrigger: HTMLElement | null = null;
 
 function isPreviewable(item: Attachment): boolean {
-  return item.kind === 'file' && (item.mimeType === 'image/png' || item.mimeType === 'image/jpeg') && !failedThumbnails.value.has(item.id);
+  return item.kind === 'file' && (item.mimeType === 'image/png' || item.mimeType === 'image/jpeg' || item.mimeType === 'image/webp') && !failedThumbnails.value.has(item.id);
 }
 function onThumbnailError(item: Attachment) {
   failedThumbnails.value.add(item.id);

@@ -1,3 +1,4 @@
+import { systemFieldMeta } from '@emu/core';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { readFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
@@ -105,7 +106,7 @@ export function formatReportFieldValue(kernel: Kernel, ctx: DataContext, table: 
   if (value === null || value === undefined) return '';
   const formatted = formatToken(value, format);
   if (formatted !== undefined) return formatted;
-  const field = table.fields.find((f) => f.name === fieldName);
+  const field = table.fields.find((f) => f.name === fieldName) ?? systemFieldMeta(fieldName);
   if (!field) return String(value);
   if (field.type === 'boolean') return value ? 'Yes' : 'No';
   if (field.type === 'enum' && field.enumName) {

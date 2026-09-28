@@ -76,6 +76,7 @@ export function localizeMetadata<T extends Record<string, any>>(registry: Metada
   }
   const artifactKinds = [
     { list: 'reports', kind: 'report' as const },
+    { list: 'functionInputs', kind: 'function' as const },
     { list: 'views', kind: 'view' as const },
     { list: 'charts', kind: 'chart' as const },
     { list: 'privileges', kind: 'privilege' as const },

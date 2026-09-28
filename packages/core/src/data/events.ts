@@ -1,3 +1,4 @@
+import { assertSynchronous, rejectAsync } from './hooks.js';
 import type { Record } from './record.js';
 import type { DataContext } from './context.js';
 
@@ -48,8 +49,9 @@ export class EventBus {
   private handlers = new Map<string, DataEventHandler[]>();
 
   on(table: string, event: DataEventType, handler: DataEventHandler): void {
+    rejectAsync(handler, table + '.' + event);
     const guard = this.captureGuard?.();
-    if (guard) { const original = handler; handler = (args) => { args.ctx.guardWrite(guard); original(args); }; }
+    if (guard) { const original = handler; handler = (args) => { args.ctx.guardWrite(guard); return original(args); }; }
     const key = `${table}.${event}`;
     const list = this.handlers.get(key) ?? [];
     list.push(handler);
@@ -81,7 +83,7 @@ export class EventBus {
       },
     };
     for (const handler of list) {
-      handler(args);
+      assertSynchronous(handler(args), table + '.' + event);
     }
   }
 }

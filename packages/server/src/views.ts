@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { stringify } from 'csv-stringify/sync';
-import { SecurityError, ValidationError, type DataContext, type FieldMeta, type Kernel, type ViewMeta } from '@emu/core';
+import { SecurityError, ValidationError, fieldsWithSystem, storageField, type DataContext, type FieldMeta, type Kernel, type ViewMeta } from '@emu/core';
 
 interface ViewRouteDeps {
   userCtx(req: FastifyRequest): DataContext;
@@ -22,7 +22,7 @@ function fieldMap(kernel: Kernel, view: ViewMeta): Map<string, FieldMeta | { nam
   const sources = [view.source, ...(view.joins ?? []).map((join) => ({ table: join.table, alias: join.alias }))];
   for (const source of sources) {
     output.set(`${source.alias}.id`, { name: 'id', type: 'int' });
-    for (const field of kernel.registry.getTable(source.table).fields) output.set(`${source.alias}.${field.name}`, field);
+    for (const field of fieldsWithSystem(kernel.registry.getTable(source.table))) output.set(`${source.alias}.${field.name}`, field);
   }
   return output;
 }
@@ -78,7 +78,7 @@ function compile(
   const ref = (name: string) => {
     if (!fields.has(name)) throw new ValidationError(`Unknown View field '${name}'`);
     const [alias, field] = name.split('.');
-    return `${quote(alias!)}.${quote(field!)}`;
+    return `${quote(alias!)}.${quote(storageField(field!))}`;
   };
   const schema = view.columns.map((column) => {
     const expression = column.expression;

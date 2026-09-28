@@ -41,7 +41,7 @@ describe('v1 client features', () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/action/:name', component: ActionPage, props: true }] });
     await router.push('/action/Send?arg.orderId=41&arg.orderId=42&ignored=value');
     await router.isReady();
-    const wrapper = mount(ActionPage, { props: { name: 'Send' }, global: { plugins: [router] } });
+    const wrapper = mount(ActionPage, { props: { name: 'Send' }, global: { plugins: [router, createPinia()] } });
     expect(post).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain('"orderId": "42"');
     await wrapper.get('button:last-child').trigger('click');

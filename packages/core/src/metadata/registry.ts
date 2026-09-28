@@ -28,7 +28,7 @@ import type {
   DataEntityMeta,
   TranslationMeta,
 } from './types.js';
-import { SYSTEM_FIELDS, LAYER_ORDER, DEFAULT_LAYER, DEFAULT_LOCALE, EXTENSION_KINDS, isIconName, canExtendLayer, canonicalExtensionName, normalizeLocale, type LayerType } from './types.js';
+import { systemFieldMeta, SYSTEM_FIELDS, LAYER_ORDER, DEFAULT_LAYER, DEFAULT_LOCALE, EXTENSION_KINDS, isIconName, canExtendLayer, canonicalExtensionName, normalizeLocale, type LayerType } from './types.js';
 import { validateMetadataArtifact } from './schema.js';
 import { validateReportLayout } from './reportLayout.js';
 
@@ -559,7 +559,7 @@ export class MetadataRegistry {
     for (const table of this.tables.values()) {
       const seen = new Set<string>();
       for (const f of table.fields) {
-        if ((SYSTEM_FIELDS as readonly string[]).includes(f.name)) {
+        if ((SYSTEM_FIELDS as readonly string[]).some(name => name.toLowerCase() === f.name.toLowerCase())) {
           throw new MetadataError(`${table.name}.${f.name}: '${f.name}' is a reserved system field`);
         }
         if (seen.has(f.name)) {
@@ -653,6 +653,10 @@ export class MetadataRegistry {
           }
         }
       }
+    }
+    for (const fn of this.functions.values()) {
+      if (fn.imageInput && (!this.tables.has(fn.imageInput.table) || fn.imageInput.table.startsWith('FW_'))) throw new MetadataError(fn.name + ': image input requires a business table');
+      if (fn.imageInput && ['attachmentIds', '__proto__', 'constructor', 'prototype'].includes(fn.imageInput.recordIdArgument)) throw new MetadataError(fn.name + ': invalid image record ID argument');
     }
     for (const form of this.forms.values()) {
       const table = this.tables.get(form.table);
@@ -919,7 +923,7 @@ export class MetadataRegistry {
       const table = aliases.get(alias);
       if (!table) throw new MetadataError(`View '${view.name}': unknown alias '${alias}'`);
       if (field === 'id') return { type: 'int' as const, field };
-      const meta = table.fields.find((candidate) => candidate.name === field);
+      const meta = table.fields.find((candidate) => candidate.name === field) ?? systemFieldMeta(field);
       if (!meta) throw new MetadataError(`View '${view.name}': unknown field '${ref}'`);
       if (meta.encrypted) throw new MetadataError(`View '${view.name}': encrypted field '${ref}' cannot be used in a View`);
       return meta;

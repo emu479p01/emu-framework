@@ -48,7 +48,7 @@ describe('LineGrid responsive table', () => {
   it('renders one responsive table and keeps edit/create/delete actions available', async () => {
     vi.spyOn(api, 'list').mockResolvedValue({ data: rows, total: 1 });
     const patch = vi.spyOn(api, 'patch').mockResolvedValue({});
-    const post = vi.spyOn(api, 'post').mockResolvedValue({});
+    const post = vi.spyOn(api, 'post').mockImplementation(async (url) => url.endsWith('/drafts') ? { token: 'draft-1', record: { headerId: 1 } } as never : {} as never);
     const remove = vi.spyOn(api, 'delete').mockResolvedValue({});
     const Host = defineComponent({
       components: { LineGrid, NConfigProvider, NDialogProvider, NMessageProvider },
@@ -80,9 +80,10 @@ describe('LineGrid responsive table', () => {
     expect(patch).toHaveBeenCalledWith('/api/data/TEST_Line/7', expect.objectContaining({ item: 'โฟมล้างหน้า' }));
 
     await wrapper.get('[data-testid="add-line"]').trigger('click');
+    await flushPromises();
     await button(wrapper, 'Save').trigger('click');
     await confirm('Add');
-    expect(post).toHaveBeenCalledWith('/api/data/TEST_Line', expect.objectContaining({ headerId: 1 }));
+    expect(post).toHaveBeenCalledWith('/api/data/TEST_Line/drafts/draft-1/save', expect.objectContaining({ headerId: 1 }));
 
     await button(wrapper, 'Del').trigger('click');
     await confirm('Delete');

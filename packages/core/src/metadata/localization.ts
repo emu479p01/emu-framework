@@ -20,7 +20,7 @@ export function formLineActionLabelKey(form: string, lineId: string, actionId: s
 export function reportLabelKey(report: string): string { return `report.${report}.label`; }
 export function reportParameterLabelKey(report: string, field: string): string { return `report.${report}.parameter.${field}.label`; }
 export function reportElementTextKey(report: string, elementId: string): string { return `report.${report}.element.${elementId}.text`; }
-export type ArtifactLabelKind = 'view' | 'chart' | 'privilege' | 'duty' | 'role' | 'dataEntity' | 'report';
+export type ArtifactLabelKind = 'function' | 'view' | 'chart' | 'privilege' | 'duty' | 'role' | 'dataEntity' | 'report';
 export function artifactLabelKey(kind: ArtifactLabelKind, name: string): string { return `${kind}.${name}.label`; }
 
 /** Framework-owned keys are reserved: only system-app translations may define them. */

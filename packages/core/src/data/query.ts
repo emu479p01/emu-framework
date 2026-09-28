@@ -1,5 +1,5 @@
 import type { TableMeta } from '../metadata/types.js';
-import { SYSTEM_FIELDS } from '../metadata/types.js';
+import { SYSTEM_FIELDS, storageField } from '../metadata/types.js';
 import { ValidationError } from './hooks.js';
 import type { FieldValue, Record } from './record.js';
 import type { DataContext } from './context.js';
@@ -48,7 +48,7 @@ export class Query implements Iterable<Record> {
 
   where(field: string, op: Op, value: FieldValue | FieldValue[]): this {
     this.assertQueryable(field);
-    this.conditions.push({ field, op, value });
+    this.conditions.push({ field: storageField(field), op, value });
     return this;
   }
 
@@ -61,13 +61,13 @@ export class Query implements Iterable<Record> {
   /** Case-insensitive free-text search across metadata-defined fields. */
   search(fields: string[], value: string): this {
     for (const field of fields) this.assertQueryable(field);
-    if (fields.length > 0 && value.trim()) this.anyLike = { fields, value: `%${value.trim()}%` };
+    if (fields.length > 0 && value.trim()) this.anyLike = { fields: fields.map(storageField), value: `%${value.trim()}%` };
     return this;
   }
 
   orderBy(field: string, dir: 'asc' | 'desc' = 'asc'): this {
     this.assertQueryable(field);
-    this.orderings.push({ field, dir: dir.toUpperCase() as 'ASC' | 'DESC' });
+    this.orderings.push({ field: storageField(field), dir: dir.toUpperCase() as 'ASC' | 'DESC' });
     return this;
   }
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatValue } from '../utils/formatValue';
 import { computed, h, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
@@ -42,7 +43,7 @@ const dataEntities = computed(() => (meta.meta?.dataEntities ?? []).filter((enti
 const activeEntity = computed(() => dataEntities.value[0]);
 const listFields = computed(() => {
   if (!form.value || !table.value) return [];
-  const names = form.value.listFields ?? table.value.fields.map((field) => field.name);
+  const names = form.value.listFields ?? table.value.fields.filter(field => !['id','createdAt','createdBy','modifiedAt','modifiedBy'].includes(field.name)).map((field) => field.name);
   return names.map((fieldName) => table.value!.fields.find((field) => field.name === fieldName)).filter((field): field is NonNullable<typeof field> => Boolean(field));
 });
 watch(listFields, (fields) => { visibleFields.value = fields.map((field) => field.name); }, { immediate: true });
@@ -62,7 +63,7 @@ function display(field: (typeof listFields.value)[number], row: Row): string {
   if (field.type === 'enum' && field.enumName) return meta.enumLabel(field.enumName, value);
   if (field.type === 'reference' && field.reference) return lookups.value[field.reference.table]?.[value as number] ?? String(value ?? '');
   if (field.type === 'boolean') return value ? 'Yes' : 'No';
-  return String(value ?? '');
+  return formatValue(field, value);
 }
 const columns = computed<DataTableColumns<Row>>(() => [
   ...shownFields.value.map((field) => ({
