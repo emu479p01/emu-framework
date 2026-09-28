@@ -2,7 +2,7 @@ import type { Database } from 'better-sqlite3';
 import type { MetadataRegistry } from '../metadata/registry.js';
 import type { TableMeta } from '../metadata/types.js';
 import { EventBus } from './events.js';
-import { HookRegistry, ValidationError } from './hooks.js';
+import { HookRegistry, ValidationError, assertSynchronous } from './hooks.js';
 import { Record, type FieldValue } from './record.js';
 import { Query } from './query.js';
 import { allowAll, SecurityError, type SecurityPolicy } from '../security/policy.js';
@@ -40,14 +40,15 @@ export class DataContext {
     this.hooks = hooks ?? new HookRegistry();
   }
 
-  newRecord(tableName: string): Record {
+  newRecord(tableName: string, initial: { [field: string]: FieldValue } = {}): Record {
     const table = this.registry.getTable(tableName);
     const rec = new Record(this, table);
     for (const field of table.fields) {
       if (field.default !== undefined) rec.set(field.name, field.default as FieldValue);
     }
+    rec.setMany(initial);
     for (const hooks of this.hooks.for(tableName)) {
-      hooks.initValue?.(rec, this);
+      assertSynchronous(hooks.initValue?.(rec, this), tableName + '.initValue');
     }
     return rec;
   }
@@ -74,6 +75,7 @@ export class DataContext {
     this.ttsLevel++;
     try {
       const result = fn();
+      assertSynchronous(result, 'Transaction');
       if (this.ttsLevel === 1) for (const guard of this.writeGuards) guard();
       if (ownsTransaction) {
         this.db.exec('COMMIT');
@@ -121,7 +123,9 @@ export class DataContext {
     }
     this.events.emit(table.name, 'onValidating', rec, this);
     for (const hooks of this.hooks.for(table.name)) {
-      if (hooks.validateWrite?.(rec, this) === false) {
+      const result = hooks.validateWrite?.(rec, this);
+      assertSynchronous(result, table.name + '.validateWrite');
+      if (result === false) {
         throw new ValidationError(`${table.name}: validateWrite failed`);
       }
     }
@@ -155,6 +159,8 @@ export class DataContext {
     this.validateWrite(table, rec);
     this.events.emit(table.name, 'onUpdating', rec, this);
 
+    const originalAudit = this.db.prepare(`SELECT createdAt,createdBy FROM "${table.name}" WHERE id=?`).get(rec.id) as { createdAt: string | null; createdBy: string | null } | undefined;
+    if (originalAudit) rec.set('createdAt', originalAudit.createdAt).set('createdBy', originalAudit.createdBy);
     rec.set('modifiedAt', new Date().toISOString()).set('modifiedBy', this.session.user);
 
     const cols = ['modifiedAt', 'modifiedBy', ...table.fields.map((f) => f.name)];
@@ -202,7 +208,9 @@ export class DataContext {
         }
       }
     for (const hooks of this.hooks.for(table.name)) {
-      if (hooks.validateDelete?.(rec, this) === false) {
+      const result = hooks.validateDelete?.(rec, this);
+      assertSynchronous(result, table.name + '.validateDelete');
+      if (result === false) {
         throw new ValidationError(`${table.name}: validateDelete failed`);
       }
     }

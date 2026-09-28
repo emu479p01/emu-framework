@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDatetime } from '../utils/formatValue';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { NAlert, NButton, NCard, NCheckbox, NDescriptions, NDescriptionsItem, NEmpty, NInput, NInputNumber, NModal, NSelect, NSpace, NSpin, NTag, useMessage } from 'naive-ui';
 import { api, ApiError, type BackupPreview } from '../api';
@@ -203,7 +204,7 @@ const archivedDocuments=ref<Array<{archiveId:string;entityName:string;businessKe
             <n-descriptions-item :label="t('ui.maintenance.current')">{{ info?.version ?? '—' }}</n-descriptions-item>
             <n-descriptions-item :label="t('ui.maintenance.latest')">{{ release?.latestVersion ?? t('ui.maintenance.notChecked') }}</n-descriptions-item>
             <n-descriptions-item :label="t('ui.maintenance.deployment')">{{ info?.deployment ?? '—' }}</n-descriptions-item>
-            <n-descriptions-item :label="t('ui.maintenance.lastChecked')">{{ release ? new Date(release.checkedAt).toLocaleString() : '—' }}</n-descriptions-item>
+            <n-descriptions-item :label="t('ui.maintenance.lastChecked')">{{ release ? formatDatetime(release.checkedAt) : '—' }}</n-descriptions-item>
           </n-descriptions>
           <n-space class="actions">
             <n-button :loading="checking" @click="checkUpdate()">{{ t('ui.maintenance.checkUpdate') }}</n-button>
@@ -227,7 +228,7 @@ const archivedDocuments=ref<Array<{archiveId:string;entityName:string;businessKe
           </div>
           <n-space><n-button type="primary" @click="downloadBackup">{{ t('ui.maintenance.downloadBackup') }}</n-button><n-button secondary :loading="validating" @click="chooseBackup">{{ t('ui.maintenance.uploadRestore') }}</n-button></n-space>
           <n-alert v-if="validated" type="success" class="notice" :title="t('ui.maintenance.backupReady')">
-            Backup from v{{ validated.frameworkVersion }}, {{ new Date(validated.createdAt).toLocaleString() }}.
+            Backup from v{{ validated.frameworkVersion }}, {{ formatDatetime(validated.createdAt) }}.
             <div>{{ validated.files.map((file) => `${file.name} (${mb(file.bytes)})`).join(' · ') }}</div>
           </n-alert>
           <n-alert v-if="restoreJob" :type="restoreJob.status === 'failed' ? 'error' : restoreJob.status === 'succeeded' ? 'success' : 'info'" class="notice" :title="`Restore ${restoreJob.status}`">
@@ -291,7 +292,7 @@ const archivedDocuments=ref<Array<{archiveId:string;entityName:string;businessKe
             </n-space>
             <n-alert v-if="archivePreview" type="info">{{ archivePreview.eligible }} · {{ t('ui.archive.oldest') }} {{ archivePreview.oldest ?? '—' }} · {{ t('ui.archive.cutoff') }} {{ archivePreview.cutoff }} · {{ t('ui.archive.batchSize') }} {{ archivePreview.batchSize ?? policyDraft.batchSize }}</n-alert>
             <details v-if="archivedDocuments.length" class="notes"><summary>{{ t('ui.archive.documents') }}</summary><div v-for="document in archivedDocuments" :key="document.archiveId" class="archive-row"><span>{{ document.entityName }} · {{ document.businessKey }} · {{ document.businessDate }}</span><n-space><a :href="`/api/system/archive/documents/${encodeURIComponent(document.archiveId)}`" target="_blank">{{ t('ui.archive.view') }}</a><n-button size="tiny" :disabled="Boolean(document.restoredAt)" :loading="archiveBusy" @click="restoreArchived(document.archiveId)">{{ t('ui.archive.restore') }}</n-button></n-space></div></details>
-            <details v-if="dataJobs.length" class="notes"><summary>{{ t('ui.archive.jobs') }}</summary><div v-for="jobEntry in dataJobs" :key="jobEntry.jobId">{{ jobEntry.createdAt }} · {{ jobEntry.type }} · {{ jobEntry.entityName }} · {{ jobEntry.status }} <span v-if="jobEntry.error">— {{ jobEntry.error }}</span></div></details>
+            <details v-if="dataJobs.length" class="notes"><summary>{{ t('ui.archive.jobs') }}</summary><div v-for="jobEntry in dataJobs" :key="jobEntry.jobId">{{ formatDatetime(jobEntry.createdAt) }} · {{ jobEntry.type }} · {{ jobEntry.entityName }} · {{ jobEntry.status }} <span v-if="jobEntry.error">— {{ jobEntry.error }}</span></div></details>
           </n-space>
         </n-card>
       </div>

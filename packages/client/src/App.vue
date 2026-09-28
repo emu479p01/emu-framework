@@ -110,6 +110,22 @@ const breadcrumb = computed(() => {
   return form?.label ?? form?.name ?? t('ui.home.title');
 });
 
+const browserTitle = computed(() => {
+  const brand = meta.meta?.branding.title ?? session.brandingTitle;
+  if (route.path === '/login' || route.path === '/setup' || !meta.meta) return brand;
+  const app = meta.apps.find(entry => entry.name === route.params.appName);
+  const screen = route.params.formName ? meta.form(String(route.params.formName)) : undefined;
+  const named = route.path.startsWith('/action/') ? meta.meta.functionInputs?.find(entry => entry.name === route.params.name)
+    : route.path.startsWith('/report/') ? meta.meta.reports.find(entry => entry.name === route.params.name) : undefined;
+  const label = screen?.label ?? screen?.name ?? named?.label ?? named?.name
+    ?? (route.path.startsWith('/action/') || route.path.startsWith('/report/') ? String(route.params.name) : undefined)
+    ?? (app && !route.params.formName ? app.label : undefined)
+    ?? ({ '/system/apps-models': 'Apps & Models', '/system/tables': 'Table Browser' } as Record<string, string>)[route.path]
+    ?? breadcrumb.value;
+  return label ? label + ' - ' + brand : brand;
+});
+watch(browserTitle, title => { document.title = title; }, { immediate: true });
+
 // ---- language switching ----
 const localeBusy = ref(false);
 const localeReloadFailed = ref(false);

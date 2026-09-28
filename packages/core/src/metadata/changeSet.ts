@@ -3,7 +3,7 @@ import type { Kernel, WebArtifactError } from '../kernel.js';
 import { EXTENSION_KINDS, canonicalExtensionName, type AnyMeta } from './types.js';
 import { validateMetadataArtifact, validateMetadataChangeSet, type MetadataArtifact, type MetadataChangeSet, type SchemaDiagnostic } from './schema.js';
 
-export interface ArtifactDiff { op: 'create' | 'update' | 'delete'; kind: string; name: string; highRisk?: boolean }
+export interface ArtifactDiff { op: 'create' | 'update' | 'delete'; kind: string; name: string; highRisk?: boolean; before?: { app?: string; model?: string }; after?: { app?: string; model?: string } }
 export interface SchemaEffect { type: 'create-table' | 'add-field' | 'orphan-table' | 'metadata-only'; target: string }
 export interface ChangeSetPreview {
   valid: boolean;
@@ -18,6 +18,9 @@ export interface ChangeSetPreview {
   candidateArtifacts: MetadataArtifact[];
 }
 
+function placement(artifact: MetadataArtifact): { app?: string; model?: string } {
+  return artifact.kind === 'app' ? { app: artifact.name } : { app: artifact.app, model: artifact.model };
+}
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === 'object') {
@@ -51,13 +54,13 @@ export function previewMetadataChangeSet(
       if (!existing) diagnostics.push({ path: `/operations/${operation.name}`, code: 'not_found', message: `Artifact '${operation.name}' does not exist` });
       else {
         byName.delete(operation.name);
-        diff.push({ op: 'delete', kind: operation.kind, name: operation.name, highRisk: operation.kind === 'table' || operation.kind === 'app' });
+        diff.push({ before: placement(existing), op: 'delete', kind: operation.kind, name: operation.name, highRisk: operation.kind === 'table' || operation.kind === 'app' });
         schemaEffects.push({ type: operation.kind === 'table' || operation.kind === 'app' ? 'orphan-table' : 'metadata-only', target: operation.name });
         if (operation.kind === 'app') {
           for (const [childName, child] of [...byName.entries()]) {
             if ('app' in child && child.app === operation.name) {
               byName.delete(childName);
-              diff.push({ op: 'delete', kind: child.kind, name: child.name, highRisk: child.kind === 'table' });
+              diff.push({ before: placement(child), op: 'delete', kind: child.kind, name: child.name, highRisk: child.kind === 'table' });
               schemaEffects.push({ type: child.kind === 'table' ? 'orphan-table' : 'metadata-only', target: child.name });
             }
           }
@@ -74,7 +77,7 @@ export function previewMetadataChangeSet(
       diagnostics.push({ path: `/operations/${operation.name}`, code: 'high_risk_script', message: 'AI and automated change sets cannot create executable scripts' });
     }
     byName.set(operation.name, structuredClone(artifact));
-    diff.push({ op: existing ? 'update' : 'create', kind: operation.kind, name: operation.name, highRisk: artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function' || artifact.kind === 'functionExtension' });
+    diff.push({ before: existing ? placement(existing) : undefined, after: placement(artifact), op: existing ? 'update' : 'create', kind: operation.kind, name: operation.name, highRisk: artifact.kind === 'script' || artifact.kind === 'scriptExtension' || artifact.kind === 'function' || artifact.kind === 'functionExtension' });
     if (artifact.kind === 'table') {
       schemaEffects.push({ type: existing ? 'metadata-only' : 'create-table', target: artifact.name });
       const oldFields = new Set(existing?.kind === 'table' ? existing.fields.map((field) => field.name) : []);

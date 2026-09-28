@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3';
+import { SYSTEM_FIELD_ALIASES } from '../metadata/types.js';
 import type { FieldMeta, TableMeta } from '../metadata/types.js';
 import type { MetadataRegistry } from '../metadata/registry.js';
 
@@ -42,6 +43,13 @@ export interface SyncOptions {
 }
 
 export function syncSchema(db: Database, registry: MetadataRegistry, options: SyncOptions = {}): SyncResult {
+  // Preflight the entire registry before making any schema changes.
+  for (const table of registry.allTables()) {
+    if (options.onlyTable && table.name !== options.onlyTable) continue;
+    const columns = db.prepare(`PRAGMA table_info("${table.name}")`).all() as { name: string }[];
+    const collisions = columns.filter(column => Object.keys(SYSTEM_FIELD_ALIASES).some(alias => alias.toLowerCase() === column.name.toLowerCase()));
+    if (collisions.length) throw new Error(table.name + ': reserved audit aliases collide with stored columns: ' + collisions.map(c => c.name).join(', '));
+  }
   const result: SyncResult = { createdTables: [], addedColumns: [] };
   for (const table of registry.allTables()) {
     if (options.onlyTable && table.name !== options.onlyTable) continue;
@@ -68,6 +76,10 @@ function syncTable(db: Database, table: TableMeta, result: SyncResult): void {
         (c) => c.name,
       ),
     );
+    for (const definition of SYSTEM_COLUMNS_SQL.slice(1)) {
+      const name = definition.split(' ')[0]!;
+      if (!existing.has(name)) { db.exec(`ALTER TABLE "${table.name}" ADD COLUMN ${definition}`); result.addedColumns.push(table.name + '.' + name); }
+    }
     for (const f of table.fields) {
       if (!existing.has(f.name)) {
         db.exec(`ALTER TABLE "${table.name}" ADD COLUMN "${f.name}" ${sqlType(f)}`);

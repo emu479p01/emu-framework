@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatValue, formatNumber } from '../utils/formatValue';
 import { computed, h, ref, watch } from 'vue';
 import { NButton, NCard, NModal, NSpace, useDialog, useMessage, type DataTableColumns } from 'naive-ui';
 import { api, ApiError, type Row } from '../api';
@@ -24,6 +25,8 @@ const rows = ref<Row[]>([]);
 /** row id currently in edit mode; 0 = new unsaved row */
 const editingId = ref<number | null>(null);
 const draft = ref<Record<string, unknown>>({});
+const draftToken = ref('');
+const draftBusy = ref(false);
 const lookups = ref<Record<string, Record<number, string>>>({});
 const selectedAction = ref<FormAction | null>(null); const selectedLine = ref<Row | null>(null); const actionDialogOpen = ref(false);
 const attachmentLine = ref<Row | null>(null);
@@ -55,13 +58,18 @@ async function load() {
 
 watch(() => props.headerId, load, { immediate: true });
 
-function startEdit(row: Row | null) {
+async function startEdit(row: Row | null) {
+  if (draftBusy.value) return;
   if (row) {
     editingId.value = row.id;
     draft.value = { ...row };
   } else {
-    editingId.value = 0;
-    draft.value = { [props.line.refField]: props.headerId };
+    draftBusy.value = true;
+    try {
+      const result = await api.post<{ token: string; record: Row }>(`/api/data/${props.line.table}/drafts`, { [props.line.refField]: props.headerId });
+      draftToken.value = result.token; draft.value = result.record; editingId.value = 0;
+    } catch (error) { message.error(error instanceof Error ? error.message : String(error)); }
+    finally { draftBusy.value = false; }
   }
 }
 
@@ -70,9 +78,11 @@ function isEditing(row: Row): boolean {
 }
 
 async function saveDraft() {
+  if (draftBusy.value) return;
+  draftBusy.value = true;
   try {
     if (editingId.value === 0) {
-      await api.post(`/api/data/${props.line.table}`, writableDraft(true));
+      await api.post(`/api/data/${props.line.table}/drafts/${draftToken.value}/save`, writableDraft(true));
     } else {
       await api.patch(`/api/data/${props.line.table}/${editingId.value}`, writableDraft(false));
     }
@@ -81,13 +91,13 @@ async function saveDraft() {
   } catch (err) {
     if (err instanceof ApiError) message.error(err.message);
     else throw err;
-  }
+  } finally { draftBusy.value = false; }
 }
 
 function writableDraft(createMode: boolean): Record<string, unknown> {
   const allowed = new Set(fields.value.filter((field) => !field.readOnly && (createMode ? field.allowEditOnCreate !== false : field.allowEdit !== false)).map((field) => field.name));
   if (createMode) allowed.add(props.line.refField);
-  return Object.fromEntries(Object.entries(draft.value).filter(([key]) => allowed.has(key)));
+  return Object.fromEntries(Object.entries(draft.value).filter(([key, value]) => allowed.has(key) && !(table.value?.fields.find(f => f.name === key)?.encrypted && value === '••••••••')));
 }
 
 function confirmSave() {
@@ -126,6 +136,7 @@ const columns = computed<DataTableColumns<Row>>(() => [
       if (editingId.value !== null && (row.id === editingId.value || (editingId.value === 0 && row.id === 0))) {
         return h(FieldControl, {
           field: f,
+          createMode: editingId.value === 0,
           modelValue: draft.value[f.name],
           record: draft.value,
           recordTable: props.line.table,
@@ -138,7 +149,7 @@ const columns = computed<DataTableColumns<Row>>(() => [
       if (f.type === 'reference' && f.reference) {
         return lookups.value[f.reference.table]?.[v as number] ?? String(v ?? '');
       }
-      return String(v ?? '');
+      return formatValue(f, v);
     },
   })),
   {
@@ -183,7 +194,7 @@ const aggregateResults = computed(() =>
     <template #header-extra>
       <n-space align="center">
         <span v-for="(agg, i) in aggregateResults" :key="i" style="color: var(--n-text-color-3); font-size: 13px">
-          {{ agg.label }}: <b>{{ agg.value }}</b>
+          {{ agg.label }}: <b>{{ formatNumber(agg.value) }}</b>
         </span>
         <n-button size="small" data-testid="add-line" @click="startEdit(null)">Add line</n-button>
       </n-space>

@@ -428,6 +428,8 @@ export interface FunctionMeta {
   code: string;
   /** Transactional is synchronous and atomic; async supports await and external integrations. */
   executionMode?: 'transactional' | 'async';
+  /** Images are attached to an existing record before calling the Function. */
+  imageInput?: { table: string; recordIdArgument: string; multiple?: boolean };
   privileges?: string[];
   layer?: LayerType;
   model?: string;
@@ -871,5 +873,28 @@ export const BASE_KINDS = new Set([
   'chart',
 ]);
 
-export const SYSTEM_FIELDS = ['id', 'createdAt', 'createdBy', 'modifiedAt', 'modifiedBy'] as const;
+export const SYSTEM_FIELD_ALIASES = {
+  sys_createdBy: 'createdBy', sys_createdAt: 'createdAt',
+  sys_modifiedBy: 'modifiedBy', sys_modifiedAt: 'modifiedAt',
+} as const;
+export function storageField(name: string): string {
+  return Object.prototype.hasOwnProperty.call(SYSTEM_FIELD_ALIASES, name)
+    ? SYSTEM_FIELD_ALIASES[name as keyof typeof SYSTEM_FIELD_ALIASES] : name;
+}
+export const SYSTEM_FIELDS = ['id', 'createdAt', 'createdBy', 'modifiedAt', 'modifiedBy', ...Object.keys(SYSTEM_FIELD_ALIASES)] as const;
+/** Virtual fields: never add these aliases to physical table definitions. */
+export const SYSTEM_FIELD_META: FieldMeta[] = [
+  { name: 'id', type: 'int', label: 'Record ID', readOnly: true },
+  ...Object.entries(SYSTEM_FIELD_ALIASES).map(([name, column]): FieldMeta => ({
+    name, type: column.endsWith('At') ? 'datetime' : 'string',
+    label: ({ createdBy: 'Created by', createdAt: 'Created date/time', modifiedBy: 'Modified by', modifiedAt: 'Modified date/time' })[column], readOnly: true,
+  })),
+];
+export function systemFieldMeta(name: string): FieldMeta | undefined {
+  const field = SYSTEM_FIELD_META.find((entry) => storageField(entry.name) === storageField(name));
+  return field ? { ...field, name } : undefined;
+}
+export function fieldsWithSystem(table: Pick<TableMeta, 'fields'>): FieldMeta[] {
+  return [...table.fields, ...SYSTEM_FIELDS.filter((name) => !table.fields.some((f) => f.name === name)).map((name) => systemFieldMeta(name)!)];
+}
 export type SystemField = (typeof SYSTEM_FIELDS)[number];

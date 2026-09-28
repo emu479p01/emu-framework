@@ -1,3 +1,4 @@
+import { recordDrafts } from './recordDrafts.js';
 import { existsSync } from 'node:fs';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -8,6 +9,8 @@ import fastifyStatic from '@fastify/static';
 import multipart from '@fastify/multipart';
 import {
   Kernel,
+  SYSTEM_FIELDS,
+  fieldsWithSystem,
   LocaleResolver,
   MetadataError,
   ValidationError,
@@ -30,7 +33,7 @@ import { registerSystemApp, registerSystemHooks } from './systemApp.js';
 import { localizeMetadata } from './localization.js';
 import { registerNavigationPreferenceRoutes } from './navigationPreferences.js';
 import { registerAppModelRoutes } from './appModels.js';
-import { deleteRecordAttachments, registerAttachmentRoutes } from './attachments.js';
+import { deleteRecordAttachments, registerAttachmentRoutes, validateFunctionImages } from './attachments.js';
 import { registerDataEntityRoutes } from './dataEntities.js';
 import { registerArchiveRoutes } from './archive.js';
 import { hashPassword, login, logout, resolveSession, verifyPassword, type AuthUser } from './auth.js';
@@ -531,7 +534,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const fields = new Map(table.fields.map((f) => [f.name, f]));
     const output: { [field: string]: FieldValue } = {};
     for (const [name, value] of Object.entries(body ?? {})) {
-      if (['id', 'createdAt', 'createdBy', 'modifiedAt', 'modifiedBy'].includes(name)) continue;
+      if ((SYSTEM_FIELDS as readonly string[]).includes(name)) continue;
       const field = fields.get(name);
       if (!field) throw new ValidationError(`${tableName}: unknown field '${name}'`);
       const editable = !field.readOnly && (operation === 'create' ? field.allowEditOnCreate !== false : field.allowEdit !== false);
@@ -541,7 +544,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         throw new ValidationError(`${tableName}.${name}: configured-value mask is not a valid new secret`);
       }
       if (field.encrypted && (value === '' || value === null)) continue;
-      output[name] = value;
+      if (field.type === 'datetime' && typeof value === 'string' && value.trim()) {
+        let text = value.trim().replace(' ', 'T');
+        if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(text)) text += 'Z';
+        const instant = new Date(text);
+        if (!Number.isFinite(instant.getTime())) throw new ValidationError(tableName + '.' + name + ': invalid datetime');
+        output[name] = instant.toISOString();
+      } else output[name] = value;
     }
     return output;
   };
@@ -563,6 +572,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   // ---- auth ----
 
   app.get('/api/setup/status', () => ({
+    branding: { title: options.appTitle ?? 'EmuFramework' },
     required: setupRequired,
     expiresAt: setupRequired ? new Date(setupExpiresAt).toISOString() : null,
     legacyReset: setupRequired && legacyDefaultPassword,
@@ -775,6 +785,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }
 
     const metadata = {
+      functionInputs: kernel.registry.allFunctions().filter(fn => policy.canFunction(fn.name)).map(fn => ({ name: fn.name, label: fn.label, imageInput: fn.imageInput })),
       branding: { title: options.appTitle ?? 'EmuFramework' },
       capabilities: {
         designer: isFrameworkAdmin || access.customizeApps.size > 0,
@@ -783,7 +794,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         securityAdmin: isFrameworkAdmin,
         myAccount: true,
       },
-      tables: visibleTables,
+      tables: visibleTables.map(table => ({ ...table, fields: fieldsWithSystem(table) })),
       enums: kernel.registry.allEnums().filter((entry) => visibleEnums.has(entry.name)),
       forms,
       reports: kernel.registry.allReports().filter((r) => !PROTECTED_TABLES.has(r.dataSource) && policy.canReport(r.name) && policy.can(r.dataSource, 'read')),
@@ -872,6 +883,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       if (!handler) throw Object.assign(new Error(`Unknown action '${req.params.name}'`), { statusCode: 404 });
       const ctx = userCtx(req);
       if (!ctx.policy.canFunction(req.params.name)) throw new SecurityError(`Access denied: function '${req.params.name}'`);
+      await validateFunctionImages(kernel, ctx, req.params.name, req.body ?? {});
       if (kernel.actionModes.get(req.params.name) === 'async') {
         return (await handler(ctx, req.body ?? {}, integrations.services)) ?? { ok: true };
       }
@@ -880,6 +892,17 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   );
 
   // ---- generic data API ----
+  const drafts = recordDrafts(kernel);
+  app.post<{ Params: { table: string }; Body: { [field: string]: FieldValue } }>('/api/data/:table/drafts', (req) => {
+    const table = dataTable(req.params.table, req);
+    const result = drafts.create(userCtx(req), table.name, writableBody(table.name, req.body ?? {}));
+    return { ...result, record: publicRecord(table, result.record) };
+  });
+  app.post<{ Params: { table: string; token: string }; Body: { [field: string]: FieldValue } }>('/api/data/:table/drafts/:token/save', (req, reply) => {
+    const table = dataTable(req.params.table, req);
+    const record = drafts.save(userCtx(req), table.name, req.params.token, writableBody(table.name, req.body ?? {}));
+    return reply.status(201).send(publicRecord(table, record));
+  });
 
   app.get<{ Params: { table: string }; Querystring: ListQuery }>(
     '/api/data/:table',
@@ -911,11 +934,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     '/api/data/:table',
     (req, reply) => {
       const table = dataTable(req.params.table, req);
-      const rec = userCtx(req).newRecord(table.name);
-      rec.setMany(writableBody(table.name, req.body, 'create'));
-      rec.insert();
-      reply.status(201);
-      return publicRecord(table, rec.toObject());
+      const ctx = userCtx(req);
+      return ctx.tts(() => {
+        const rec = ctx.newRecord(table.name);
+        rec.setMany(writableBody(table.name, req.body, 'create'));
+        rec.insert();
+        reply.status(201);
+        return publicRecord(table, rec.toObject());
+      });
     },
   );
 

@@ -9,7 +9,7 @@ interface User {
 }
 
 export const useSession = defineStore('session', {
-  state: () => ({ user: null as User | null, checked: false, setupRequired: false, setupLegacyReset: false, setupUsername: null as string | null }),
+  state: () => ({ brandingTitle: 'EmuFramework', user: null as User | null, checked: false, setupRequired: false, setupLegacyReset: false, setupUsername: null as string | null }),
   getters: {
     isFrameworkUser: (s) =>
       s.user !== null &&
@@ -20,7 +20,8 @@ export const useSession = defineStore('session', {
   },
   actions: {
     async check() {
-      const setup = await api.get<{ required: boolean; legacyReset: boolean; username: string | null }>('/api/setup/status');
+      const setup = await api.get<{ branding?: { title: string }; required: boolean; legacyReset: boolean; username: string | null }>('/api/setup/status');
+      this.brandingTitle = setup.branding?.title ?? 'EmuFramework';
       this.setupRequired = setup.required;
       this.setupLegacyReset = setup.legacyReset;
       this.setupUsername = setup.username;

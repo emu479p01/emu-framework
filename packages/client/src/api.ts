@@ -71,7 +71,7 @@ export interface MetadataPackagePreview {
   expiresAt: string;
   valid: boolean;
   destructive: boolean;
-  diff: { op: 'create' | 'update' | 'delete'; kind: string; name: string; highRisk?: boolean }[];
+  diff: { op: 'create' | 'update' | 'delete'; kind: string; name: string; highRisk?: boolean; before?: { app?: string; model?: string }; after?: { app?: string; model?: string } }[];
   diagnostics: { path: string; code: string; message: string }[];
   warnings?: { path: string; code: string; message: string }[];
   package: {

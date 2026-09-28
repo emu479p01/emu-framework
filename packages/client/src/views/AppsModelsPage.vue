@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDatetime } from '../utils/formatValue';
 import { onMounted, ref } from 'vue';
 import { NAlert, NButton, NCard, NInput, NSpace, NTable, NTag, useMessage } from 'naive-ui';
 import { api } from '../api';
@@ -30,8 +31,8 @@ onMounted(() => { void load().catch((e) => message.error(e.message)); });
       <n-table :single-line="false"><thead><tr><th>Model</th><th>Layer / Source</th><th>Revision</th><th>License / Vendor</th><th>Expires (UTC)</th></tr></thead><tbody>
         <tr v-for="model in app.models" :key="model.name"><td>{{ model.name }}</td><td>{{ model.layer }} / {{ model.source }}</td><td><code :title="model.revision || ''">{{ model.revision?.slice(0, 12) || 'File deployment' }}</code></td><td><n-tag :type="model.licenseStatus.blocked ? 'error' : model.licenseStatus.status === 'expiring' ? 'warning' : 'default'">{{ model.licenseStatus.status }}</n-tag> {{ model.licenseStatus.vendor }}</td><td>{{ model.licenseStatus.expiresAt || '—' }}</td></tr>
       </tbody></n-table>
-      <details><summary>Deployment history</summary><p v-for="entry in app.history" :key="entry.id">{{ entry.createdAt }} — {{ entry.actor }} — {{ entry.description }}</p></details>
+      <details><summary>Deployment history</summary><p v-for="entry in app.history" :key="entry.id">{{ formatDatetime(entry.createdAt) }} — {{ entry.actor }} — {{ entry.description }}</p></details>
     </n-card>
-    <n-card v-if="data" title="License audit"><p v-for="entry in data.audit" :key="entry.id">{{ entry.createdAt }} — {{ entry.actor }} — {{ entry.action }}: {{ entry.detail }}</p></n-card>
+    <n-card v-if="data" title="License audit"><p v-for="entry in data.audit" :key="entry.id">{{ formatDatetime(entry.createdAt) }} — {{ entry.actor }} — {{ entry.action }}: {{ entry.detail }}</p></n-card>
   </n-space>
 </template>

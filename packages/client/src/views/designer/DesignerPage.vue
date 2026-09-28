@@ -26,6 +26,7 @@ import {
 import { useDesigner } from '../../stores/designer';
 import { api, ApiError } from '../../api';
 import type { MetadataPackagePreview } from '../../api';
+import DeploymentDetails from '../../components/DeploymentDetails.vue';
 import SimpleBuilder from './SimpleBuilder.vue';
 
 const designer = useDesigner();
@@ -335,17 +336,20 @@ function artifactCountForModel(appName: string, modelName: string): number {
 }
 
 // ---- level 3: filtered artifacts ----
+const artifactType = ref<string | null>(null);
+const artifactTypeOptions = computed(() => [...new Set(designer.artifacts.map(a => a.kind))].sort().map(kind => ({ label: kind, value: kind })));
 const filteredArtifacts = computed(() => {
   const q = searchQuery.value.toLowerCase();
   return designer.artifacts.filter((a) => {
     const art = a.artifact as any;
     if (selectedApp.value && art.app !== selectedApp.value) return false;
     if (selectedModel.value && art.model !== selectedModel.value) return false;
+    if (artifactType.value && a.kind !== artifactType.value) return false;
     if (q && !a.name.toLowerCase().includes(q)) return false;
     return true;
   });
 });
-watch([selectedApp, selectedModel, searchQuery], () => { artifactPage.value = 1; });
+watch([selectedApp, selectedModel, searchQuery, artifactType], () => { artifactPage.value = 1; });
 const pagedArtifacts = computed(() => filteredArtifacts.value.slice(
   (artifactPage.value - 1) * artifactPageSize,
   artifactPage.value * artifactPageSize,
@@ -634,6 +638,7 @@ async function onReload() {
       <div v-if="selectedModel" class="designer-section">
         <div class="section-header">
           <span class="section-title">Artifacts</span>
+          <n-select v-model:value="artifactType" :options="artifactTypeOptions" clearable filterable placeholder="All artifact types" style="width:240px" />
           <span class="section-count">{{ filteredArtifacts.length }}</span>
         </div>
         <n-empty
@@ -754,7 +759,7 @@ async function onReload() {
         <n-button type="primary" :disabled="!deployModels.length" :loading="packageBusy" @click="buildDeployment">Download package</n-button>
       </n-space>
     </n-modal>
-    <n-modal v-model:show="showPackagePreview" preset="card" title="Review Metadata Import" style="width:min(720px, 92vw)">
+    <n-modal v-model:show="showPackagePreview" preset="card" title="Review Metadata Import" style="width:min(960px, 94vw);max-height:92vh" content-style="overflow:auto;min-height:0">
       <template v-if="packagePreview">
         <n-alert v-if="packagePreview.diff.some((item) => item.highRisk)" type="warning" style="margin-bottom:16px">
           This package contains executable code or metadata deletions. Review high-risk changes before confirming.
@@ -769,19 +774,12 @@ async function onReload() {
           · from v{{ packagePreview.package.frameworkVersion }}
           <p v-if="packagePreview.package.scope.type === 'models'">Mode: {{ packagePreview.package.scope.mode }} · Selected: {{ packagePreview.package.scope.models.map(m => m.name).join(', ') }}</p>
           <p v-if="packagePreview.preservedModels?.length">Preserved: {{ packagePreview.preservedModels.map(m => m.name).join(', ') }}</p>
-          <p v-for="effect in packagePreview.schemaEffects" :key="`${effect.type}:${effect.target}`">{{ effect.type }}: {{ effect.target }}</p>
         </div>
-        <n-table size="small" :bordered="false" style="margin-top:16px;max-height:360px;overflow:auto">
-          <thead><tr><th>Change</th><th>Kind</th><th>Name</th><th>Risk</th></tr></thead>
-          <tbody><tr v-for="item in packagePreview.diff" :key="`${item.kind}:${item.name}`">
-            <td><n-tag size="small" :type="item.op === 'create' ? 'success' : 'warning'">{{ item.op }}</n-tag></td>
-            <td>{{ item.kind }}</td><td>{{ item.name }}</td><td>{{ item.highRisk ? 'High' : 'Normal' }}</td>
-          </tr></tbody>
-        </n-table>
+        <DeploymentDetails :preview="packagePreview" />
       </template>
       <template #footer><n-space justify="end">
         <n-button @click="showPackagePreview=false">Cancel</n-button>
-        <n-button type="primary" :loading="packageBusy" @click="commitPackage">Confirm deployment</n-button>
+        <n-button type="primary" :loading="packageBusy" :disabled="!packagePreview?.valid || packageBusy" @click="commitPackage">Confirm deployment</n-button>
       </n-space></template>
     </n-modal>
     </div>

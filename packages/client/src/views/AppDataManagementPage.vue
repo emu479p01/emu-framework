@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDatetime } from '../utils/formatValue';
 import { computed, onMounted, ref } from 'vue';
 import { NAlert, NButton, NCard, NDataTable, NDescriptions, NDescriptionsItem, NInput, NModal, NSelect, NSpace, NSpin, NTag, useMessage } from 'naive-ui';
 import { api, ApiError, type AppDataOverview, type AppDataPreview } from '../api';
@@ -78,7 +79,7 @@ onMounted(load);
             <n-descriptions label-placement="left" :column="1" size="small">
               <n-descriptions-item label="App">{{ current.label }} ({{ current.name }})</n-descriptions-item>
               <n-descriptions-item label="Total rows">{{ current.totalRows.toLocaleString() }}</n-descriptions-item>
-              <n-descriptions-item label="Last operation">{{ current.lastOperation ? `${current.lastOperation.action} · ${new Date(current.lastOperation.createdAt).toLocaleString()}` : '—' }}</n-descriptions-item>
+              <n-descriptions-item label="Last operation">{{ current.lastOperation ? `${current.lastOperation.action} · ${formatDatetime(current.lastOperation.createdAt)}` : '—' }}</n-descriptions-item>
             </n-descriptions>
             <n-data-table :columns="columns" :data="current.tables" :pagination="false" />
             <n-alert type="warning">Replace and Delete are atomic maintenance operations. They bypass per-record business hooks and never modify App metadata.</n-alert>

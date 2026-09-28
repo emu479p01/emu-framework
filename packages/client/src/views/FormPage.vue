@@ -21,6 +21,7 @@ import { applyIfBlank } from '../utils/applyDefaults';
 import ActionDialog from '../components/ActionDialog.vue';
 import EmbeddedChart from '../components/EmbeddedChart.vue';
 import AttachmentPanel from '../components/AttachmentPanel.vue';
+import { ENCRYPTED_FIELD_MASK } from '@emu/core/browser';
 import type { FormAction } from '@emu/core';
 
 const props = defineProps<{ formName: string; id: string; appName?: string }>();
@@ -30,6 +31,9 @@ const message = useMessage();
 const dialog = useDialog();
 
 const record = ref<Record<string, unknown>>({});
+const draftToken = ref('');
+const loadError = ref('');
+let loadGeneration = 0;
 const original = ref('');
 const busy = ref(false);
 const validationErrors = ref<string[]>([]);
@@ -45,7 +49,7 @@ const dirty = computed(() => JSON.stringify(record.value) !== original.value);
 const groups = computed(() => {
   if (!form.value || !table.value) return [];
   return (
-    form.value.groups ?? [{ label: undefined, fields: table.value.fields.map((f) => f.name) }]
+    form.value.groups ?? [{ label: undefined, fields: table.value.fields.filter(f => !['id','createdAt','createdBy','modifiedAt','modifiedBy'].includes(f.name)).map((f) => f.name) }]
   ).filter((g) => !g.hidden).map((g) => ({
     id: g.id,
     label: g.label,
@@ -57,11 +61,21 @@ const groups = computed(() => {
 
 async function load() {
   if (!table.value) return;
-  record.value = isNew.value
-    ? {}
-    : await api.get<Row>(`/api/data/${table.value.name}/${props.id}`);
-  original.value = JSON.stringify(record.value);
-  validationErrors.value = [];
+  const generation = ++loadGeneration;
+  busy.value = true; loadError.value = '';
+  try {
+    if (isNew.value) {
+      const result = await api.post<{ token: string; record: Row }>(`/api/data/${table.value.name}/drafts`, {});
+      if (generation !== loadGeneration) return;
+      draftToken.value = result.token; record.value = result.record;
+    } else {
+      const result = await api.get<Row>(`/api/data/${table.value.name}/${props.id}`);
+      if (generation !== loadGeneration) return;
+      draftToken.value = ''; record.value = result;
+    }
+    original.value = JSON.stringify(record.value); validationErrors.value = [];
+  } catch (error) { if (generation === loadGeneration) loadError.value = String(error instanceof Error ? error.message : error); }
+  finally { if (generation === loadGeneration) busy.value = false; }
 }
 
 watch(() => [props.formName, props.id], load, { immediate: true });
@@ -76,10 +90,10 @@ async function save() {
   try {
     const payload = Object.fromEntries(table.value.fields
       .filter((field) => !field.readOnly && (isNew.value ? field.allowEditOnCreate !== false : field.allowEdit !== false))
-      .filter((field) => Object.prototype.hasOwnProperty.call(record.value, field.name))
+      .filter((field) => Object.prototype.hasOwnProperty.call(record.value, field.name) && !(field.encrypted && record.value[field.name] === ENCRYPTED_FIELD_MASK))
       .map((field) => [field.name, record.value[field.name]]));
     if (isNew.value) {
-      const created = await api.post<Row>(`/api/data/${table.value.name}`, payload);
+      const created = await api.post<Row>(`/api/data/${table.value.name}/drafts/${draftToken.value}/save`, payload);
       message.success('Created');
       record.value = created;
       original.value = JSON.stringify(created);
@@ -152,7 +166,7 @@ function remove() {
           Delete
         </n-button>
         <n-button @click="goBack">Back</n-button>
-        <n-button type="primary" :loading="busy" data-testid="save-record" @click="save">
+        <n-button type="primary" :loading="busy" :disabled="busy || Boolean(loadError)" data-testid="save-record" @click="save">
           Save
         </n-button>
       </n-space>
@@ -162,6 +176,7 @@ function remove() {
       <ul class="error-list"><li v-for="error in validationErrors" :key="error">{{ error }}</li></ul>
     </n-alert>
 
+    <n-alert v-if="loadError" type="error">{{ loadError }}</n-alert>
     <n-form label-placement="top">
       <n-space vertical :size="16">
         <n-card v-for="(group, gi) in groups" :key="group.id ?? gi" :title="group.label" size="small">

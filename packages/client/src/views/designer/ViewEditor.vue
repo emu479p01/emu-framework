@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { SYSTEM_FIELD_META } from '@emu/core/browser';
 import { computed } from 'vue';
 import { NButton, NCard, NFormItem, NInput, NSelect, NSpace, NTable } from 'naive-ui';
 import type { Artifact } from '../../stores/designer';
@@ -8,7 +9,7 @@ const tableOptions = computed(() => props.tables.map((table) => ({ label: String
 const aliases = computed(() => [props.artifact.source as any, ...((props.artifact.joins ?? []) as any[])].filter(Boolean));
 const refOptions = computed(() => aliases.value.flatMap((source: any) => {
   const table = props.tables.find((entry) => entry.name === source.table);
-  const fields = ['id', ...(((table?.fields ?? []) as any[]).map((field) => field.name))];
+  const fields = [...SYSTEM_FIELD_META.map(field => field.name), ...(((table?.fields ?? []) as any[]).map((field) => field.name))];
   return fields.map((field) => ({ label: `${source.alias}.${field}`, value: `${source.alias}.${field}` }));
 }));
 const outputOptions = computed(() => ((props.artifact.columns ?? []) as any[]).map((column) => ({ label: column.name, value: column.name })));

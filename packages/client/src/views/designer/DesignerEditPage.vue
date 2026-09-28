@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { SYSTEM_FIELD_META, SYSTEM_FIELDS } from '@emu/core/browser';
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -311,11 +312,15 @@ const formTableName = computed(() => {
 });
 const fieldOptionsForFormTable = computed(() => {
   const table = designer.catalog.tables.find((entry) => entry.name === formTableName.value);
-  return ((table?.fields ?? []) as any[]).map((field) => ({ label: field.name, value: field.name }));
+  return [...((table?.fields ?? []) as any[]).map((field) => ({ label: field.name, value: field.name })), ...SYSTEM_FIELD_META.map(field => ({ label: 'System fields · ' + (field.label ?? field.name), value: field.name }))];
 });
+const groupedFormFieldOptions = computed(() => [
+  ...fieldOptionsForFormTable.value.filter(field => !SYSTEM_FIELD_META.some(system => system.name === field.value)),
+  { type: 'group' as const, label: 'System fields', key: 'system', children: fieldOptionsForFormTable.value.filter(field => SYSTEM_FIELD_META.some(system => system.name === field.value)) },
+]);
 function fieldOptionsFor(tableName: string) {
   const table = designer.catalog.tables.find((entry) => entry.name === tableName);
-  return ((table?.fields ?? []) as any[]).map((field) => ({ label: field.name, value: field.name }));
+  return [...((table?.fields ?? []) as any[]).map((field) => ({ label: field.name, value: field.name })), ...SYSTEM_FIELD_META.map(field => ({ label: 'System fields · ' + (field.label ?? field.name), value: field.name }))];
 }
 function numericFieldOptionsFor(tableName: string) {
   const table = designer.catalog.tables.find((entry) => entry.name === tableName);
@@ -401,7 +406,7 @@ const entityIssues = computed<string[]>(() => {
   const rootTable = String(artifact.value.rootTable ?? '');
   const table = designer.catalog.tables.find((entry) => entry.name === rootTable);
   if (!table) { issues.push(`${t('ui.designer.dataEntity.rootTable')}: —`); return issues; }
-  const fieldNames = new Set(((table as any).fields ?? []).map((field: any) => field.name));
+  const fieldNames = new Set([...SYSTEM_FIELDS, ...((table as any).fields ?? []).map((field: any) => field.name)]);
   for (const field of [...(artifact.value.businessKey as string[] ?? []), ...(artifact.value.fields as string[] ?? [])]) {
     if (!fieldNames.has(field)) issues.push(`${rootTable} › ${field}`);
   }
@@ -409,7 +414,7 @@ const entityIssues = computed<string[]>(() => {
   for (const [index, line] of entityLines.value.entries()) {
     const lineTable = designer.catalog.tables.find((entry) => entry.name === line.table);
     if (!lineTable) { issues.push(`${t('ui.designer.dataEntity.lines')} #${index + 1}: ${line.table || '—'}`); continue; }
-    const lineFieldNames = new Set(((lineTable as any).fields ?? []).map((field: any) => field.name));
+    const lineFieldNames = new Set([...SYSTEM_FIELDS, ...((lineTable as any).fields ?? []).map((field: any) => field.name)]);
     if (!lineFieldNames.has(line.parentReference)) issues.push(`${t('ui.designer.dataEntity.lines')} #${index + 1} › ${line.parentReference || '—'}`);
     for (const field of [...line.fields, ...line.lineKeys]) {
       if (!lineFieldNames.has(field)) issues.push(`${line.table} › ${field}`);
@@ -881,6 +886,15 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
                     Function targets or <b>POST /api/action/&lt;name&gt;</b>. The return value becomes the response.
                   </p>
                 </n-form-item>
+                <n-form-item v-if="kind === 'function'" label="Image input">
+                  <n-checkbox :checked="Boolean(artifact.imageInput)" @update:checked="(enabled: boolean) => { if (enabled) artifact.imageInput = { table: '', recordIdArgument: 'recordId', multiple: false }; else delete artifact.imageInput; }">Accept images for an existing record</n-checkbox>
+                </n-form-item>
+                <template v-if="kind === 'function' && artifact.imageInput">
+                  <n-form-item label="Attachment table"><n-select v-model:value="(artifact.imageInput as any).table" :options="designer.catalog.tables.filter(t => !t.name.startsWith('FW_')).map(t => ({ label: t.name, value: t.name }))" filterable /></n-form-item>
+                  <n-form-item label="Record ID argument"><n-input v-model:value="(artifact.imageInput as any).recordIdArgument" placeholder="recordId or lineId" /></n-form-item>
+                  <n-checkbox v-model:checked="(artifact.imageInput as any).multiple">Allow multiple images</n-checkbox>
+                  <p>Images are attached before execution. The Function receives args.attachmentIds. Successfully attached files remain available if the Function fails.</p>
+                </template>
                 <n-form-item v-if="kind === 'function'" label="Execution mode">
                   <n-select v-model:value="(artifact.executionMode as string)" :options="[
                     { label: 'Transactional — synchronous and atomic', value: 'transactional' },
@@ -967,16 +981,16 @@ function back() { window.history.length > 1 ? router.back() : router.push({ path
             <!-- Form groups -->
             <template v-if="kind === 'form' || kind === 'formExtension'">
               <n-card size="small" title="List page columns (blank = all fields)">
-                <n-select v-model:value="(artifact.listFields as string[])" :options="fieldOptionsForFormTable" multiple placeholder="all fields" />
+                <n-select v-model:value="(artifact.listFields as string[])" :options="groupedFormFieldOptions" multiple placeholder="all fields" />
               </n-card>
               <n-card size="small" title="Filter columns (blank = list page columns)">
-                <n-select v-model:value="(artifact.filterFields as string[])" :options="fieldOptionsForFormTable" multiple placeholder="list page columns" />
+                <n-select v-model:value="(artifact.filterFields as string[])" :options="groupedFormFieldOptions" multiple placeholder="list page columns" />
               </n-card>
               <n-card size="small" title="Groups (detail layout)">
                 <n-space vertical :size="8">
                   <n-space v-for="(g, i) in formGroups" :key="i" align="center">
                     <n-input v-model:value="g.label" size="small" placeholder="Group label" style="width: 180px" />
-                    <n-select v-model:value="g.fields" :options="fieldOptionsForFormTable" multiple size="small" style="min-width: 380px" />
+                    <n-select v-model:value="g.fields" :options="groupedFormFieldOptions" multiple size="small" style="min-width: 380px" />
                     <n-button size="tiny" quaternary type="error" @click="removeGroup(i)">✕</n-button>
                   </n-space>
                 </n-space>

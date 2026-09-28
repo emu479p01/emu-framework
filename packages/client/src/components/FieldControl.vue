@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatValue, formatNumber, parseNumber, datetimeMillis } from '../utils/formatValue';
 import { computed, h, ref, watch } from 'vue';
 import { NInput, NInputNumber, NSwitch, NSelect, NDatePicker, NTooltip, type SelectOption } from 'naive-ui';
 import { api, type Row } from '../api';
@@ -60,7 +61,7 @@ async function loadReferenceOptions() {
     const { data } = await api.list(props.field.reference.table, params);
     if (request !== lookupRequest) return;
     refOptions.value = data.map((row) => ({
-      label: displays.map((field) => String(row[field] ?? '')).join(' | '),
+      label: displays.map((field) => formatValue(meta.field(refTable?.name ?? '', field) ?? { name: field, type: 'string' }, row[field])).join(' | '),
       value: row.id,
     }));
   }
@@ -107,6 +108,8 @@ function renderLookupLabel(option: SelectOption) {
   <n-input-number
     v-else-if="field.type === 'int' || field.type === 'real'"
     :value="(modelValue as number | null)"
+    :format="formatNumber"
+    :parse="parseNumber"
     :precision="field.type === 'int' ? 0 : undefined"
     :disabled="isDisabled"
     style="width: 100%"
@@ -146,13 +149,12 @@ function renderLookupLabel(option: SelectOption) {
   />
   <n-date-picker
     v-else-if="field.type === 'datetime'"
-    :formatted-value="(modelValue as string | null)"
-    value-format="yyyy-MM-dd'T'HH:mm:ss"
+    :value="datetimeMillis(modelValue)"
     type="datetime"
     :disabled="isDisabled"
     style="width: 100%"
     clearable
-    @update:formatted-value="update"
+    @update:value="(value: number | null) => update(value === null ? null : new Date(value).toISOString())"
   />
   <n-input v-else :value="String(modelValue ?? '')" :disabled="isDisabled" @update:value="update" />
 </template>
