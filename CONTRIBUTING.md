@@ -6,7 +6,7 @@ This file is for people who want to propose code changes through a GitHub Pull R
 
 1. Fork the repository on GitHub and clone your fork.
 2. Create a short-lived branch from the current default branch.
-3. Run `pnpm install` with Node.js 24.18.0 and pnpm 11.12.0.
+3. Run `pnpm install` with Node.js 24.22.1 and pnpm 11.25.0.
 4. Make one focused change and add or update tests.
 5. Do not commit databases, `.env` files, `.tools`, build output, or credentials.
 

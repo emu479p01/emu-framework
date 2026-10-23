@@ -1,10 +1,10 @@
-FROM node:24.18.0-slim AS build
+FROM node:24.22.1-slim AS build
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@11.12.0 --activate
+RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
 COPY . .
 RUN pnpm install --frozen-lockfile && pnpm --filter @emu/server build
 
-FROM node:24.18.0-slim
+FROM node:24.22.1-slim
 WORKDIR /updater
 COPY --from=build /app/packages/server/dist/updater.js ./updater.js
 COPY --from=build /app/packages/server/dist/updaterState.js ./updaterState.js
