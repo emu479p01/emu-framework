@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     tags: ['*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing X.Y.Z tag to publish after a failed release
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,7 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
       - uses: pnpm/action-setup@v5
         with: { version: 11.25.0 }
       - uses: actions/setup-node@v6
@@ -21,10 +29,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Validate version policy and release notes
         id: release_policy
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         shell: bash
         run: |
           node scripts/release-policy.mjs \
-            --tag "$GITHUB_REF_NAME" \
+            --tag "$RELEASE_TAG" \
             --output "$RUNNER_TEMP/release-notes.md"
       - run: pnpm test
       - run: pnpm typecheck
@@ -42,18 +52,32 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish the validated images
+      - name: Publish the validated images through Buildx
         shell: bash
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          docker push "ghcr.io/emu479p01/emu-framework:$VERSION"
-          docker push "ghcr.io/emu479p01/emu-framework-updater:$VERSION"
-          docker tag "ghcr.io/emu479p01/emu-framework:$VERSION" ghcr.io/emu479p01/emu-framework:latest
-          docker tag "ghcr.io/emu479p01/emu-framework-updater:$VERSION" ghcr.io/emu479p01/emu-framework-updater:latest
-          docker push ghcr.io/emu479p01/emu-framework:latest
-          docker push ghcr.io/emu479p01/emu-framework-updater:latest
+          APP="ghcr.io/emu479p01/emu-framework:$VERSION"
+          UPDATER="ghcr.io/emu479p01/emu-framework-updater:$VERSION"
+          docker image inspect "$APP" | jq -S '.[0] | {Architecture, Os, Config, RootFS}' > "$RUNNER_TEMP/tested-app-config.json"
+          docker image inspect "$UPDATER" | jq -S '.[0] | {Architecture, Os, Config, RootFS}' > "$RUNNER_TEMP/tested-updater-config.json"
+          # Re-export the cached build graph directly; avoid the daemon push path.
+          docker buildx build --push --tag "$APP" --metadata-file "$RUNNER_TEMP/app-image.json" .
+          docker buildx build --push --file Dockerfile.updater --tag "$UPDATER" --metadata-file "$RUNNER_TEMP/updater-image.json" .
+          # Pull exported digests and compare runtime configuration and filesystem layers.
+          APP_DIGEST=$(jq -er '."containerimage.digest"' "$RUNNER_TEMP/app-image.json")
+          UPDATER_DIGEST=$(jq -er '."containerimage.digest"' "$RUNNER_TEMP/updater-image.json")
+          docker pull "ghcr.io/emu479p01/emu-framework@$APP_DIGEST"
+          docker pull "ghcr.io/emu479p01/emu-framework-updater@$UPDATER_DIGEST"
+          docker image inspect "ghcr.io/emu479p01/emu-framework@$APP_DIGEST" | jq -S '.[0] | {Architecture, Os, Config, RootFS}' > "$RUNNER_TEMP/pushed-app-config.json"
+          docker image inspect "ghcr.io/emu479p01/emu-framework-updater@$UPDATER_DIGEST" | jq -S '.[0] | {Architecture, Os, Config, RootFS}' > "$RUNNER_TEMP/pushed-updater-config.json"
+          diff -u "$RUNNER_TEMP/tested-app-config.json" "$RUNNER_TEMP/pushed-app-config.json"
+          diff -u "$RUNNER_TEMP/tested-updater-config.json" "$RUNNER_TEMP/pushed-updater-config.json"
+          # Promote only the verified registry digests.
+          docker buildx imagetools create --tag ghcr.io/emu479p01/emu-framework:latest "ghcr.io/emu479p01/emu-framework@$APP_DIGEST"
+          docker buildx imagetools create --tag ghcr.io/emu479p01/emu-framework-updater:latest "ghcr.io/emu479p01/emu-framework-updater@$UPDATER_DIGEST"
       - uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           name: ${{ steps.release_policy.outputs.release_name }}
           body_path: ${{ runner.temp }}/release-notes.md
           generate_release_notes: false
