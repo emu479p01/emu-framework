@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24.18.0-slim AS build
+FROM node:24.22.1-slim AS build
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@11.12.0 --activate
+RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
 
 # Fallback build toolchain in case a native module (better-sqlite3) has no
 # prebuilt binary for this image's platform/arch (e.g. building for linux/arm64).
@@ -20,7 +20,7 @@ RUN pnpm install --frozen-lockfile
 
 RUN pnpm build
 
-FROM node:24.18.0-slim AS runtime
+FROM node:24.22.1-slim AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production \
